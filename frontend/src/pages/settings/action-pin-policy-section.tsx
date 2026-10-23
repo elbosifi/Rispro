@@ -27,6 +27,8 @@ import {
 } from "@/lib/action-pin-policy";
 import { useLanguage } from "@/providers/language-provider";
 import { getUserDisplayName } from "@/lib/user-display-name";
+import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 
 function isReAuthRequiredError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || "");
@@ -68,14 +70,14 @@ function NumberField({
   return (
     <label className="space-y-1">
       <FieldLabel>{label}</FieldLabel>
-      <input
+      <Input
         aria-label={label}
         type="number"
         min={0}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm disabled:bg-stone-100 disabled:text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:disabled:bg-stone-800"
+        className={disabled ? "w-full !bg-muted !text-muted-foreground" : "w-full"}
       />
     </label>
   );
@@ -127,12 +129,12 @@ function IdleLockUserSelector({
   return (
     <div className="space-y-2">
       <FieldLabel>{label}</FieldLabel>
-      <input
+      <Input
         aria-label={`Search ${label}`}
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Search users"
-        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+        className="w-full"
       />
       <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-stone-200 p-2 dark:border-stone-700">
         {visibleUsers.map((user) => (
@@ -266,7 +268,7 @@ function UserPinManagementTable({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+        <select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="input-premium min-w-0 px-3 py-2 text-sm">
           <option value="all">All roles</option>
           {ACTION_PIN_ROLES.map((role) => <option key={role} value={role}>{ACTION_PIN_ROLE_LABELS[role]}</option>)}
         </select>
@@ -274,7 +276,7 @@ function UserPinManagementTable({
           <input type="checkbox" checked={activeOnly} onChange={(event) => setActiveOnly(event.target.checked)} />
           Active only
         </label>
-        <select aria-label="Filter by PIN status" value={pinFilter} onChange={(event) => setPinFilter(event.target.value as typeof pinFilter)} className="rounded-lg border px-3 py-2 text-sm">
+        <select aria-label="Filter by PIN status" value={pinFilter} onChange={(event) => setPinFilter(event.target.value as typeof pinFilter)} className="input-premium min-w-0 px-3 py-2 text-sm">
           <option value="all">All PIN states</option>
           <option value="missing">PIN missing</option>
           <option value="locked">Locked</option>
@@ -282,7 +284,7 @@ function UserPinManagementTable({
         </select>
       </div>
 
-      <div className="overflow-auto rounded-lg border border-stone-200 dark:border-stone-700">
+      <div role="region" aria-label="User Action PIN management table" tabIndex={0} className="overflow-auto rounded-lg border border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         <table className="w-full min-w-[1100px] text-sm">
           <thead>
             <tr className="bg-stone-100 dark:bg-stone-800">
@@ -305,9 +307,9 @@ function UserPinManagementTable({
                 <td className="p-2">{formatDate(user.updatedAt)}</td>
                 <td className="p-2">
                   <div className="flex flex-wrap gap-1">
-                    <button type="button" className="btn-secondary text-xs" onClick={() => runAction("reset", user)}>Reset PIN</button>
-                    <button type="button" className="btn-secondary text-xs" disabled={!user.isLocked} onClick={() => runAction("unlock", user)}>Unlock PIN</button>
-                    <button type="button" className="btn-secondary text-xs" disabled={!user.hasActionPin} onClick={() => runAction("expire", user)}>Force expire PIN</button>
+                    <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={() => runAction("reset", user)}>Reset PIN</Button>
+                    <Button type="button" variant="secondary" size="sm" className="text-xs" disabled={!user.isLocked} onClick={() => runAction("unlock", user)}>Unlock PIN</Button>
+                    <Button type="button" variant="secondary" size="sm" className="text-xs" disabled={!user.hasActionPin} onClick={() => runAction("expire", user)}>Force expire PIN</Button>
                   </div>
                 </td>
               </tr>
@@ -470,7 +472,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
             aria-label="Rotation mode"
             value={draft.rotationMode}
             onChange={(event) => update("rotationMode", event.target.value as ActionPinRotationMode)}
-            className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+            className="input-premium w-full px-3 py-2 text-sm"
           >
             <option value="manual">Manual</option>
             <option value="daily">Daily</option>
@@ -491,7 +493,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         <BoolField label="Notify user on PIN change" checked={draft.notifyUserOnPinChange} onChange={(checked) => update("notifyUserOnPinChange", checked)} />
       </div>
 
-      <div className="space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-700">
+      <div className="space-y-3 rounded-lg border border-border p-3">
         <h5 className="text-sm font-semibold text-stone-900 dark:text-white">Idle lock eligibility</h5>
         <div className="grid gap-3 md:grid-cols-3">
           <label className="space-y-1">
@@ -500,7 +502,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
               aria-label="Idle lock role eligibility"
               value={draft.idleLockRoleMode}
               onChange={(event) => update("idleLockRoleMode", event.target.value as ActionPinIdleLockRoleMode)}
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+              className="input-premium w-full px-3 py-2 text-sm"
             >
               <option value="all">All roles</option>
               <option value="include">Only selected roles</option>
@@ -544,27 +546,27 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
         {ACTION_PIN_GROUPS.map((group) => (
           <div key={group.label} className="space-y-2">
             <h5 className="text-sm font-semibold text-stone-900 dark:text-white">{group.label}</h5>
-            <div className="overflow-auto rounded-lg border border-stone-200 dark:border-stone-700">
+            <div role="region" aria-label={`${group.label} Action PIN policy table`} tabIndex={0} className="overflow-auto rounded-lg border border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
               <table className="w-full min-w-[1050px] text-sm">
                 <thead>
-                  <tr className="bg-stone-100 dark:bg-stone-800">
-                    <th className="p-2 text-start font-semibold">Action</th>
+                  <tr className="bg-muted/40">
+                    <th scope="col" className="p-2 text-start font-semibold">Action</th>
                     {ACTION_PIN_ROLES.map((role) => (
-                      <th key={role} className="p-2 text-start font-semibold">{ACTION_PIN_ROLE_LABELS[role]}</th>
+                      <th key={role} scope="col" className="p-2 text-start font-semibold">{ACTION_PIN_ROLE_LABELS[role]}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {group.actions.map((actionKey) => (
-                    <tr key={actionKey} data-testid={`action-pin-row-${actionKey}`} className="border-t border-stone-200 dark:border-stone-700">
-                      <td className="p-2 font-medium">{ACTION_PIN_ACTION_LABELS[actionKey]}</td>
+                    <tr key={actionKey} data-testid={`action-pin-row-${actionKey}`} className="border-t border-border">
+                      <th scope="row" className="p-2 text-start font-medium">{ACTION_PIN_ACTION_LABELS[actionKey]}</th>
                       {ACTION_PIN_ROLES.map((role) => (
                         <td key={`${actionKey}-${role}`} className="p-2">
                           <select
                             aria-label={`${ACTION_PIN_ACTION_LABELS[actionKey]} ${role} mode`}
                             value={draft.actionModes[actionKey]?.[role] ?? "not_required"}
                             onChange={(event) => updateMode(actionKey, role, event.target.value as ActionPinMode)}
-                            className="w-full rounded-md border border-stone-300 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-900"
+                            className="input-premium w-full px-2 py-1 text-xs"
                           >
                             {ACTION_PIN_MODES.map((mode) => (
                               <option key={mode} value={mode}>{ACTION_PIN_MODE_LABELS[mode]}</option>
@@ -582,11 +584,12 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn-primary text-sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+        <Button className="text-sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save Action PIN Policy"}
-        </button>
-        <button
-          className="btn-secondary text-sm"
+        </Button>
+        <Button
+          variant="secondary"
+          className="text-sm"
           onClick={() => {
             setFormOverride({
               baseUpdatedAt: query.dataUpdatedAt,
@@ -596,7 +599,7 @@ export default function ActionPinPolicySection({ onReAuthRequired }: { onReAuthR
           disabled={saveMutation.isPending}
         >
           Reset
-        </button>
+        </Button>
         {message ? <span className="text-sm text-stone-700 dark:text-stone-200">{message}</span> : null}
         {isArabic ? <span className="text-xs text-stone-500">واجهة السياسة باللغة الإنجليزية حالياً.</span> : null}
       </div>

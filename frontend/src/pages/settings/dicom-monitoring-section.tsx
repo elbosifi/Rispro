@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Button, Input } from "@/components/shared";
 import { ApiError, api } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -197,39 +198,51 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 compact-controls" dir="ltr" lang="en">
       {/* Tab Navigation */}
-      <div className="flex gap-2 border-b border-stone-200 dark:border-stone-700">
-        <button
+      <div className="flex flex-wrap gap-2 border-b border-border">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={activeTab === "overview"}
           onClick={() => setActiveTab("overview")}
-          className={`px-4 py-2 text-sm font-medium ${
+          className={`rounded-none border-b-2 bg-transparent font-medium hover:bg-muted/30 ${
             activeTab === "overview"
-              ? "border-b-2 border-teal-600 text-teal-700 dark:text-teal-400"
-              : "text-stone-600 dark:text-stone-400"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground"
           }`}
         >
           Overview
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={activeTab === "logs"}
           onClick={() => setActiveTab("logs")}
-          className={`px-4 py-2 text-sm font-medium ${
+          className={`rounded-none border-b-2 bg-transparent font-medium hover:bg-muted/30 ${
             activeTab === "logs"
-              ? "border-b-2 border-teal-600 text-teal-700 dark:text-teal-400"
-              : "text-stone-600 dark:text-stone-400"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground"
           }`}
         >
           Logs
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={activeTab === "actions"}
           onClick={() => setActiveTab("actions")}
-          className={`px-4 py-2 text-sm font-medium ${
+          className={`rounded-none border-b-2 bg-transparent font-medium hover:bg-muted/30 ${
             activeTab === "actions"
-              ? "border-b-2 border-teal-600 text-teal-700 dark:text-teal-400"
-              : "text-stone-600 dark:text-stone-400"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground"
           }`}
         >
           Actions
-        </button>
+        </Button>
       </div>
 
       {/* Overview Tab */}
@@ -348,25 +361,28 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
       {activeTab === "logs" && (
         <div className="space-y-4">
           {/* Filters */}
-          <div className="flex gap-3 flex-wrap">
-            <input
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input
               type="text"
               placeholder="Status (processed/failed)"
+              aria-label="Filter DICOM logs by status"
               value={logFilter.status}
               onChange={(e) => setLogFilter({ ...logFilter, status: e.target.value })}
-              className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+              className="w-full"
             />
-            <input
+            <Input
               type="text"
               placeholder="Accession number"
+              aria-label="Filter DICOM logs by accession number"
               value={logFilter.accession}
               onChange={(e) => setLogFilter({ ...logFilter, accession: e.target.value })}
-              className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+              className="w-full"
             />
             <select
+              aria-label="DICOM log page size"
               value={logFilter.limit}
               onChange={(e) => setLogFilter({ ...logFilter, limit: e.target.value })}
-              className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+              className="input-premium w-full !py-1"
             >
               <option value="25">25 entries</option>
               <option value="50">50 entries</option>
@@ -432,31 +448,34 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                 : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400"
             }`}>
               {actionMessage.text}
-              <button onClick={() => setActionMessage(null)} className="ml-2 underline">Dismiss</button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setActionMessage(null)} className="ms-2">Dismiss</Button>
             </div>
           )}
 
           <div className="card-shell p-4">
             <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">Worklist Operations</h4>
             <div className="space-y-3">
-              <button
+              <Button
+                type="button"
                 onClick={() => {
                   if (confirm("Rebuild all worklists? This may take several minutes.")) {
                     rebuildMutation.mutate();
                   }
                 }}
                 disabled={rebuildMutation.isPending}
-                className="w-full btn-primary text-sm disabled:opacity-50"
+                className="w-full"
               >
                 {rebuildMutation.isPending ? "Rebuilding..." : "Rebuild All Worklists"}
-              </button>
+              </Button>
             </div>
           </div>
 
           <div className="card-shell p-4">
             <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">Maintenance</h4>
             <div className="space-y-3">
-              <button
+              <Button
+                type="button"
+                variant="secondary"
                 onClick={async () => {
                   try {
                     const data = await api<{ message: string }>("/dicom/detect-tools", { method: "POST" });
@@ -467,10 +486,10 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                     setTimeout(() => setActionMessage(null), 5000);
                   }
                 }}
-                className="w-full btn-secondary text-sm"
+                className="w-full"
               >
                 Auto-detect DICOM Tools
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -498,11 +517,11 @@ function StatusCard({
     error: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
   };
 
-  const actionColorMap = {
-    success: "bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white",
-    warning: "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white",
-    danger: "bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white"
-  };
+  const actionVariantMap = {
+    success: "primary",
+    warning: "secondary",
+    danger: "destructive"
+  } as const;
 
   return (
     <div className="card-shell p-4">
@@ -518,14 +537,17 @@ function StatusCard({
       {actions && actions.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {actions.map((action) => (
-            <button
+            <Button
               key={action.label}
+              type="button"
+              variant={actionVariantMap[action.kind]}
+              size="sm"
               onClick={action.onClick}
               disabled={action.disabled}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${actionColorMap[action.kind]}`}
+              className="text-xs"
             >
               {action.label}
-            </button>
+            </Button>
           ))}
         </div>
       )}

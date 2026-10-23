@@ -440,14 +440,14 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
 
       <section className="space-y-3">
         <h4 className="text-lg font-semibold text-stone-900 dark:text-white">HL7 Field Mapping</h4>
-        <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700" role="region" aria-label="HL7 field mapping" tabIndex={0}>
+          <table className="min-w-[600px] w-full text-sm">
             <thead className="bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
               <tr>
-                <th className="px-3 py-2 text-left font-semibold">Field</th>
-                <th className="px-3 py-2 text-left font-semibold">Send</th>
-                <th className="px-3 py-2 text-left font-semibold">Max</th>
-                <th className="px-3 py-2 text-left font-semibold">Overflow</th>
+                <th scope="col" className="px-3 py-2 text-left font-semibold">Field</th>
+                <th scope="col" className="px-3 py-2 text-left font-semibold">Send</th>
+                <th scope="col" className="px-3 py-2 text-left font-semibold">Max</th>
+                <th scope="col" className="px-3 py-2 text-left font-semibold">Overflow</th>
               </tr>
             </thead>
             <tbody>
@@ -456,6 +456,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
                   <td className="px-3 py-2 text-stone-800 dark:text-stone-100">{field.label}</td>
                   <td className="px-3 py-2">
                     <input
+                      aria-label={`Send ${field.label}`}
                       type="checkbox"
                       checked={enabledFields[field.key] !== false}
                       onChange={(event) => updateJsonMap("hl7_enabled_fields_json", field.key, event.target.checked ? null : false, enabledFields)}
@@ -463,6 +464,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
                   </td>
                   <td className="px-3 py-2">
                     <input
+                      aria-label={`Maximum length for ${field.label}`}
                       type="number"
                       min={1}
                       value={fieldLimits[field.key] || field.defaultMax}
@@ -480,6 +482,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
                   </td>
                   <td className="px-3 py-2">
                     <select
+                      aria-label={`Overflow policy for ${field.label}`}
                       value={overflowPolicies[field.key] || field.defaultPolicy}
                       onChange={(event) => updateJsonMap(
                         "hl7_overflow_policy_json",

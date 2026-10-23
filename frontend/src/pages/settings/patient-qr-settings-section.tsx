@@ -498,7 +498,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
 
         <FieldCard title={chooseLocalized(language, "محتوى الصفحة", "Page Content")}>
           <label className="block text-sm font-semibold text-slate-700">{chooseLocalized(language, "عنوان الصفحة", "Page Title")}</label>
-          <div className="mt-1 grid grid-cols-2 gap-2">
+          <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               dir="ltr"
               value={draft.pageTitleEn}
@@ -516,7 +516,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
           </div>
 
           <label className="mt-3 block text-sm font-semibold text-slate-700">{chooseLocalized(language, "مقدمة الصفحة", "Page Introduction")}</label>
-          <div className="mt-1 grid grid-cols-2 gap-2">
+          <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <textarea
               dir="ltr"
               value={draft.introTextEn}
@@ -536,7 +536,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
           </div>
 
           <label className="mt-3 block text-sm font-semibold text-slate-700">{chooseLocalized(language, "نص التحضير العام", "General Preparation Text")}</label>
-          <div className="mt-1 grid grid-cols-2 gap-2">
+          <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <textarea
               dir="ltr"
               value={draft.genericPreparationTextEn}
@@ -813,7 +813,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
             <Input dir="ltr" label={chooseLocalized(language, "ساعات العمل (En)", "Working Hours (En)")} value={draft.contact.workingHoursEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, workingHoursEn: value } }))} />
             <Input dir="rtl" label={chooseLocalized(language, "ساعات العمل", "Working Hours (Ar)")} value={draft.contact.workingHoursAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, workingHoursAr: value } }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "ملاحظة (En)", "Note (En)")} value={draft.contact.noteEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "ملاحظة قصيرة", "Note (Ar)")} value={draft.contact.noteAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteAr: value } }))} />
           </div>
@@ -823,23 +823,23 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
           <p className="text-sm leading-6 text-slate-600">
             {chooseLocalized(language, "يمكنك استخدام {link} لرابط صفحة الموعد و {date} لتاريخ الموعد.", "Use {link} for the patient QR page link and {date} for the appointment date.")}
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "رابط صفحة الموعد (En)", "QR link message (En)")} value={draft.whatsappQrLinkMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappQrLinkMessageEn: value }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "رابط صفحة الموعد", "QR link message (Ar)")} value={draft.whatsappQrLinkMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappQrLinkMessageAr: value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "تذكير الموعد (En)", "Reminder message (En)")} value={draft.whatsappReminderMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappReminderMessageEn: value }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "تذكير الموعد", "Reminder message (Ar)")} value={draft.whatsappReminderMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappReminderMessageAr: value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "تغيير الموعد (En)", "Rescheduled message (En)")} value={draft.whatsappRescheduledMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappRescheduledMessageEn: value }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "تغيير الموعد", "Rescheduled message (Ar)")} value={draft.whatsappRescheduledMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappRescheduledMessageAr: value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "تحديث تفاصيل الموعد (En)", "Changed details message (En)")} value={draft.whatsappChangedMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappChangedMessageEn: value }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "تحديث تفاصيل الموعد", "Changed details message (Ar)")} value={draft.whatsappChangedMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappChangedMessageAr: value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "إلغاء الموعد (En)", "Cancellation message (En)")} value={draft.whatsappCancelledMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappCancelledMessageEn: value }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "إلغاء الموعد", "Cancellation message (Ar)")} value={draft.whatsappCancelledMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappCancelledMessageAr: value }))} />
           </div>
@@ -851,7 +851,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
             <Input dir="ltr" label={chooseLocalized(language, "اسم المركز (En)", "Center Name (En)")} value={draft.location.centerNameEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameEn: value } }))} />
             <Input dir="rtl" label={chooseLocalized(language, "اسم المركز", "Center Name (Ar)")} value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "اسم القسم / الموقع (En)", "Department/Location (En)")} value={draft.location.departmentLocationEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "اسم القسم / الموقع", "Department/Location (Ar)")} value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
           </div>
@@ -859,16 +859,16 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
             <Input dir="ltr" label={chooseLocalized(language, "الطابق / الوحدة / الغرفة (En)", "Floor/Unit/Room (En)")} value={draft.location.roomUnitFloorEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorEn: value } }))} />
             <Input dir="rtl" label={chooseLocalized(language, "الطابق / الوحدة / الغرفة", "Floor/Unit/Room (Ar)")} value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "العنوان (En)", "Address (En)")} value={draft.location.addressEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "العنوان", "Address (Ar)")} value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "إرشادات الوصول (En)", "Arrival Instructions (En)")} value={draft.location.arrivalInstructionsEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "إرشادات الوصول", "Arrival Instructions (Ar)")} value={draft.location.arrivalInstructionsAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsAr: value } }))} />
           </div>
           <Input label={chooseLocalized(language, "رابط خرائط Google", "Google Maps Link")} value={draft.location.googleMapsUrl} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, googleMapsUrl: value } }))} error={errors.googleMapsUrl} />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "ملاحظة إضافية (En)", "Additional Note (En)")} value={draft.location.parkingNoteEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "ملاحظة إضافية", "Additional Note (Ar)")} value={draft.location.parkingNoteAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteAr: value } }))} />
           </div>

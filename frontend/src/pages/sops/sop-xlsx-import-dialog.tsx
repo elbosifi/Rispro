@@ -106,7 +106,7 @@ export function SopXlsxImportDialog({
   const preview = state.preview;
   return (
     <Dialog open={open} onClose={() => { if (!busy) onClose(); }}>
-      <DialogContent maxWidth="960px" className="max-h-[92vh] overflow-y-auto">
+      <DialogContent maxWidth="960px" className="compact-controls max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t("sops.xlsxImport.title")}</DialogTitle>
           <p className="text-sm text-muted-foreground">
@@ -188,7 +188,7 @@ export function SopXlsxImportDialog({
             <Alert variant="info"><AlertDescription>{t("sops.xlsxImport.formattingNote")}</AlertDescription></Alert>
             <div className="hidden overflow-x-auto rounded-xl border border-border md:block">
               <table className="w-full text-sm">
-                <thead className="bg-muted/20 text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="p-3 text-start">{t("sops.xlsxImport.sectionColumn")}</th><th className="p-3 text-start">{t("sops.xlsxImport.resultColumn")}</th><th className="p-3 text-start">{t("sops.xlsxImport.detailsColumn")}</th></tr></thead>
+                <thead className="bg-muted/20 text-xs font-medium text-muted-foreground"><tr><th className="p-3 text-start">{t("sops.xlsxImport.sectionColumn")}</th><th className="p-3 text-start">{t("sops.xlsxImport.resultColumn")}</th><th className="p-3 text-start">{t("sops.xlsxImport.detailsColumn")}</th></tr></thead>
                 <tbody>{preview.sections.map((section) => (
                   <tr key={section.sectionKey} className="border-t border-border align-top">
                     <td className="p-3 font-medium">{localizeSopSectionTitle(section.sectionKey, section.sectionTitle, t)}</td>

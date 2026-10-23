@@ -21,7 +21,7 @@ export function ReportingWorklistDocumentsPage() {
     : null;
 
   return (
-    <main className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-6">
+    <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -30,7 +30,7 @@ export function ReportingWorklistDocumentsPage() {
           </div>
           <Link
             to={`/reporting/worklist/${encodeURIComponent(token)}`}
-            className="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+            className="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Back to Personal Reporting Desk
           </Link>

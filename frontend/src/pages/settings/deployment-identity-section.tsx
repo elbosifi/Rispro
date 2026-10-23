@@ -58,7 +58,7 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
       </div>
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm">
         <p className="font-semibold text-foreground">{text.current}</p>
-        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{currentOrigin || "Unavailable"}</p>
+        <p dir="ltr" className="mt-1 break-all font-mono text-xs text-muted-foreground">{currentOrigin || "Unavailable"}</p>
         <button type="button" onClick={() => setDraftOverride(currentOrigin)} disabled={!currentOrigin} className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold disabled:opacity-60">{text.use}</button>
       </div>
       <button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending || !draft.trim()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">

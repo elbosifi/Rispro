@@ -31,7 +31,7 @@ export default function SystemDiagnosticsSection({ onReAuthRequired }: { onReAut
   const recent = (summary.data?.recentDiagnostics || {}) as Record<string, unknown>;
   const backupRestore = (summary.data?.backupRestore || {}) as Record<string, unknown>;
   const ohif = (summary.data?.ohifViewer || {}) as Record<string, unknown>;
-  return <div className="space-y-4">
+  return <div dir="ltr" className="space-y-4">
     <div className="flex gap-2 border-b border-border pb-2"><Button variant={tab === "overview" ? "primary" : "secondary"} onClick={() => setTab("overview")}>Overview</Button><Button variant={tab === "events" ? "primary" : "secondary"} onClick={() => setTab("events")}>Events</Button><Button variant="secondary" className="ml-auto" onClick={() => { void summary.refetch(); void events.refetch(); }}>Refresh</Button></div>
     {tab === "overview" ? summary.isLoading ? <p className="description-center">Loading system diagnostics…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <Card title="Application" rows={{ Environment: application.environment, Version: application.version, Uptime: `${value(application.uptimeSeconds)} seconds`, "Server time": application.serverTime }} />
@@ -47,4 +47,4 @@ export default function SystemDiagnosticsSection({ onReAuthRequired }: { onReAut
     </div>}
   </div>;
 }
-function Card({ title, rows }: { title: string; rows: Record<string, unknown> }) { return <div className="rounded-xl border border-border bg-muted/20 p-4"><h4 className="font-semibold">{title}</h4><dl className="mt-2 space-y-1 text-sm">{Object.entries(rows).map(([label, row]) => <div className="flex justify-between gap-2" key={label}><dt className="description-center">{label}</dt><dd className="text-right">{value(row)}</dd></div>)}</dl></div>; }
+function Card({ title, rows }: { title: string; rows: Record<string, unknown> }) { return <div className="rounded-xl border border-border bg-muted/20 p-4"><h4 className="font-semibold">{title}</h4><dl className="mt-2 space-y-1 text-sm">{Object.entries(rows).map(([label, row]) => <div className="flex justify-between gap-2" key={label}><dt className="description-center">{label}</dt><dd className="min-w-0 break-words text-right">{value(row)}</dd></div>)}</dl></div>; }

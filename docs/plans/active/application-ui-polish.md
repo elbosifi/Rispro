@@ -1,0 +1,445 @@
+# Complete application UI polish — progress
+
+Status: in-scope polish complete; 99/99 in-scope entries assessed or completed. The 17 active Teaching screens remain inventoried but are excluded from this goal by the user's direction.
+
+## Baseline and safety
+
+- Starting main/origin/main: `50514e038eaf1e8792b89864b3b2854fc27dfccd`, clean, fetched and aligned.
+- Local rollback branch: `codex/application-ui-polish-goal`; no push, PR, or deployment.
+- The committed five-screen polish is present in `50514e03`. References: Appointment Creation, Reporting Board, Patient Registration, Scheduling Settings, Dashboard.
+- Read AGENTS, CURRENT_TASK (stale prior security goal), UI normalization guidance, shared README, tokens, routes and navigation.
+- Baseline checks outside sandbox: agent contract PASS; preflight PASS/DOCKER_OK; frontend typecheck PASS; production build PASS; focused reference tests 143/143 PASS; Chromium foundation 1/1 PASS; frontend lint PASS with 9 existing hook warnings.
+- Existing warning-only output: large production bundle; jsdom scrollTo stubs; 9 lint hook warnings. No failed baseline check.
+- Only guarded disposable E2E database, synthetic seed, localhost backend 3100/frontend 5173. External integrations disabled/unconfigured in this environment.
+- Browser tooling: in-app browser unavailable; native Safari connection timed out. Repository Chromium E2E harness works.
+- Screenshot artifacts and capture runner live outside tracked application source in the system temporary directory.
+
+## Counting and exclusions
+
+Each canonical routed page or separately navigable Settings/protocol/setup section is one inventory entry. Parameterized detail/editor routes count once each; aliases and redirects do not count again. Shared subpanels and dialogs are assessed with their owning screen.
+
+Redirect-only aliases excluded: `/`, `/appointments/legacy`, `/v2/appointments`, `/doctor`, `/doctor/dashboard`, `/doctor/cases`, `/doctor/admin/roster`, `/doctor/admin/doctors`, `/mobile/reporting-view/:token`, `/public/cancel-appointment`, `/teaching`, wildcard fallbacks. The five reference entries are regression-only. Despite its name, Legacy Access Viewer is actively routed and remains in scope. Teaching is actively routed and inventoried, but all 17 Teaching screens are excluded from polish by the user's direction. Internal print renderers are active output surfaces and remain in scope.
+
+## Inventory
+
+Total discovered composed screen entries: **121**, including **5** regression references; **116** active entries beyond those references. Of these, **17 Teaching screens are excluded by user direction**, leaving **99 in-scope entries**. Inventory completeness is cross-checked against routed pages, Settings section resolver/menu, Doctor Workspace navigation and Teaching route registry.
+
+- Inventory correction (2026-10-23): route-registry comparison found the active `/settings?section=sante_worklist_hl7` screen in the Settings menu, section resolver and render switch, but absent from the earlier inventory. It is now included as a P2 integration screen. Milestones before this correction retain their contemporaneous counts; current and subsequent counts use 116 active entries beyond the five regression references.
+
+| Module | Route / view | Component | Priority | Status |
+| --- | --- | --- | --- | --- |
+| Access | `/login` | `LoginPage` | P2 | Complete — batch 12 |
+| Reference | `/dashboard` | `DashboardPage` | P2 | Regression reference |
+| Patients | `/patients` | `PatientsPage` | P2 | Complete — batch 6 |
+| Reference | `/patients/new` | `PatientsPage / PatientForm` | P2 | Regression reference |
+| Patients | `/patients/:id/edit` | `EditPatientPage` | P2 | Complete — batch 6 |
+| Patients | `/patients/merge` | `PatientMergePage` | P2 | Complete — batch 6 |
+| Patients | `/name-dictionary` | `NameDictionaryPage` | P2 | Complete — batch 6 |
+| Reference | `/appointments` | `AppointmentCreatePage` | P2 | Regression reference |
+| Operations | `/scheduling/override-requests` | `SchedulingOverrideRequestsPage` | P1 | Complete — batch 7 |
+| Operations | `/recall-requests` | `RecallRequestsPage` | P1 | Complete — batch 4 |
+| Operations | `/calendar` | `CalendarPage` | P1 | Complete — batch 5 |
+| Operations | `/registrations` | `RegistrationsPage` | P1 | Complete — batch 5 |
+| Documents | `/request-scans` | `RequestScansPage` | P1 | Complete — batch 7 |
+| Operations | `/queue` | `QueuePage` | P1 | Complete — batch 5 |
+| Operations | `/queue/check-in` | `QueueCheckInPage` | P1 | Complete — batch 5 |
+| Operations | `/queue/no-shows` | `NoShowReviewPage` | P1 | Complete — batch 5 |
+| Modality | `/modality` | `ModalityPage` | P1 | Complete — batch 7 |
+| Documents | `/modality/document-ingestion` | `DocumentIngestionPage` | P1 | Complete — batch 7 |
+| Comparisons | `/comparisons` | `ComparisonsPage` | P1 | Complete — batch 4 |
+| Comparisons | `/comparisons/:id` | `ComparisonsPage (detail)` | P1 | Complete — batch 4 |
+| Comparisons | `/comparisons/ir/:id` | `IrReferralDetailPage` | P1 | Complete — batch 4 |
+| Comparisons | `/comparisons/:id/remap` | `PacsRemapPage (comparison)` | P1 | Complete — batch 8 |
+| Printing | `/print` | `PrintPage / ReportCenter` | P2 | Complete — batch 9 |
+| Printing | `/print?appointmentId=:id` | `DirectAppointmentPrintPage` | P2 | Complete — batch 9 |
+| Printing | `/print/day-list` | `DayListPrintPage` | P2 | Complete — batch 9 |
+| Printing | `/print/reporting-board` | `ReportingBoardPrintPage` | P2 | Complete — batch 9 |
+| Printing | `/print/internal/appointment-slip` | `InternalAppointmentSlipRenderPage` | P2 | Complete — batch 10 |
+| Printing | `/print/internal/registration-list` | `InternalRegistrationListRenderPage` | P2 | Complete — batch 10 |
+| Monitoring | `/statistics` | `StatisticsPage` | P2 | Complete — batch 12 |
+| Patients | `/search` | `SearchPage` | P2 | Complete — batch 6 |
+| PACS | `/pacs` | `PacsPage` | P2 | Complete — batch 8 |
+| PACS | `/pacs/remap` | `PacsRemapPage` | P2 | Complete — batch 8 |
+| PACS | `/systems/authoritative-orthanc` | `AuthoritativeOrthancOperationsPage` | P2 | Complete — batch 8 |
+| Monitoring | `/worklist-monitor` | `WorklistMonitorPage` | P2 | Complete — batch 8 |
+| Settings | `/settings` | `SettingsPage` | P2 | Complete — batch 13 |
+| Monitoring | `/incidents` | `IncidentsPage` | P2 | Complete — batch 12 |
+| SOP | `/sops` | `SopsPage (library)` | P2 | Complete — batch 11 |
+| SOP | `/sops/json-example` | `SopJsonExamplePage` | P2 | Complete — batch 11 |
+| SOP | `/sops/new` | `SopsPage (authoring)` | P2 | Complete — batch 11 |
+| SOP | `/sops/:id` | `SopsPage (detail/revisions)` | P2 | Complete — batch 11 |
+| Printing | `/workstation/printing` | `WorkstationPrintingPage` | P2 | Complete — batch 9 |
+| Legacy access | `/legacy-access-viewer` | `LegacyAccessViewerPage` | P2 | Complete — batch 12 |
+| Reference | `/v2/appointments/admin` | `SchedulingAdminPage` | P2 | Regression reference |
+| Public | `/public/appointment` | `PublicCancelAppointmentPage` | P2 | Complete — batch 12 |
+| Reporting | `/reporting/worklist/:token` | `ReportingBoardMobilePage` | P2 | Complete — batch 10 |
+| Documents | `/reporting/worklist/:token/cases/:caseId/documents` | `ReportingWorklistDocumentsPage` | P1 | Complete — batch 10 |
+| Doctor | `/doctor/my-work` | `DoctorPortalHome` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/today-cases` | `DoctorCasesPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/reporting-board` | `DoctorReportingBoardPage` | P1 | Regression reference |
+| Doctor | `/doctor/doctor-worklists` | `DoctorWorklistsPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/reporting-board/saved/:token` | `DoctorReportingBoardPage (saved view)` | P1 | Complete — batch 10 |
+| Doctor | `/doctor/roster-planner` | `DoctorRosterPage (management)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/doctors-directory` | `DoctorAdminDoctorsPage` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup` | `DoctorAdvancedSetupPage` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup?section=roster` | `DoctorRosterPage (advanced)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/advanced-setup?section=doctors` | `DoctorAdminDoctorsPage (advanced)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/roster` | `DoctorRosterPage (personal)` | P1 | Complete — batch 2 |
+| Doctor | `/doctor/availability` | `DoctorAvailabilityPage` | P1 | Complete — batch 1 |
+| Doctor | `/doctor/protocols` | `DoctorProtocolsPage (protocoling)` | P1 | Complete — batch 3 |
+| Doctor | `/doctor/additional-imaging` | `RecallRequestsPage (doctor)` | P1 | Complete — batch 4 |
+| Doctor | `/doctor/ir-consultations` | `DoctorIrReferralsPage` | P1 | Complete — batch 4 |
+| Doctor | `/doctor/ir-consultations/:id` | `IrReferralDetailPage (doctor)` | P1 | Complete — batch 4 |
+| Doctor | `/doctor/team-workload` | `DoctorTeamWorkloadPage` | P1 | Complete — batch 1 |
+| Protocols | `/doctor/protocols?area=library&section=protocols` | `DoctorProtocolsPage / protocols` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=importExport` | `DoctorProtocolsPage / importExport` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=anatomy` | `DoctorProtocolsPage / anatomy` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=scanners` | `DoctorProtocolsPage / scanners` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=ctPhases` | `DoctorProtocolsPage / ctPhases` | P1 | Complete — batch 3 |
+| Protocols | `/doctor/protocols?area=library&section=mriSequences` | `DoctorProtocolsPage / mriSequences` | P1 | Complete — batch 3 |
+| Settings | `/settings?section=mobile_widget` | `MobileWidgetAccessSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=patient_registration` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=patient_import` | `PatientImportSection` | P2 | Complete — batch 14 |
+| Settings | `/settings?section=patient_duplicate_resolver` | `PatientDuplicateResolverSection` | P2 | Complete — batch 14 (accepted unchanged) |
+| Settings | `/settings?section=scheduling_and_capacity` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=queue_and_arrival` | `SimpleSettingsSection` | P2 | Complete — batch 13 |
+| Settings | `/settings?section=scheduling_engine_config` | `SchedulingEngineConfigSection` | P2 | Complete — batch 20 |
+| Settings | `/settings?section=pacs_connection` | `PacsSettingsSection` | P2 | Complete — batch 15 |
+| Settings | `/settings?section=dicom_gateway_config` | `DicomGatewaySettingsSection` | P2 | Complete — batch 15 |
+| Settings | `/settings?section=dicom_gateway_monitoring` | `DicomMonitoringSection` | P2 | Complete — batch 15 |
+| Settings | `/settings?section=mwl_policy` | `MwlPolicySection` | P2 | Complete — batch 15 (accepted unchanged) |
+| Settings | `/settings?section=orthanc_mwl_sync` | `OrthancMwlSection` | P2 | Complete — batch 15 |
+| Settings | `/settings?section=sante_worklist_hl7` | `SanteWorklistSection` | P2 | Complete — batch 17 |
+| Settings | `/settings?section=users` | `UsersSection` | P2 | Complete — batch 16 |
+| Settings | `/settings?section=action_pin_policy` | `ActionPinPolicySection` | P2 | Complete — batch 16 |
+| Settings | `/settings?section=role_page_access` | `RolePageAccessSection` | P2 | Complete — batch 16 |
+| Settings | `/settings?section=audit_log` | `AuditLogSection` | P2 | Complete — batch 16 |
+| Settings | `/settings?section=exam_types` | `ExamTypesSection` | P2 | Complete — batch 14 |
+| Settings | `/settings?section=modalities` | `ModalitiesSection` | P2 | Complete — batch 14 |
+| Settings | `/settings?section=equipment` | `EquipmentSection` | P2 | Complete — batch 14 |
+| Settings | `/settings?section=name_dictionary` | `NameDictionarySection` | P2 | Complete — batch 18 (accepted unchanged) |
+| Settings | `/settings?section=not_allowed_name_words` | `NotAllowedNameWordsSection` | P2 | Complete — batch 18 (accepted unchanged) |
+| Settings | `/settings?section=appointment_slip` | `AppointmentSlipSettingsSection` | P2 | Complete — batch 19 |
+| Settings | `/settings?section=qz_tray` | `QzTrayPrintingSection` | P2 | Complete — batch 19 (accepted unchanged) |
+| Settings | `/settings?section=deployment_identity` | `DeploymentIdentitySection` | P2 | Complete — batch 20 |
+| Settings | `/settings?section=patient_qr_self_service` | `PatientQrSettingsSection` | P2 | Complete — batch 18 |
+| Settings | `/settings?section=passkey_configuration` | `PasskeyConfigurationSection` | P2 | Complete — batch 20 |
+| Settings | `/settings?section=sonicdicom_reports` | `SonicDicomReportsSection` | P2 | Complete — batch 17 |
+| Settings | `/settings?section=ohif_viewer` | `OhifViewerSection` | P2 | Complete — batch 17 |
+| Settings | `/settings?section=documents_and_uploads` | `DocumentsStorageSection` | P2 | Complete — batch 21 |
+| Settings | `/settings?section=backup_restore` | `BackupRestoreSection` | P2 | Complete — batch 21 |
+| Settings | `/settings?section=system_diagnostics` | `SystemDiagnosticsSection` | P2 | Complete — batch 20 |
+| Settings | `/settings?section=request_scan_automation` | `RequestScanAutomationSection` | P2 | Complete — batch 21 |
+| Settings | `/settings?section=email_notifications` | `EmailNotificationsSection` | P2 | Complete — batch 19 |
+| Settings | `/settings?section=authoritative_orthanc` | `AuthoritativeOrthancSection` | P2 | Complete — batch 17 |
+| Teaching | `/teaching/login` | `TeachingLoginPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/dashboard` | `TeachingDashboardPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/anatomy` | `TeachingAnatomyIndexPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/anatomy/sources` | `TeachingAnatomySourcesPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/anatomy/atlas/:atlasId` | `TeachingAnatomyAtlasPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/anatomy/liver` | `TeachingLiverAnatomyPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/qbank` | `TeachingQbankPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/qbank/session/:sessionId` | `TeachingSessionPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/history` | `TeachingHistoryPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/progress` | `TeachingProgressPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/import` | `TeachingImportPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/import/history` | `TeachingImportHistoryPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/import/batches/:batchId` | `TeachingImportBatchPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/questions` | `TeachingQuestionListPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/questions/maintenance` | `TeachingQuestionMaintenancePage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/questions/new` | `TeachingQuestionEditorPage` | P3 | Excluded — user direction |
+| Teaching | `/teaching/admin/questions/:id` | `TeachingQuestionEditorPage` | P3 | Excluded — user direction |
+
+## Milestone ledger
+
+- Preflight: complete.
+- Inventory: 118 routed screen/view entries discovered, including 5 reference entries; full reachability/subview audit remains pending.
+- Batches: Doctor Workspace; roster and directory; protocols; reception operations; modality/documents; patient management; comparisons/IR; PACS/monitoring; SOP/printing; Settings clinical, scheduling, integrations, administration, system; Teaching learner/editorial/anatomy; public/auth; final reference regression. Each batch is split into 3–5 screens where practical.
+- Screens completed: 35 (28 polished, 7 accepted without further visual change). Four execution/document/override entries initially assessed; 74 non-reference entries remain unassessed. Five original reference regressions passed at batch 5; final regression remains required after later edits.
+- Screenshots: batch 1 before/after desktop/mobile captures, Arabic-preference captures (the Doctor Workspace intentionally forces English/LTR), and the QR dialog. See the local screenshot report for exact files.
+- Decisions requiring approval: none pending. Both encountered test-locator/interaction repairs were explicitly authorized and now pass.
+- Remaining: visual assessment, focused changes, before/after evidence, targeted tests per batch, final typecheck/build and regression checks, final main alignment and uncommitted squash-apply.
+
+### Batch 1 — Doctor Workspace core
+
+- Assessed/completed: My Work, Today’s Cases, Doctor Worklists, Availability, Team Workload.
+- Fixed: teal primary actions inconsistent with the blue reference screens; dark default control/table borders; unlabelled Availability date/time/status inputs; inconsistent control heights; worklist header alignment; manual QR overlay without Escape/focus handling.
+- Reused shared Button/Input and Dialog; native selects retain their label/layout semantics. Dense domain tables and segmented view controls stay local. Scoped compact styling applies only to assessed pages; shared primitives and theme tokens are unchanged.
+- Browser: before/after 1440x960 and 390x844; populated cases/worklists, empty availability/leave/workload, and QR modal. QR Tab containment, Escape, and focus restoration pass. Five Arabic-preference captures confirm the existing explicit English/LTR Doctor Workspace boundary (not an Arabic translation or RTL-compliance claim).
+- Checks: 104 focused tests pass; 8 existing Doctor navigation E2E pass; 5 before + 5 final after capture cases pass; 5 Arabic-preference capture cases pass; QR keyboard case passes; frontend typecheck/build pass on final batch tree; targeted lint retains one pre-existing hook warning; harness:all passes with existing warning-only findings; diff whitespace clean.
+- Correction during development: introduced JSX self-closing syntax error detected by focused tests/typecheck/build and first two after captures; corrected, rejected invalid captures, and reran to passing.
+- Next-batch baseline: 2 existing roster browser tests pass, including populated synthetic roster, phone alternatives, theme and simulated direction checks.
+- Open batch limits: workload populated summary and editable scoring-rule form still need representative fixture coverage; Availability/leave successful and error states need further browser characterization. These remain explicit follow-up validation, not claimed passed.
+
+### Batch 2 — Roster, directory and advanced setup
+
+- Assessed/completed: Roster Planner, My Roster, Advanced Setup menu, Roster setup, Doctors Directory, Doctor import/export. Planner and menu already meet the reference style and are accepted without further restructuring.
+- Fixed: legacy active roster/admin controls and directory actions using teal or default dark borders; directory row dividers; drawer tabs and separators; inconsistent form sizing. Added persistent labels to 32 roster setup/template/assignment controls and 8 workload admin fields. Preserved native drag handles, tab/disclosure controls, permission checkboxes, file uploads, drawer geometry, and all handlers.
+- Synthetic fixtures: linked the existing disposable super-admin account to a synthetic doctor profile through existing APIs, plus a current-week draft roster/assignment, availability, study leave, and workload catalog rule. This enabled admin-only views without changing application permissions or auth implementation. The extra synthetic profile increases directory rows from 4 to 5 across some captures; screenshot comparisons must not attribute this data change to UI code.
+- Browser: desktop/mobile normal pages; populated planner/personal/advanced roster; admin setup/import; all directory drawer tabs and creation; labeled workload catalog form. Original planner workflow baseline passed 2 existing E2E tests. Directory responsive drawer E2E passes; before/after capture cases and drawer case pass. Doctor Workspace remains English/LTR; the planner has its own local Arabic/direction support and requires final targeted regression.
+- Checks on final batch tree: 118 focused tests pass; frontend typecheck/build pass; targeted lint passes; harness:ui passes; whitespace check passes. Existing bundle warning retained.
+- Development correction: the label text-edit helper produced invalid JSX; rejected those renders, replaced the edit with syntax-aware insertion, and reran typecheck, build, focused tests, and captures successfully.
+- Rollback: batch 1 checkpoint `62688641`; batch 2 local checkpoint follows after final capture comparison. No push.
+
+## Stop checkpoint — required validation failure
+
+- Goal incomplete. Do not squash-apply to main.
+- Completed checkpoints: batch 1 `62688641`; batch 2 `fe63fc29`, both local-only on `codex/application-ui-polish-goal`. Starting main remains `50514e038eaf1e8792b89864b3b2854fc27dfccd`.
+- Next-batch baseline command: `npx playwright test e2e/specs/protocol-library-usability.spec.ts --reporter=line --output=<temporary-artifact-directory>/protocol-baseline`. Failed before any Protocol Management source edit.
+- Exact failure: `e2e/specs/protocol-library-usability.spec.ts:61`, `getByRole("button", { name: "Protocols", exact: true }).click()` resolves to two valid controls: the Doctor navigation button and the button inside `aria-label="Protocol library navigation"`. Playwright strict-mode violation.
+- Diagnostic evidence: the test file, Protocols page, and Doctor navigation component have no diff from starting main. Existing navigation and in-page labels are both intentional in source; this is an unscoped test locator. No test patch, test relaxation, UI rename, threshold change, or retry was made.
+- Required operating rule: stop at the first unrelated failure. This blocks further implementation and final main squash-apply. The next task should scope the in-page locator and rerun this baseline before resuming; do not treat the current run as passing.
+- Protocol baseline screenshots captured for all 7 top-level views at 1440x960/390x844. These are partial assessment, not completed polish or verified full interaction. The failed baseline run also captured the library desktop view, new-protocol dialog, import/export panel, and failure state.
+- Counts at stop: 11 completed/accepted remaining entries (9 polished, 2 already adequate), 7 protocol entries partially assessed, 95 remaining entries unassessed, plus 5 original reference entries awaiting final regression verification. No application-wide completion claim.
+- Still pending: most modules, full dynamic-detail/dialog coverage, final five-screen regression, application-wide checks, final exact-tree validation after all future edits, and squash-apply to unchanged main.
+- No backend, schema, integration, authorization, audit, identity, scheduling or reporting-calculation implementation changes. Synthetic fixtures only in the disposable E2E environment.
+
+## Resume authorization
+
+- User explicitly authorized the one-line Protocol Library locator repair and resumption of the full goal.
+- Scoped only the test's in-page Protocols click to the existing `Protocol library navigation` container. No assertion, UI label, workflow, or application code changed for this repair.
+- Repaired baseline passed (1/1 Chromium test) against a newly migrated/seeded disposable E2E database. The prior stop checkpoint remains historical evidence, not the current decision to abandon remaining scope.
+
+## Protocol batch — current validation checkpoint
+
+- Seven top-level protocol views captured before/after at desktop and phone sizes. Controls reuse shared Button/Input; native selects retain semantics. Scoped compact styling excludes textareas. Tables use muted headers, normal tracking and row dividers. Blue primary actions match the reference screens. Clinical handlers, action placement, columns and dialog geometry are preserved.
+- Focused Protocols/Doctor tests: 169 passed after implementation, before the final small hover/keyboard-token cleanup. Targeted Protocols lint passed. Required frontend typecheck and build passed after the final frontend edit (existing bundle warning only).
+- Seven after-capture cases passed, and the repaired Protocol Library browser test passed after implementation. Browser screenshots inspected for the library and anatomy desktop/phone comparisons; full editor/state inspection remains pending. This batch is not yet counted complete.
+- Existing exam-type browser test exposed an unchanged dynamic-dialog-title mismatch: reopened assigned dialog is “Change assigned protocol.” User authorized widening the dialog locator to the two existing titles. The rerun proceeded through successful keep/clear mutation assertions, then failed at its final assertion because clearing returns the unchanged UI to Saved protocol mode, hiding the free-text field. Main has the same clearing/reset logic. No application behavior or assertion has been weakened.
+- Additional proposed test interaction: select Free-text protocol after clearing, then retain the existing empty-value assertion. Awaiting explicit user scope authorization for that addition.
+- Preserved local checkpoints: `62688641`, `fe63fc29`, `5c0ac145`. Protocol application changes and exam-test locator remain uncommitted. Main/origin tracking ref remains `50514e038eaf1e8792b89864b3b2854fc27dfccd`; no final squash-apply while validation/scope remain incomplete.
+
+### Batch 3 — Protocol Management complete
+
+- Completed/accepted seven entries: Protocoling, Protocol Library, Import/Export, Anatomy, Scanners, CT phase presets and MRI sequence presets. Scanners informational panel accepted unchanged.
+- Fixed inconsistent teal actions, oversized mixed controls, widely tracked table headers, missing row separators, and mobile inline editors wider than the viewport. Reused 31 generic Buttons and 31 Inputs; native selects remain native; textareas retain their height. Six inline table editors now fit the phone viewport while the underlying tables still scroll horizontally. No clinical handlers, columns, critical action positions or permissions changed.
+- Browser: seven before/after top-level capture cases at desktop/phone; three preset forms with disabled/enabled save and cancel states; CT/MRI builders at desktop/phone; existing library test verifies dialog focus/Escape, action menu, CT/MRI create entry, navigation and 1024/390 responsive bounds. Real exam-change test verifies saved free text preserved on keep, cleared on clear, and empty after selecting free-text mode. External PACS and request-document content remain synthetic/unconfigured and are not integration verification.
+- User authorized both exam-test repairs: dynamic dialog title locator and selecting Free-text protocol before retaining its existing empty-value assertion. Both protocol E2E tests passed 2/2. Final component tests passed 88/88; final frontend typecheck/build passed; lint passed from frontend cwd; harness:ui passed. Existing bundle/jsdom warning output retained. An initial lint invocation from root lacked the frontend config; corrected invocation passed. Temporary MRI capture helper used the wrong Name label; stopped that obsolete run and corrected it to Sequence name; all three final form cases passed.
+- Screenshot evidence: `/tmp/rispro-ui-polish-20261022/{before,after,comparisons}/protocol-*`, `after/builder-*`, `protocol-resume-e2e`. Before left/after right in comparisons. No patient-identifiable data.
+- Counts: 18 non-reference entries complete (15 polished, 3 accepted), 95 remaining non-reference entries; four of those have initial review-workflow captures. Full goal remains incomplete. Original five regressions and final main squash-apply remain pending.
+- Next: populated recall, IR worklist/detail and comparison views, followed by reception operations. Existing real IR baseline passed 1/1 and focused Recall/IR baseline tests passed 35/35. One synthetic recall created through existing disposable APIs.
+
+### Batch 4 — Recall, comparison and IR review complete
+
+- Completed seven entries: core/doctor Additional Imaging Requests; Review Requests list/comparison detail; Doctor IR worklist; core/doctor IR detail. The three IR entries already use the established style and are accepted unchanged after populated, empty and form-state assessment.
+- Fixed: recall actions consuming most of the desktop row width and squeezing clinical information; oversized status/filter actions; one-column phone attention filters; inconsistent comparison text fields, selects and textareas. Local compact CSS reuses existing control-height/radius/theme tokens. Native clinical confirmation controls remain unchanged.
+- Automatic viewed-status updates produced generic success toasts over patient information. Suppressed only this background mutation's global toast, preserving all calls and seen/audit semantics; its error now appears as an explicit bilingual inline alert. User-triggered action feedback remains unchanged.
+- Consequential decision approved: comparison Edit request Save/Cancel rendered outside DialogContent, behind the overlay and outside the focus trap. Moved the existing footer into DialogContent without changing handlers. Browser DOM reports `inDialog: false` before and `true` after; desktop/phone screenshots show reachable actions. New component regression test verifies containment and identical save payload. A preserved baseline was reproduced from unchanged checkpoint source, then the exact current file restored before final validation.
+- Browser: initial empty and populated lists; core/doctor IR details; IR preparation, clinical review and eligible appointment-request forms; recall contact/edit/withdraw dialogs and Escape; comparison edit desktop/phone; core Arabic RTL recall/comparison/detail and IR detail. External PACS opening/integration not claimed. Synthetic data only.
+- Checks: focused Recall/Comparison/IR tests 45 passed before final footer fix; final affected tests 77 passed including all 44 Registrations tests, plus the new Comparison test file 11/11 passed. Existing real IR workflow baseline 1/1 passed; operation navigation/queue baseline 5/5 passed. Capture cases passed: populated review 5, dialogs 3 plus final comparison rerun 1, Arabic core review 3, Arabic IR 1, and IR state scenario 1. Final typecheck/build, targeted lint, harness:ui, whitespace checks passed.
+- Authorized baseline maintenance: operations baseline exposed three unchanged Registrations assertions expecting “Protocol: Not protocolled,” while source/catalog/Modality consistently use “No protocol assigned.” User authorized three assertion text updates; all missing-request and upload assertions retained; repaired file passes 44/44. No Registrations application edit made in this batch.
+- Development capture-helper correction: explicitly initialized English for modal tests after the initial helper used the application's default Arabic locale. Corrected helper passes; obsolete waiting run terminated. No application labels renamed to satisfy it.
+- Rollback checkpoint follows locally. No push/PR/deploy; main remains unchanged. Counts: 25 remaining-scope entries complete, 88 still to complete (5 initially assessed, 83 unassessed), plus the original five final regressions. No decisions pending.
+
+### Batch 5 — Reception operations complete
+
+- Completed/polished Calendar, Registrations, Queue, Check-in kiosk and No-show Review. Fixed oversized mixed controls, gradient page headings, search-icon overlap, crowded calendar summary labels, queue actions squeezing patient details, kiosk reset contrast and teal gradient inconsistency. Calendar's existing summary column is modestly wider and long modality names wrap fully; existing localized short category labels have full tooltip expansions. No clinical labels are truncated.
+- Reused shared Input/SearchInput; consolidated the preceding review stylesheet into opt-in `components/shared/compact-controls.css` for assessed operational workspaces. This stylesheet uses existing tokens and does not change base primitives or apply to the five reference screens. Native calendar cells, range/checkbox controls, forms, scan handlers, action order and booking/no-show authority are preserved.
+- No-show Review retains its existing English-only copy. Set LTR content and dialog direction inside an Arabic shell to prevent reversed English punctuation; localized patient names remain supported. This is not a claim of full Arabic translation. Removed implementation jargon from its subtitle while retaining the Action PIN requirement.
+- Browser: five before/after desktop/phone cases; five Arabic-preference cases; final English/Arabic calendar capture reruns; no-show reason validation, Escape/focus restoration and zero mutation assertion. Initial no-show dialog check passed with the earlier historical fixture. After the disposable reset removed that extra fixture, two temporary helper runs timed out on the correctly disabled cleanup control; final dialog rendering used an explicitly UI-only synthetic historical candidate via a read-response fixture. It validates UI, not backend eligibility or cleanup execution.
+- Test-data isolation correction: the existing Queue journey changes E2E Queue Patient from scheduled to arrived. Rerunning Calendar's scheduled-filter scenario on that reused DB failed twice. Diagnosed the data mismatch, reset only the guarded disposable seed, and reran all five existing Calendar/Queue/Registrations browser journeys in established order: 5/5 passed. No assertion or application workaround was made. Prior review/roster fixture IDs are stale after that reset; historical screenshots/results remain valid evidence from their runs.
+- Checks: 137 focused operations/review tests passed; final Calendar delta tests 41/41 passed. Original reference workflow tests 144/144 passed. Exact final frontend typecheck/build passed; lint passed with the two existing Calendar hook warnings; harness:ui passed; whitespace clean. Existing bundle/jsdom warnings retained.
+- Five-screen regression: separate detached main worktree at starting SHA, with a separate Vite cache and shared installed dependencies. Captured all five references at desktop/phone against the same synthetic backend. Appointment/Registration pairs are pixel-identical; remaining pairs differ only by tiny dynamic timestamp/aging text (0.007–0.057% of pixels), with matching layout inspected. Evidence: `reference-diff.json`, before/after/comparisons `reference-*`. Main is unchanged. Final reference verification remains required after future changes.
+- Source-only existing issue outside this UI task: the historical candidate list's per-row Confirm callback is a no-op; preserved because altering no-show workflow is prohibited. Cleanup and bulk/clinical mutation behavior are not claimed browser-validated. Full No-show Arabic localization also remains a pre-existing limitation.
+- Counts: 30 remaining-scope entries complete (24 polished, 6 accepted unchanged), 83 to complete (5 initially assessed, 78 unassessed), plus final verification of the original five. No product decision pending. Next patient-management/search baseline: 24 focused tests passed; merge/dictionary re-authentication and populated states captured safely without patient mutations.
+
+### Batch 6 — Patient management and search complete
+
+- Completed five entries: Patients list (accepted unchanged), Edit Patient header, Patient Merge, Name Dictionary and Patient Search. Shared registration form is unchanged.
+- Fixed Search's unreadable dark header/selection, low-contrast identifiers, oversized phone results area and clipped edit actions. Reused Button/Card/Input, preserved selection and all update/delete handlers, and styled the existing destructive action consistently. Save bounds are verified inside desktop/phone viewports. Edit Patient's duplicated Back wording is removed; its route/return behavior is unchanged.
+- Merge/Dictionary reuse SearchInput to prevent icon overlap in either direction. Dictionary fields have persistent localized labels; compact styling reuses existing tokens. Merge controls, conflict warnings, identity calculations and confirmation behavior remain untouched. The reused Settings resolver receives only the SearchInput presentation correction and will be assessed in Settings later.
+- Browser: five before/after desktop/phone screens; populated Search details/edit/cancel; actual Arabic RTL across five screens; Merge/Dictionary beyond unchanged password re-authentication in English and Arabic; populated dictionary row/edit/cancel using one synthetic token. Apply spellings to patients was never invoked; no real patient mutation or merge occurred.
+- Checks: 59 focused tests including shared registration workflow pass; existing patient navigation E2E 2/2 pass; top-level captures 5/5, Arabic 5/5, authorized views 2/2 each language, Search case 1/1 and dictionary row case 1/1 pass. Exact final frontend typecheck/build, targeted lint, harness:ui and whitespace checks pass. Existing build warning retained.
+- Temporary capture-helper corrections: used the existing Edit Patient/Save Changes labels; kept row selection stable while editing; prevented reload initialization from resetting Arabic to English. Corrected runs and actual screenshots were inspected; no UI text changed to satisfy a helper.
+- Counts: 35 complete (28 polished, 7 accepted unchanged), 78 remain (4 initially assessed, 74 unassessed). Original five passed the prior milestone; final regression remains required. No decisions pending. Next baseline: 66 focused execution/document/override UI tests and 2 Modality navigation E2E tests pass.
+
+### Execution batch — baseline failure checkpoint
+
+- Four localized presentation edits are uncommitted: Modality desktop title/control sizing, Request Scans/Document Ingestion compact controls and readable description, Override Requests compact controls and persistent page-only filter labels. Mobile Modality touch targets and all handlers are preserved. This batch is not complete.
+- Targeted run: 169 passed, 1 failed across four files. Failure: `modality-page.test.tsx:820` tries clicking “Scan Paper” with NAPS2 disabled and the retired scanner-app flag enabled. The unchanged shared document panel explicitly sets `scannerAppEnabled = false` and exposes only supported NAPS2 scanning.
+- Reproduced the exact failing test in the detached starting-main worktree: 1 failed, 103 skipped by the targeted name filter. Both test and document panel are unchanged by this goal. Log: `/tmp/rispro-ui-polish-20261022/modality-main-baseline.log`. No test/application workaround applied.
+- Proposed scoped repair: preserve all clinical-upload assertions, then assert the unsupported Scan Paper action is absent and `createScanSessionMock` is not called. Enabled NAPS2 coverage already exists in Modality and RequestDocumentsPanel tests. User authorization requested under AGENTS rule 6; further implementation stopped pending response.
+- Four initial after capture cases passed at desktop/phone, but comparison, populated/dialog/RTL coverage, final targeted checks and exact-tree typecheck/build remain pending. No completion credit added.
+- Latest validated rollback checkpoint: `8daf5e69` on local-only `codex/application-ui-polish-goal`; main remains at the starting SHA. No push/PR/deploy or squash-apply.
+
+### Batch 7 — Modality, document operations and overrides complete
+
+- Completed/polished four entries: Modality Board, Document Ingestion, Request Scans and Override Requests. Desktop Modality heading no longer squeezed by the action row; desktop controls use established compact tokens. Previously polished phone touch targets remain unchanged.
+- Request Scans/Document Ingestion: readable wrapping description, blue selected tab, consistent compact buttons/fields/dialogs, muted row dividers, and existing SearchInput fixes assignment search-icon overlap. Native table scrolling, actions, assignments, scanner/PACS/export handlers and dialog geometry remain unchanged.
+- Override Requests: localized persistent page filter labels and compact controls. Drawer accessible names and filter behavior retained; no approval/rejection authority, validation, re-authentication or scheduling rules changed. Existing English-only summary/action copy inside Arabic layouts remains a localization limitation.
+- User authorized the stale Modality test repair: preserved all upload assertions; asserts Scan Paper absent and retired scanner-session API not called when NAPS2 is disabled. Existing enabled-NAPS2 tests retained. Reproduced old failure on starting main before repair; historical failure checkpoint above is resolved.
+- Browser: four initial after desktop/phone cases, two populated modality/document cases, four actual Arabic cases, three populated synthetic read-fixture cases before/after (including assignment/archive dialogs and rejection forms), three Arabic synthetic cases, and two existing real Modality navigation/deep-link E2E tests pass. Read fixtures explicitly assert zero workflow mutation requests. External scanner, archive and PACS integrations are not validated by these fixtures.
+- Capture-helper correction: narrowed an overbroad interception matching a Vite module URL; rejected blank captures, terminated those two temporary runs and reran successfully. Corrected an unsupported helper assumption that blank rejection disables its button; verified empty required reason without submitting instead. No app behavior changed to satisfy helpers.
+- Checks: 170 focused tests pass; final Request Scans styling delta 44/44 pass; exact final frontend typecheck/build pass; targeted lint passes with one existing hook warning; harness:ui and whitespace checks pass. Existing build/jsdom warnings retained.
+- Five references recaptured against starting main with current synthetic data: ten viewport pairs have matching dimensions; Appointment/Registration/Scheduling pixel-identical, others differ only by dynamic clock text (0.009–0.022%). Earlier reporting discrepancy was stale fixture data; fresh matching-data pairs resolve it. Final reference checks still required after future shared edits.
+- Counts: 39 complete (32 polished, 7 accepted unchanged), 74 remain (5 PACS/monitoring initially assessed, 69 unassessed). No product decisions pending. Next baseline: 115 PACS/remap/Orthanc/monitor component tests and five initial capture cases pass.
+- Rollback checkpoint follows locally on retained goal branch; no push, PR, deployment or main squash-apply.
+
+### Batch 8 — PACS administration and MWL monitoring validated
+
+- Five entries polished: PACS Search, DICOM Remap, comparison-linked Remap, Authoritative Orthanc Operations and MWL Monitor. Reused 38 Buttons, 7 Inputs and the shared Card shell. Native file/folder selectors, clinical acknowledgments, wizard controls, history selectors and domain-specific non-modal monitor drawer remain local.
+- Fixed inconsistent teal remap styling, oversized controls, unassociated PACS form labels, low-contrast result descriptions and truncated operational metric values. Orthanc metric grid uses four columns until the wide breakpoint; full values wrap. Existing English-only Orthanc/monitor content now explicitly LTR inside either shell language; this does not claim Arabic localization. Remap and PACS search retain actual Arabic RTL support.
+- Populated browser inspection found MWL drawer Close hidden under the z-50 application header. Raised the existing drawer from z-40 to z-70 without moving actions or changing its non-modal layout. Before capture and intercepted-pointer log reproduce the problem; after desktop/phone Close clicks pass.
+- Remap preview produced generic “Task completed” before sending anything. Suppressed only its global preview toast; local scan progress/completion and preview error messages remain. No clinical remap/send/identity calls or logic changed. Phone review comparison now wraps full original/replacement values within the existing three-column table, with muted dividers and header. Warning, file review, confirmation checkbox and disabled send behavior remain.
+- Browser: five before/after top-level desktop/phone cases; five Arabic-preference cases (actual RTL for PACS/remap; explicit English/LTR for monitoring); four populated synthetic fixture cases before/after; two actual Arabic remap/comparison cases; existing Orthanc browser scenarios 2/2 pass before and after. Synthetic DICOM headers parsed locally in the real browser through Source, Patient, Destination and Review; comparison patient lock verified. Preview/replacement/search responses mocked explicitly, no remap/send/remote integration execution claimed. Monitor Orthanc/Sante previews and Close verified.
+- Capture corrections: changed a helper locator to the actual patient result text; rejected that failed baseline helper. Initial monitor helper exposed the real stacking bug, then baseline capture navigated away solely to inspect the second tab; current helper requires normal Close clicks. One styling edit helper used the wrong working directory and made no changes; reapplied with absolute paths. Sticky header positions in full-page stitched captures are screenshot artifacts, not a page-layout defect.
+- Checks: 115 focused component tests pass; final Remap delta 85/85 pass. Exact final frontend typecheck/build pass. Targeted lint, harness:ui and whitespace checks pass; existing build/jsdom warnings retained. Shared base primitives unchanged; five-reference regression remains valid from batch 7 and requires final recheck after future work.
+- Counts: 44 complete (37 polished, 7 accepted unchanged), 69 remain (4 printing screens initially assessed, 65 unassessed). Batch 7 rollback commit is `16c292b0`. Batch 8 validated source is uncommitted because the next baseline exposed unrelated failures before its checkpoint commit. Main remains unchanged at `50514e03`; no push/PR/deploy or squash-apply.
+
+### Printing baseline — required stop
+
+- Before any printing application edit: 43 passed, 5 failed across five test files. Two unchanged test files fail due stale text expectations after existing localization. All five failures reproduced in the detached starting-main worktree: autoprint targeted case 1 failed/13 filtered skips; ReportCenter 4 failed/13 passed.
+- Proposed test-only updates: autoprint list assertions use `print.reportCenter.title` and `print.reportTemplate.daily-appointments.title`, matching that file's existing translation-key mock; ReportCenter expectations use existing “Daily appointment list,” “No-show,” “Grouped by: Exam” and “Case Category.” No print/audit/filter/disabled-output assertion removed or weakened. Approval requested under AGENTS rule 6; no repair applied yet.
+- Logs and initial printing captures remain in the external artifact directory (`print-baseline-vitest.log`, `print-main-baseline.log`, `report-center-main-baseline.log`, before `print-center`, `day-list-print`, `reporting-print`, `workstation-printing`). Those four screens are assessed only, not complete.
+
+### Printing baseline repair authorized and passed
+
+- User authorized the six scoped expectation updates. The localized audit-template expectation was scoped to its table cell because the same label legitimately appears in a heading and option; this preserves the audit-row readiness check. All original printing, audit, filter and disabled-output assertions remain. Repaired baseline: 48/48 pass. No printing application change made for these repairs.
+- Added the separately navigable appointment-slip preview (`/print?appointmentId=:id`) discovered during actual print routing assessment. Inventory now 119 total entries: 5 references and 114 remaining-scope entries. Completion stays 44; 70 remain. No screen silently excluded.
+- Next batch: Report Center, appointment preview, day-list output, reporting-board output and workstation printing/scanning. Internal slip/registration renderers follow separately. Report Center phone clipping is a concrete priority; external printer/scanner integration remains outside browser fixture claims.
+
+### Batch 9 — Primary printing and workstation UI complete
+
+- Five entries polished: Report Center, appointment-slip preview, day-list output, reporting-board output and workstation printing/scanning. Report Center grid/cards now constrain intrinsic table width so phone controls, filters, columns and all output actions stay visible; only the data table scrolls. Reused shared Input and compact controls; labels use normal clinical typography. No output filters, templates, column permissions, audit calls or printing/scanning handlers changed.
+- Slip preview now uses the configured A5/A4 paper dimensions inside its existing scroll container. Previously the fixed-width RTL paper began at negative x in a narrow iframe, clipping fields; now the full sheet is aligned within the iframe and the outer container supports horizontal panning. Underlying generated slip HTML is unchanged. Browser geometry checks cover A5/A4 in both shell languages.
+- Day-list/reporting output: consistent blue brand/header colors, readable normal header tracking, responsive on-screen header and horizontal table scrolling without changing the A4 landscape printed table. Reporting output and workstation setup retain existing predominantly English content with explicit LTR direction; day-list output retains actual Arabic RTL. Existing raw category/status codes in some output fields remain a localization limitation.
+- Browser: five after desktop/phone cases and five Arabic-preference cases; appointment preview before/after; two populated control scenarios verify all five output buttons within the viewport, grouped/patient reports, paper geometry and advanced workstation diagnostics. No physical print, scanner test, setup installation, mapping save or clinical mutation was invoked. Existing autoprint/audit component checks remain intact.
+- PDF evidence: applied PDF skill; generated four before/four after Chromium A4 landscape PDFs (day-list/reporting, English/Arabic), rendered via native PDFKit because Poppler is unavailable. All eight are one page; latest four PNGs visually inspected without clipping/overlap. Synthetic accession sets match: 15/15 day-list and 8/8 reporting in each language. Artifacts stay outside tracked source in `pdf/`, with `comparison.json`; these are UI/output evidence, not physical-printer verification.
+- Checks: repaired baseline and final focused suite 48/48 pass; final affected ReportCenter 17/17 and preview 14/14 reruns pass. Exact final frontend typecheck/build pass; targeted lint and harness:ui pass; whitespace clean. Existing jsdom navigation/build warnings retained.
+- Development corrections: localized audit label occurs in multiple places, so scoped the authorized expectation to its actual table cell; removed unsupported Testing Library `exact` option caught by TypeScript. Corrected uppercase paper-size comparison to the existing lowercase type. Corrected the A4 read fixture to the existing nested setting-value shape; final A4/A5 browser geometry checks pass. Capture comparison helper now tolerates changed full-page dimensions. None of these failures was hidden or reported as passing before correction.
+- Counts: 49 complete (42 polished, 7 accepted unchanged) of 114 remaining-scope entries, 65 remain (3 reporting/document entries initially assessed, 62 unassessed), plus final five-reference verification. PACS rollback checkpoint `0ca06b02`; printing checkpoint follows locally. No decisions pending, no push/PR/deploy or main squash-apply.
+- Next: saved reporting view, Personal Reporting Desk, its case documents and the two internal print renderers. Next component baseline: 90/90 mobile/reporting-document tests pass; initial three route captures pass with real synthetic saved token and assigned case.
+
+### Batch 10 — Reporting delivery assessment and required stop
+
+- Assessed saved Reporting Board, Personal Reporting Desk, case documents, internal appointment-slip renderer and internal registration-list renderer. Saved Board and internal slip renderer meet the existing reference and require no changes. Personal Desk has small uncommitted theme/search normalization; case-document page gains explicit existing English/LTR direction and theme focus ring; internal registration brand aligns to blue. No batch completion credit yet.
+- Passing checks so far: 117 focused component/print-helper tests; 4 existing read-only public/authenticated Personal Desk browser journeys before/after; 3 top-level before/after desktop/phone routes, 3 Arabic-preference captures (existing explicit English/LTR), 2 internal-render cases before/after with synthetic read fixtures; case and filter dialogs. Exact current frontend typecheck/build, targeted lint and harness:ui pass. Five original references recaptured successfully; final comparison still required.
+- Browser evidence correction: the first populated-document helper checked file-list/control rendering and zero writes but did not assert successful image decoding. Visual inspection found its image error, so it is NOT accepted as passing document-preview verification. The strengthened helper now fails on unchanged starting main.
+- Existing root cause: `listReportingBoardAppointmentDocuments` returns a view URL without `/api`; native image/open links consume it directly, receiving Vite HTML (HTTP 200, `text/html`) instead of image bytes. Three workspace thumbnail/open anchors also hardcode the unscoped `/api/documents/:id/view` route. The relevant API module and shared panel have no diff from starting main. Backend mounts the scoped view under `/api/reporting`; no backend/auth change is needed.
+- Evidence: `before`/`after/personal-reporting-document-390.png`, `reporting-document-network-before.json` (unscoped 404 plus scoped-looking non-API HTML 200), and `reporting-document-main-failure.log`. Proposed four-URL presentation repair is reviewable in `reporting-url-repair.patch` outside tracked source. It has not been applied. User approval requested under AGENTS rule 6; preserve token/case encoding, read-only mode and all existing permissions. Add focused API/helper/panel/browser regressions after authorization.
+- Goal remains incomplete: 49/114 completed, 65 remain (five current entries assessed, 60 unassessed), plus final original-five verification. Current uncommitted source: Personal Desk, case documents and registration-list brand. Rollback `b31fcdb7` on retained goal branch; main unchanged. No push/PR/deploy or squash-apply.
+
+### Batch 10 — Reporting delivery complete; scoped URL repair authorized
+
+- User authorized the four-URL repair. Reporting document API results now include `/api`; the shared panel's three thumbnail/open links reuse the existing document URL helper. Token/case encoding, generic fallback, permissions, read-only controls and backend scope are unchanged.
+- Chromium desktop/phone preview and thumbnail images now decode the synthetic PNG. Network assertions require HTTP 200 image/png from the scoped `/api/reporting/.../documents/:id/view` endpoint, with zero workflow writes; the strengthened test reproduces the old failure on starting main. No backend or external integration changes.
+- Completed five entries: Personal Reporting Desk, case documents and internal registration-list brand polished; saved Reporting Board and fixed-paper internal appointment slip accepted unchanged. Desk search reuses SearchInput, theme accents match blue tokens, native filter borders are muted and text stays visible. Original mobile control/touch geometry preserved. Rejected a compact select variant that clipped text before accepting the final native styling.
+- Checks: 117 initial focused tests; final affected reporting pages 90/90; URL/helper/panel regressions 62/62; original reference component workflows 144/144; read-only Personal Desk E2E 4/4. Exact final frontend typecheck/build PASS after the final filter edit. Targeted lint PASS with one existing hook warning; harness:ui PASS; whitespace clean. Initial baseline and final corrected screenshot cases, dialogs, internal renderers and Arabic-preference captures inspected. Existing English-only reporting content is explicitly LTR, not claimed translated.
+- Fresh original-five reference captures have matching dimensions: Appointment and Registration identical; Scheduling 0–0.002%, Dashboard 0.008–0.018%, Reporting 0.003–0.007% pixel differences from clocks/aging. No shared-base regression found. Comparison metadata: external `reference-diff.json`.
+- Counts before the next route discovery: 54/114 complete (45 polished, 9 accepted unchanged). This validated batch remains uncommitted because the next baseline failed before checkpointing; rollback branch retains `b31fcdb7`. No push/PR/deploy or squash-apply.
+
+### SOP baseline — required stop before application edits
+
+- Before any SOP application edit, focused SOP page/editor run: 14 FAIL, 19 PASS across two files. Same exact result reproduced on unchanged starting main. Logs: external `sop-baseline-vitest.log` and `sop-main-baseline-vitest.log`. SOP source, tests and language catalogs have zero diff from starting main.
+- Root cause: old test labels differ from the existing English catalog, including file extensions, sentence case, revision/owner/review labels and the superseded-version wording. Downstream assertions also retain the previous import-success wording. Review-status badges now read “Due soon” and “Overdue”; tests must scope these to their synthetic SOP rows to avoid matching filter options.
+- Prepared an external reviewable patch only: `sop-label-repair-proposed.patch`. It updates 20 stale string values plus two row-scoped review-status assertions; no application behavior or assertion removed. User authorization requested under AGENTS rule 6. No test repair applied yet; further implementation stopped.
+- Baseline library and authoring desktop/phone screenshots captured, but not complete. Source inspection also confirmed separately navigable `/sops/json-example` (library button and pathname dispatch), so it is explicitly added rather than hidden inside library coverage. Inventory now 120 entries: 5 references, 115 remaining scope. 54 complete, 61 remain (2 SOP entries initially assessed, 59 unassessed).
+- Goal is incomplete. Current eight modified files belong to the validated reporting batch and progress record. Last committed rollback `b31fcdb7`, local-only `codex/application-ui-polish-goal`; main remains at starting SHA. No main squash-apply or final approval recommendation while scope remains.
+
+### SOP baseline repair authorized
+
+- User approved the prepared test-only patch. Applied exactly the scoped label updates and row-scoped review-status checks; all 33 SOP page/editor tests PASS. No application behavior changed for the repair. Previous stop is resolved.
+- Populated English/Arabic desktop/phone baseline captures pass. Concrete mobile register defect: positional CSS displays owner under “Ver,” version under “State,” and review date under “Open.” Removing those register-only overrides restores real localized headers and all columns inside the existing horizontal scroll wrapper. Existing history-specific responsive rules are retained. Metadata/buttons/dialogs use the existing compact-control stylesheet; domain toolbar heading selector fits its 32px toolbar. SOP action order/handlers remain unchanged.
+
+### Batch 11 — SOP library, authoring, details and example configuration complete
+
+- Four entries polished. Reused existing shared controls/compact tokens; reduced oversized metadata/button controls and aligned domain toolbar heading selector to its 32px controls. Dialog shells retain existing geometry, action order and handlers. Native select vertical padding was adjusted after Arabic screenshot inspection; text now fits without clipping. Table headings use normal readable case.
+- Removed only obsolete mobile register positional overrides from index.css. They relabeled owner/version/review columns incorrectly and hid status. Existing horizontally scrollable table now preserves every real localized column and the unchanged Open action. Browser asserts all nine management headers present with no synthetic pseudo-labels, no document overflow, and Open reachable in the viewport through keyboard focus. History-specific mobile layout remains unchanged.
+- Browser: two populated synthetic read-fixture scenarios (English/Arabic, each desktop/phone) before/after; library register, published content/history, owner/review/revision/archive dialogs, JSON import, toolbar and JSON example/reset. Escape closes dialogs. No SOP create/save/review/publish/archive/import/reset writes executed in these browser fixtures. Six final real route captures (three routes, two languages), plus five original references, pass at desktop/phone. Safe synthetic bilingual content only.
+- Checks: authorized baseline repair 33/33 PASS; final SOP focused tests 33/33 PASS. Exact final frontend typecheck/build PASS; targeted lint PASS; harness:ui PASS; whitespace clean. Existing build/jsdom warnings retained. Original-five image dimensions match; tiny dynamic text differences recorded in reference-diff.json, no layout regression. Before/after pairs in external comparisons/sop-*; 11 final route/reference capture cases and 2 populated-state cases PASS.
+- Counts: 58/115 remaining-scope entries complete (49 polished, 9 accepted unchanged), 57 remain unassessed. Inventory 120 including five reference screens. No pending product decisions. Next batch: Statistics, Incidents, Login, Public Appointment and active Legacy Access Viewer. No push, PR, deployment or main squash-apply.
+
+### Batch 12 — Operational statistics, incident UI and access screens complete
+
+- Five entries assessed: Statistics, Incidents and active Legacy Access Viewer polished; Login and Public Appointment accepted unchanged after desktop/phone, Arabic and synthetic populated/invalid-link inspection. Existing patient-facing portal layout retained. Passkey copy and “or” remain English in Arabic login; no physical passkey validation claimed.
+- Statistics: compact controls, readable metric/column labels, muted row dividers, and screen-only table minimum widths keep status rows readable while preserving horizontal scrolling. Print minimum widths reset to the original automatic behavior. Replaced an unassociated common Select instance with the existing modality-specific native select inside its visible label; option values/filter update handler unchanged. Loading/empty/error browser inspection reproduced corrupted em-dash placeholders in three rate cards; corrected only displayed text, with all rate arithmetic and output data unchanged.
+- Incidents: compact shared controls in page/dialogs and blue selected radio-card states. Labels, form validation, attachments, review transitions and submission/audit handlers unchanged. Populated details and create dialog verified in English/Arabic; Escape closes them. No incident submission, review save, upload or printing performed in the browser fixtures.
+- Legacy Access Viewer: reused shared Button/Input; replaced hard-coded teal/gray visual constants with existing tokens; raised unreadably small labels/cells, associated filter labels, wrapped existing filter groups/toolbar on phones, and retained table scrolling and all print/search/reset/upload handlers. Domain-specific inline group geometry and native MDB file selector remain local; no second generic primitive introduced. Printed HTML generators and all MDB/API/query logic are unchanged.
+- Data-safety correction: the first generic legacy navigation unexpectedly loaded existing non-seeded MDB rows from outside the disposable DB. Removed its six screenshots/body/metadata/crop artifacts immediately, without changing the MDB. Replaced them with explicit synthetic fixtures intercepting every legacy API request before navigation. Retained legacy images contain only SYNTHETIC-UI.mdb and clearly synthetic patient text. No such row data entered tracked files or commits. Future legacy capture uses only this helper.
+- Browser: 8 final route/language cases (Statistics, Incidents, Login, invalid public link), 4 synthetic legacy/public cases, 2 synthetic incident cases, and 1 Statistics loading/empty/error case, each including desktop/phone, PASS. Synthetic legacy Search/Reset run; no workflow writes. Original public-helper duplicate-text locator and incident-helper guessed Arabic action label were corrected to actual heading/catalog labels; rejected/interrupted helper runs are not passes. Login/public show existing language limitations, not claimed fully localized. External MDB import/physical printing/WebAuthn not validated.
+- Checks: baseline and final 67/67 focused tests PASS. Exact final frontend typecheck/build PASS after final app edit; targeted lint PASS; harness:ui PASS; whitespace clean. Existing bundle/jsdom warnings retained. Shared base primitives/tokens unchanged; original-five reference verification remains valid from batch 11 and will be rerun at final handoff.
+- Counts: 63/115 remaining-scope entries complete (52 polished, 11 accepted unchanged), 52 remain unassessed: 35 Settings entries and 17 Teaching entries. No pending product decisions. Rollback commits: reporting `5e851c32`, SOP `168fd64e`; this milestone checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 13 — Settings landing, mobile access and core clinical preferences complete
+
+- Five entries polished: Settings landing, Mobile Widget Access, Patient Registration settings, Scheduling & Capacity, Queue & Arrival. Reused SearchInput/Button/Input/LoadingState and existing compact tokens. Landing search icon/text no longer overlap; readable summary labels and one existing Back label replace duplicate “Back - Back to Settings Menu.” Menu grouping, navigation handlers and section routing unchanged.
+- Simple setting rows now stack label/control on phones and preserve compact desktop rows. Previously similar-name labels collapsed to a few characters per line and selectors extended beyond cards. Labels associate with native/shared fields, MRN prefix retains its explicit Save, and auto-save controls retain the same values, handlers, min/max/step and pending behavior. No setting/rule values changed during browser QA.
+- Shared Settings shell now opts into compact controls for its descendants. Remaining Settings entries still require individual assessment and are NOT credited complete. Future before captures use the unchanged starting-main frontend at port 5174 so this common polish does not conceal earlier baseline issues. Mobile create/rotate/revoke dialogs opt in locally because they render through portals.
+- Browser: initial loading-only protected-setting captures rejected; replaced by settled English/Arabic desktop/phone views after normal password re-authentication. Actual re-auth flow unchanged. Two core settled-state cases, four landing/mobile route cases before/after, and two populated synthetic device cases before/after PASS. Active/expired/revoked device cards, long name wrapping, create/rotate/revoke dialogs and Cancel verified without generating, rotating or revoking tokens. Settings writes remain zero. Original helper Arabic rotation wording corrected from a guessed synonym to the existing catalog label; failed helper runs not credited.
+- Checks: baseline/final 18/18 focused Settings navigation/reauth/mobile/composition tests PASS. Exact final frontend typecheck/build PASS; targeted lint PASS; harness:ui PASS; whitespace clean. Base shared primitives/tokens and original-five screens unchanged. Existing mixed English/Arabic setting labels and raw fallback key labels remain localization limitations; no language catalogs or auth/setting persistence logic changed.
+- Counts: 68/115 complete (57 polished, 11 accepted unchanged). 47 remain unassessed: 30 Settings views and 17 Teaching views. No pending decisions. Previous rollback `69d158cd`; this checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 14 — Patient import, modality, exam type and equipment settings complete
+
+- Five Settings entries assessed: Patient Import, Patient Duplicate Resolver (accepted unchanged), Modalities, Exam Types and Equipment. The four edited screens now use the existing shared inputs, buttons, badges, table and dialog, with more readable labels, compact controls, consistent neutral dividers/statuses, and phone layouts that preserve the existing action order and handlers. The exam instruction-copy dialog now uses the shared accessible dialog behavior and has an explicit accessible name. No settings values or clinical import/apply actions were changed.
+- Browser comparison found a success toast covering Patient Import mapping controls on phones; inspect/stage requests now keep the existing inline progress and error feedback without that redundant global toast. File chooser, mapping fields, selection checkboxes, staged-row review and catalog workbook review were inspected with synthetic data in English/Arabic at 1440px/390px. Tables remain horizontally scrollable where clinical columns need more width. Exam-copy dialog close and Escape behavior were checked. No patient migration, catalog apply, modality/exam mutation or equipment configuration write occurred.
+- Checks: focused baseline/final tests 17/17 PASS; settled Settings audit 2/2 PASS (20 desktop/phone/language measurements, no overflow, errors or writes); editor states 2/2 PASS; synthetic import preview states 2/2 PASS. Exact-final-tree `typecheck:frontend` and `build:frontend` PASS; targeted lint and whitespace checks PASS. Existing bundle and jsdom warnings are unchanged. No shared primitive implementation changed.
+- Evidence: before/after PNGs and comparison images are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; screenshot files remain outside tracked application source. A browser helper's early locator mismatch was corrected and its final run passed; rejected helper attempts are not counted.
+- Counts: 73/115 complete (62 polished, 11 accepted unchanged); 42 remain unassessed: 25 Settings entries and 17 Teaching entries. No pending decisions. Previous rollback `c4e081a0`; batch 14 checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 15 — PACS and DICOM integration settings complete
+
+- Assessed five Settings views: PACS Connection, DICOM Gateway Configuration, DICOM Gateway Monitoring, MWL Policy (accepted unchanged), and Orthanc MWL Sync. PACS, gateway, monitoring, and Orthanc controls now use existing shared inputs, buttons and badges with consistent form labels, compact sizing, readable statuses, responsive action rows, and accessible names. No connection, credential, worklist, retention, or monitoring behavior changed.
+- Fixed a PACS retention value colliding with its label and mobile modality actions clipped at the card edge. DICOM Monitoring filters now have explicit accessible names and a responsive grid; active navigation uses the existing blue primary language. Orthanc's DICOM tag limits remain horizontally scrollable on phones. Gateway Arabic form labels and direction remain RTL; English-only monitoring and Orthanc panels stay explicitly LTR.
+- Browser: 20 English/Arabic desktop/phone settled route captures, plus PACS create and Orthanc tag-entry states; all 40 viewport measurements stayed within bounds with no page errors, unmatched integration requests or writes. PACS, gateway, monitoring, MWL policy and Orthanc configuration APIs were intercepted with synthetic fixtures; no external DICOM/PACS connection was attempted. Before/after comparisons were inspected.
+- Checks: focused Settings tests 12/12 PASS; browser audit 2/2 PASS; exact-tree frontend typecheck and production build PASS; targeted lint and whitespace checks PASS. Existing large-bundle build warning remains. No shared base primitive changed.
+- Evidence: paired screenshots and interaction states are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; artifacts remain outside tracked application source.
+- Counts, corrected against the active Settings route registry: 78/116 complete (66 polished, 12 accepted unchanged); 38 remain: 21 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `3994f169`; this milestone checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 16 — User and access administration complete
+
+- Polished Users, Action PIN Policy, Role Page Access and Audit Log. User create/manage forms now use the shared Input style. Action PIN fields and actions use shared controls while preserving the same table density, disabled state cues, handlers and action order. Role and PIN matrices expose named, focusable scroll regions, scoped headers and readable checkbox labels; shared Buttons standardize Save/Reset actions. No role, permission, PIN or audit behavior changed.
+- Fixed audit search/filter controls colliding at desktop widths and labels sitting beside selectors on phones. Filters now use a compact responsive grid with full-width controls, and SearchInput keeps its icon clear of the placeholder. Existing audit detail drawer, filter values, URL state, exports and pagination remain unchanged.
+- Browser: 16 English/Arabic desktop/phone route captures before and after, plus user creation, user management and audit-detail states in English. Safe synthetic staff names (including Arabic), accounts and audit events were used. All 32 route/viewport checks had zero overflow, page errors, unmatched requests or writes. Keyboard Tab moved from the visible permission checkbox to the next off-screen role column. Dialog Escape and audit detail drawer rendering passed.
+- Checks: focused baseline/final tests 38/38 PASS; synthetic Chromium audit baseline/final 2/2 PASS; exact-tree frontend typecheck and production build PASS; targeted lint and whitespace checks PASS. Existing jsdom `scrollTo` and large-bundle warnings remain. Shared Button/Input/SearchInput primitives were reused; their implementations were not modified.
+- Evidence: baseline/after images and comparisons are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; screenshots remain outside tracked application source.
+- Counts, corrected against the active Settings route registry: 82/116 complete (70 polished, 12 accepted unchanged); 34 remain: 17 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `9cd05fe5`; this milestone checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 17 — Integration settings complete
+
+- Assessed and polished Sante Worklist HL7, SonicDICOM Reports, OHIF Viewer and Authoritative Orthanc. The Authoritative Orthanc form had unstyled/invisible text fields because it used an undefined `input` class; fields now use the shared Input and `input-premium` treatment. Its mobile destination selector now fills the row, stacks the Add action and keeps the PACS option text legible in LTR. OHIF technical values and SonicDICOM URLs/templates now render LTR within the Arabic interface.
+- Sante's four-column HL7 field map now retains usable column width on phones, exposes a named keyboard-focusable scroll region, and labels each per-field toggle, limit and overflow selector. The Authoritative Orthanc reconciliation table is a labeled, keyboard-focusable scroll region when populated and shows a visible empty-history message when there are no jobs. Existing connection settings, save/test actions, credentials, routing, reconciliation and reversal behavior are unchanged.
+- Browser: baseline and final Chromium captures for all four routes in English and Arabic at 1440px/390px (16 each stage). The captured Sante table and Orthanc reconciliation tab states use synthetic/empty disposable E2E data. Final route checks: 2/2 PASS; zero page errors, horizontal page overflow or settings writes. Interaction checks: 2/2 PASS in both languages; keyboard Tab reached the Sante checkbox, limit and overflow fields and scrolled the map, the Orthanc destination selector measured 232px and the Add button stacked below it, and the empty-state message remained visible. No settings or reconciliation writes were issued.
+- Checks: focused integration-settings tests 17/17 PASS; final Chromium interaction tests 2/2 PASS. Existing jsdom `scrollTo` warnings remain. No shared primitive implementation changed; existing shared Input/Table/Button components and direction tokens were reused. Some operational labels and explanatory copy remain English in Arabic mode, matching the existing localization coverage; no catalog or authentication work was added.
+- Evidence: paired route screenshots and comparisons plus interaction states are indexed in `/tmp/rispro-ui-polish-20261022/report.md`. Screenshot artifacts remain outside tracked application source.
+- Counts: 86/116 complete (74 polished, 12 accepted unchanged); 30 remain: 13 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `3795dad9`; this batch checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 18 — Patient name and QR settings complete
+
+- Assessed Name Dictionary, Not Allowed Name Words and Patient QR Self-Service in English and Arabic at desktop and phone widths. The two name-management screens retained readable, compact forms, search/import/export controls and their existing RTL behavior, so they were accepted unchanged. Patient QR long bilingual instructions and templates were cramped into two 132px columns on phones; those 13 long-text pairs now stack below 640px and remain paired on wider screens. Short settings pairs remain compact. No form values, save behavior or workflow changed.
+- Browser: 12 baseline and 12 final Chromium route captures (3 screens × 2 languages × 2 widths); final route audit 2/2 PASS with no page errors, overflow or settings writes. Layout interaction audit 2/2 PASS verified all 13 fields stack and exceed 250px on phones and remain two-column on desktop. The synthetic delete-confirm interaction was dismissed without a write.
+- Checks: Patient QR/name-dictionary focused tests 25/25 PASS; Name Dictionary browser workflow 1/1 PASS using the disposable E2E DB, followed by a DB reset; targeted ESLint and `git diff --check` PASS. Existing jsdom scroll warnings remain.
+- Evidence: baseline/final pairs and comparisons are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; screenshot artifacts remain outside tracked application source.
+- Counts: 89/116 complete (75 polished, 14 accepted unchanged); 27 remain: 10 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `4f7933e6`; this batch checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 19 — Printing and email settings complete
+
+- Assessed Appointment Slip, QZ Tray and Email Notifications in English and Arabic at desktop and phone widths. Appointment Slip had a visibly corrupted Arabic “bold text” toggle label and paired long helper/instruction textareas that were too narrow on phones. The label now renders correctly; those long-text pairs stack below 640px and remain paired on wider screens. QZ Tray’s profile layout was already clear and is accepted unchanged; its English controls now stay LTR inside Arabic navigation. Email Notifications’ empty activity table previously showed only clipped headers on phones. It now has an explicit empty state, scoped headers and a named, keyboard-focusable horizontal scroll region with left/right arrow handling. Existing settings, template, test-print and email workflows are unchanged.
+- Browser: 12 baseline and 12 final Chromium route captures (3 screens × 2 languages × 2 widths); final route/interaction run 8/8 PASS. No page errors or viewport overflow in any route/width state. Keyboard interaction confirmed the email table moves horizontally and its empty-state message remains visible on phones. No settings writes were issued.
+- Checks: focused print/settings/API tests 38/38 PASS; targeted ESLint PASS with one pre-existing `onReAuthRequired` dependency warning in Email Notifications; `git diff --check` PASS. External Orthanc-disabled and Express cookie-deprecation messages came from the existing synthetic E2E server and did not affect route checks.
+- Evidence: before/after pairs and comparisons are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; screenshots remain outside tracked application source.
+- Counts: 92/116 complete (77 polished, 15 accepted unchanged); 24 remain: 7 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `dc7602c8`; this batch checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+### Batch 20 — Scheduling and security settings complete
+
+- Assessed Scheduling Engine, Deployment Identity, Passkey Configuration and System Diagnostics in English and Arabic at desktop and phone widths. The five Special Quotas bulk actions were clipped in the existing mobile header; they now wrap inside the same quota section and preserve order, labels and handlers. English passkey and diagnostics panels rendered RTL under Arabic navigation; each now declares LTR direction. Diagnostic card values can wrap within their available width. The detected browser origin is also explicitly LTR in the bilingual Deployment Identity screen. The existing local-HTTP passkey warning and disabled save state remain expected.
+- Browser: 16 route screenshots (four screens × two languages × two widths) before and after, plus four Diagnostics Events screenshots at both sizes/languages. The Events view was captured in its loading state before and fully loaded empty state after. Final Chromium route/layout/state checks passed 15/15; no browser errors, viewport overflow or settings/diagnostic writes. The mobile quota audit confirmed all five buttons remain within their section and wrap across rows.
+- Checks: focused tests 14/14 PASS; targeted ESLint PASS; `git diff --check` PASS. Chromium emitted the existing synthetic-server Orthanc-disabled, Express clearCookie deprecation and transient PostgreSQL pool-wait notices; all route assertions passed.
+- No shared component or business logic changed. Screenshot pairs and comparisons are indexed in `/tmp/rispro-ui-polish-20261022/report.md`; all artifacts remain outside tracked application source.
+- Counts: 96/116 complete (81 polished, 15 accepted unchanged); 20 remain: 3 Settings views and 17 Teaching views. No product decisions are pending. Previous rollback `2187d900`; this batch checkpoint follows locally. No push/PR/deploy or main squash-apply.
+
+
+### Batch 21 — remaining Documents and Backup settings complete
+
+- Assessed Documents & Uploads, Backup & Restore, and Request Scan Automation in English and Arabic at 1440px and 390px. Backup & Restore’s English-only content and status grid inherited RTL, reversing ordering and punctuation; Request Scan Automation’s English labels, field values, and action order were mirrored. Added local LTR direction to those two panel roots. Documents & Uploads was accepted unchanged: its visible labels, descriptions, inputs and controls already support Arabic RTL, and the desktop/phone layout remains readable.
+- Browser: 12 baseline and 12 final route/viewport/language screenshots. Final audit passed 7/7 browser cases, including both viewport widths per case, with zero page errors, horizontal page overflow or writes. The protected Documents & Uploads endpoint kept showing its re-auth prompt after the direct Arabic capture attempt; its Arabic visual baseline and final screenshots therefore use a read-only synthetic empty-settings response. This validates layout only; protected-data re-auth/refetch was not validated in that capture. English Documents & Uploads baseline used the real loaded route.
+- Checks: focused Settings tests 41/41 PASS; targeted ESLint PASS. The first final typecheck/build run found `TableHead`'s shared type omitted the standard `scope` prop already forwarded by the component. Corrected its prop type to `ThHTMLAttributes`; this changes no runtime rendering. The focused Authoritative Orthanc test then passed 11/11, and final frontend typecheck/build passed. The five reference screens were rerun after this shared type correction.
+- Counts: 99/99 in-scope entries assessed (83 polished, 16 accepted unchanged). The 17 active Teaching screens remain in the inventory with status “Excluded — user direction.”
+- Screenshot pairs are indexed in /tmp/rispro-ui-polish-20261022/report.md; all artifacts remain outside tracked application source. No product decision is pending. Final main/origin check and squash-apply await final validation.
+
+### Final validation and handoff
+
+- Final Chromium reference regression passed for all five established screens at desktop and phone widths (10 route/viewport states), after the shared `TableHead` type correction. There were no page errors, viewport overflow or API writes. Appointment creation, reporting, registration and scheduling screenshot dimensions match their polished baselines. Small pixel differences are time/data-driven: the reporting notification/aging values and the dashboard's no-show notice/counters changed with the active time window and disposable test state. No reference layout regression was found.
+- Required final commands on the completed frontend tree: `npm run typecheck:frontend` PASS; `npm run build:frontend` PASS (existing large-bundle warning only). Focused tests: Batch 21 Settings 41/41 PASS; Authoritative Orthanc 11/11 PASS. Targeted ESLint and `git diff --check` PASS. Browser captures used the disposable E2E environment and synthetic data.
+- Known limits: direct re-authentication/refetch for the protected Documents & Uploads endpoint did not complete in the Arabic capture harness; its Arabic before/after screenshots use a read-only synthetic settings response and verify layout only. External Orthanc is disabled in this environment. Existing warning output includes the large frontend bundle, jsdom `scrollTo`, Express `clearCookie` deprecation, and occasional PostgreSQL query-pool notices; none caused a failed final check.
+- Final discovered scope: 121 composed entries including five reference-only screens; 116 other active entries, 17 active Teaching entries excluded by the user's direction, and all 99 remaining in-scope entries assessed. No product decisions require approval. Final fetch confirms local main and origin/main both remain at the starting SHA. The validated branch is squash-applied to local main without a commit for review; `codex/application-ui-polish-goal` is retained as rollback.

@@ -90,7 +90,7 @@ export default function MobileWidgetAccessSection({ onReAuthRequired, reauthVers
       {token.status !== "revoked" && <div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => open({ kind: "rotate", token })}>{t("mobileWidget.rotate")}</Button><Button variant="secondary" onClick={() => open({ kind: "revoke", token })}>{t("mobileWidget.revoke")}</Button></div>}
     </Card>)}</div>
     <details className="text-sm"><summary className="cursor-pointer font-medium">{t("mobileWidget.setup")}</summary><p className="mt-2 whitespace-pre-line">{t("mobileWidget.instructions")}</p></details>
-    <Dialog open={action !== null || secret !== null} onClose={close}><DialogContent maxWidth="520px" aria-labelledby="mobile-widget-dialog-title">
+    <Dialog open={action !== null || secret !== null} onClose={close}><DialogContent maxWidth="520px" className="compact-controls" aria-labelledby="mobile-widget-dialog-title">
       <div className="min-w-0 space-y-4" dir={isArabic ? "rtl" : "ltr"}>
         <h3 id="mobile-widget-dialog-title" className="text-lg font-semibold">{t(secret ? "mobileWidget.reveal" : action?.kind === "rotate" ? "mobileWidget.rotate" : action?.kind === "revoke" ? "mobileWidget.revoke" : "mobileWidget.create")}</h3>
         {error && <p role="alert" className="text-sm">{t("mobileWidget.actionError")}</p>}
@@ -101,7 +101,7 @@ export default function MobileWidgetAccessSection({ onReAuthRequired, reauthVers
           {copied && <p role="status">{t("mobileWidget.copied")}</p>}
         </> : action && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit(action); }}>
           {action.kind === "create" ? <label className="block space-y-1"><span>{t("mobileWidget.deviceName")}</span><Input required maxLength={100} value={deviceName} onChange={event => setDeviceName(event.target.value)} className="w-full" autoComplete="off" /></label> : <p className="break-words text-sm [overflow-wrap:anywhere]">{t(action.kind === "rotate" ? "mobileWidget.rotateConfirm" : "mobileWidget.revokeConfirm", { device: action.token.deviceName })}</p>}
-          {action.kind !== "revoke" && <label className="block space-y-1"><span>{t("mobileWidget.expiry")}</span><select className="input-premium w-full" value={days} onChange={event => setDays(Number(event.target.value))}>{[30, 90, 180, 365].map(value => <option key={value} value={value}>{t("mobileWidget.days", { days: value })}</option>)}</select></label>}
+          {action.kind !== "revoke" && <label className="block space-y-1"><span>{t("mobileWidget.expiry")}</span><select className="input-premium w-full !py-1" value={days} onChange={event => setDays(Number(event.target.value))}>{[30, 90, 180, 365].map(value => <option key={value} value={value}>{t("mobileWidget.days", { days: value })}</option>)}</select></label>}
           <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{t(busy ? "common.loading" : "common.continue")}</Button><Button type="button" variant="secondary" disabled={busy} onClick={close}>{t("common.cancel")}</Button></div>
         </form>}
       </div>

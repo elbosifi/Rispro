@@ -51,7 +51,7 @@ function SopToolbar({ editor, editable }: { editor: Editor; editable: boolean })
   const { t } = useLanguage();
   if (!editable) return null;
   return <div className="flex flex-wrap items-center gap-1 border-b border-border bg-muted/20 p-2" role="toolbar" aria-label={t("sops.editor.toolbarLabel")}>
-    <select aria-label={t("sops.editor.headingStyle")} className="input-premium h-8 w-28 px-2 text-xs" value={editor.isActive("heading", { level: 2 }) ? "2" : editor.isActive("heading", { level: 3 }) ? "3" : "p"} onChange={(event) => { const value = event.target.value; if (value === "p") editor.chain().focus().setParagraph().run(); else editor.chain().focus().toggleHeading({ level: Number(value) as 2 | 3 }).run(); }}>
+    <select aria-label={t("sops.editor.headingStyle")} className="h-8 w-28 rounded-lg border border-border bg-card px-2 text-xs text-foreground" value={editor.isActive("heading", { level: 2 }) ? "2" : editor.isActive("heading", { level: 3 }) ? "3" : "p"} onChange={(event) => { const value = event.target.value; if (value === "p") editor.chain().focus().setParagraph().run(); else editor.chain().focus().toggleHeading({ level: Number(value) as 2 | 3 }).run(); }}>
       <option value="p">{t("sops.editor.body")}</option><option value="2">{t("sops.editor.headingTwo")}</option><option value="3">{t("sops.editor.headingThree")}</option>
     </select>
     <ToolbarButton label={t("sops.editor.bold")} active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></ToolbarButton>

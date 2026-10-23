@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, RotateCcw, Save } from "lucide-react";
@@ -112,7 +113,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-[1400px] flex-col gap-4" dir={language === "ar" ? "rtl" : "ltr"}>
+    <main className="compact-controls mx-auto flex w-full min-w-0 max-w-[1400px] flex-col gap-4" dir={language === "ar" ? "rtl" : "ltr"}>
       <header className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
         <div>
           <Button type="button" variant="ghost" size="sm" onClick={() => requestLeave(() => navigate("/sops"))}>
@@ -132,7 +133,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
           <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.codeLabel")}<Input aria-label={t("sops.jsonExample.codeLabel")} value={config.code} onChange={(event) => update("code", event.target.value)} disabled={busy} /></label>
           <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.titleLabel")}<Input aria-label={t("sops.jsonExample.titleLabel")} value={config.title} onChange={(event) => update("title", event.target.value)} disabled={busy} /></label>
           <label className="grid gap-1 text-sm font-medium">{t("sops.jsonExample.categoryLabel")}
-            <select aria-label={t("sops.jsonExample.categoryLabel")} className="input-premium h-10" value={config.category} onChange={(event) => update("category", event.target.value)} disabled={busy}>
+            <select aria-label={t("sops.jsonExample.categoryLabel")} className="input-premium h-10 !py-1 leading-normal" value={config.category} onChange={(event) => update("category", event.target.value)} disabled={busy}>
               {(metaQuery.data?.categories ?? ["General", "CT", "MRI", "Ultrasound", "Mammography", "X-Ray", "Interventional Radiology", "Patient Safety", "PACS / IT", "Reception / Registration", "Administrative"]).map((category) => <option key={category} value={category}>{categoryKeys[category] ? t(categoryKeys[category]) : category}</option>)}
             </select>
           </label>
@@ -165,7 +166,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       </div>
 
       <Dialog open={resetOpen} onClose={() => { if (!reset.isPending) setResetOpen(false); }}>
-        <DialogContent maxWidth="520px">
+        <DialogContent maxWidth="520px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.jsonExample.resetTitle")}</DialogTitle>
             <DialogDescription>{t("sops.jsonExample.resetDescription")}</DialogDescription>
@@ -181,7 +182,7 @@ function ManagementSopJsonExampleEditor({ initial }: { initial: SopJsonExampleCo
       </Dialog>
 
       <Dialog open={discardOpen} onClose={() => setDiscardOpen(false)}>
-        <DialogContent maxWidth="460px">
+        <DialogContent maxWidth="460px" className="compact-controls">
           <DialogHeader>
             <DialogTitle>{t("sops.editor.discardTitle")}</DialogTitle>
             <DialogDescription>{t("sops.jsonExample.discardDescription")}</DialogDescription>

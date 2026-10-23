@@ -421,7 +421,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function inputClass() {
-  return "mt-1 w-full rounded-lg border px-3 py-2 text-sm";
+  return "mt-1 w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20";
 }
 
 function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: DoctorProtocolsNavigationState; onNavigationChange: (patch: Partial<DoctorProtocolsNavigationState>, replace?: boolean) => void }) {
@@ -664,7 +664,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
          />
        )}
       <Dialog open={newProtocolDialogOpen} onClose={() => setNewProtocolDialogOpen(false)}>
-        <DialogContent maxWidth="420px" aria-label="New protocol">
+        <DialogContent className="doctor-protocols-page" maxWidth="420px" aria-label="New protocol">
           <DialogHeader>
             <DialogTitle>New protocol</DialogTitle>
             <DialogDescription>Select the imaging modality.</DialogDescription>
@@ -692,7 +692,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
         </DialogContent>
       </Dialog>
       <Dialog open={duplicateVersion !== null} onClose={() => { if (!duplicateCtVersionMutation.isPending) setDuplicateVersion(null); }}>
-        <DialogContent maxWidth="520px">
+        <DialogContent className="doctor-protocols-page" maxWidth="520px">
           <DialogHeader>
             <DialogTitle>Duplicate protocol</DialogTitle>
             <DialogDescription>Create an independent draft from the exact source version below.</DialogDescription>
@@ -715,7 +715,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
         </DialogContent>
       </Dialog>
       <Dialog open={protocolPendingToggle !== null} onClose={() => setProtocolPendingToggle(null)}>
-        <DialogContent maxWidth="460px">
+        <DialogContent className="doctor-protocols-page" maxWidth="460px">
           <DialogHeader>
             <DialogTitle>{protocolPendingToggle?.isActive ? "Deactivate protocol?" : "Reactivate protocol?"}</DialogTitle>
             <DialogDescription>{protocolPendingToggle?.isActive ? "This protocol will stop being available for new assignments." : "This protocol will become available for new assignments again."}</DialogDescription>
@@ -728,7 +728,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
         </DialogContent>
       </Dialog>
       <Dialog open={protocolDeactivationDialogOpen} onClose={() => setProtocolDeactivationDialogOpen(false)}>
-        <DialogContent maxWidth="520px">
+        <DialogContent className="doctor-protocols-page" maxWidth="520px">
           <DialogHeader>
             <DialogTitle>Apply protocol library synchronization?</DialogTitle>
             <DialogDescription>Deactivated protocols remain in RISpro history but will no longer be available for new assignments.</DialogDescription>
@@ -819,8 +819,8 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
       {section === "mriSequences" && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => downloadMriTemplateMutation.mutate()} disabled={downloadMriTemplateMutation.isPending}>Download template</button>
-            <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => exportMriSequencesMutation.mutate()} disabled={exportMriSequencesMutation.isPending}>Export current XLSX</button>
+            <Button variant="secondary" size="sm" type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => downloadMriTemplateMutation.mutate()} disabled={downloadMriTemplateMutation.isPending}>Download template</Button>
+            <Button variant="secondary" size="sm" type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => exportMriSequencesMutation.mutate()} disabled={exportMriSequencesMutation.isPending}>Export current XLSX</Button>
             <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
               Import XLSX
               <input className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readMriImportFile(file); event.currentTarget.value = ""; }} />
@@ -841,8 +841,8 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
               )}
               {mriImportFileBase64 && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={previewMriImportMutation.isPending} onClick={() => previewMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Preview import</button>
-                  <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={!mriImportPreview?.canConfirm || confirmMriImportMutation.isPending} onClick={() => confirmMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Confirm import</button>
+                  <Button variant="secondary" size="sm" type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={previewMriImportMutation.isPending} onClick={() => previewMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Preview import</Button>
+                  <Button variant="secondary" size="sm" type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} disabled={!mriImportPreview?.canConfirm || confirmMriImportMutation.isPending} onClick={() => confirmMriImportMutation.mutate({ fileContentBase64: mriImportFileBase64, fileName: mriImportFileName })}>Confirm import</Button>
                 </div>
               )}
               {mriImportPreview && (
@@ -867,7 +867,7 @@ function ProtocolLibraryPanel({ navigation, onNavigationChange }: { navigation: 
 }
 
 function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="inline-flex h-9 items-center rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white">{label}</button>;
+  return <Button variant="primary" size="sm" type="button" onClick={onClick} className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-semibold">{label}</Button>;
 }
 
 function Cell({ children }: { children: ReactNode }) {
@@ -877,8 +877,8 @@ function Cell({ children }: { children: ReactNode }) {
 function RowActions({ active, onEdit, onToggle }: { active: boolean; onEdit: () => void; onToggle: () => void }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <button type="button" onClick={onEdit} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Edit</button>
-      <button type="button" onClick={onToggle} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{active ? "Deactivate" : "Reactivate"}</button>
+      <Button variant="secondary" size="sm" type="button" onClick={onEdit} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Edit</Button>
+      <Button variant="secondary" size="sm" type="button" onClick={onToggle} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{active ? "Deactivate" : "Reactivate"}</Button>
     </div>
   );
 }
@@ -889,8 +889,8 @@ function SettingsTable({ headers, emptyText, tableClassName = "", children }: { 
   return (
     <div className="overflow-x-auto rounded-lg border" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <table className={`min-w-full text-sm ${tableClassName}`.trim()}>
-        <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header, idx) => <th key={typeof header === "string" ? header : idx} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
-        <tbody>{hasRows ? childArray : <tr><td className="p-6 text-sm" colSpan={headers.length} style={{ color: "var(--text-muted)" }}>{emptyText}</td></tr>}</tbody>
+        <thead className="bg-muted"><tr className="border-b" style={{ borderColor: "var(--border)" }}>{headers.map((header, idx) => <th key={typeof header === "string" ? header : idx} className="px-3 py-2 text-start text-xs font-semibold uppercase tracking-normal" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+        <tbody className="divide-y divide-border">{hasRows ? childArray : <tr><td className="p-6 text-sm" colSpan={headers.length} style={{ color: "var(--text-muted)" }}>{emptyText}</td></tr>}</tbody>
       </table>
     </div>
   );
@@ -997,9 +997,9 @@ function ProtocolList({
 
 function CtProtocolCreateForm({ draft, saving, setDraft, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onSave: () => void; onCancel: () => void }) {
   return (
-    <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3">
-      <Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Indication"><input aria-label="Indication" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field>
+    <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-3">
+      <Field label="Protocol name"><Input aria-label="Protocol name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Indication"><Input aria-label="Indication" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field>
       <Field label="Internal protocol notes"><Textarea aria-label="Internal protocol notes" value={textValue(draft.protocolNotes ?? null)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /><span className="mt-1 block text-xs font-normal" style={{ color: "var(--text-muted)" }}>Reusable guidance for doctors during protocoling. Not patient-facing.</span></Field>
       <FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
@@ -1124,7 +1124,7 @@ function ProtocolBuilder({
       </section> : null}
 
       <Dialog open={publishDialogOpen} onClose={() => setPublishDialogOpen(false)}>
-        <DialogContent maxWidth="500px">
+        <DialogContent className="doctor-protocols-page" maxWidth="500px">
           <DialogHeader>
             <DialogTitle>Publish protocol?</DialogTitle>
             <DialogDescription>Review the version before it becomes available for future assignments.</DialogDescription>
@@ -1143,7 +1143,7 @@ function ProtocolBuilder({
       </Dialog>
 
       <Dialog open={revisionDialogOpen} onClose={() => setRevisionDialogOpen(false)}>
-        <DialogContent maxWidth="500px">
+        <DialogContent className="doctor-protocols-page" maxWidth="500px">
           <DialogHeader>
             <DialogTitle>Create revision</DialogTitle>
             <DialogDescription>Current active version: v{detail.version.versionNumber}</DialogDescription>
@@ -1260,18 +1260,18 @@ function ClinicalCtAdvancedTechniqueEditor({ detail, scanners, editable }: { det
     </button>
     {open ? <div className="space-y-3 border-t px-3 py-3" style={{ borderColor: "var(--border)" }}>
       {detail.ctTechniques.length ? <div className="space-y-2">{detail.ctTechniques.map((technique) => <div key={technique.id} className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)" }}><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="font-semibold">{techniqueLabel(technique)}</p><p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{techniqueSummary(technique).join(" · ") || "No populated settings"}</p></div>{editable ? <div className="flex shrink-0 items-center gap-1"><Button type="button" variant="secondary" size="sm" onClick={() => { setScannerId(String(technique.scannerId)); const next = techniquePayloadFromRow(technique); setDraft(next); setInitialDraft(next); setEditing(true); }}>Edit</Button><Button type="button" variant="ghost" size="sm" className="text-red-700" onClick={() => setRemoveScannerId(technique.scannerId)}>Remove</Button></div> : null}</div></div>)}</div> : <p className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>No scanner-specific techniques</p>}
-      {editable ? <div className="flex flex-wrap items-end gap-2 border-t pt-3" style={{ borderColor: "var(--border)" }}><label className="min-w-64 flex-1 text-sm font-medium">Scanner technique<select aria-label="Scanner technique" className={inputClass()} value={scannerId} onChange={(event) => changeScanner(event.target.value)}><option value="">Select a scanner</option>{ctScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{[scanner.name, scanner.vendor, scanner.model].filter(Boolean).join(" · ")}</option>)}</select></label><Button type="button" variant="secondary" size="sm" disabled={!selectedScanner} onClick={begin}>{existing ? "Edit technique" : "Add scanner technique"}</Button></div> : null}
+      {editable ? <div className="flex flex-wrap items-end gap-2 border-t pt-3" style={{ borderColor: "var(--border)" }}><label className="min-w-64 flex-1 text-sm font-medium">Scanner technique<select aria-label="Scanner technique" className={"input-premium " + (inputClass())} value={scannerId} onChange={(event) => changeScanner(event.target.value)}><option value="">Select a scanner</option>{ctScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{[scanner.name, scanner.vendor, scanner.model].filter(Boolean).join(" · ")}</option>)}</select></label><Button type="button" variant="secondary" size="sm" disabled={!selectedScanner} onClick={begin}>{existing ? "Edit technique" : "Add scanner technique"}</Button></div> : null}
       {editing && draft && selectedScanner ? <CanonicalClinicalCtTechniqueFields current={draft} vendor={vendor} editable={editable} setDraft={setDraft} onSave={() => mutation.mutate(normalizedTechnique(draft))} onCancel={() => { if (dirty) setPendingAction("collapse"); else { setDraft(null); setInitialDraft(null); setEditing(false); } }} onRemove={existing ? () => setRemoveScannerId(existing.scannerId) : null} /> : null}
     </div> : null}
-    <Dialog open={removeScannerId !== null} onClose={() => setRemoveScannerId(null)}><DialogContent maxWidth="460px"><DialogHeader><DialogTitle>Remove {detail.ctTechniques.find((item) => item.scannerId === removeScannerId)?.scannerName ?? "scanner"} technique?</DialogTitle><DialogDescription>This removes the saved scanner-specific settings from the current draft.</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setRemoveScannerId(null)} disabled={removeMutation.isPending}>Cancel</Button><Button variant="destructive" onClick={() => removeScannerId !== null && removeMutation.mutate(removeScannerId)} disabled={removeMutation.isPending}>{removeMutation.isPending ? "Removing..." : "Remove technique"}</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={pendingAction !== null} onClose={() => setPendingAction(null)}><DialogContent maxWidth="460px"><DialogHeader><DialogTitle>Discard unsaved changes?</DialogTitle><DialogDescription>Advanced Technique has unsaved changes.</DialogDescription></DialogHeader><p className="text-sm">Keep editing or discard the scanner-specific changes made in this editor.</p><DialogFooter><Button variant="secondary" onClick={() => setPendingAction(null)}>Keep editing</Button><Button variant="destructive" onClick={discardPendingAction}>Discard changes</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={removeScannerId !== null} onClose={() => setRemoveScannerId(null)}><DialogContent className="doctor-protocols-page" maxWidth="460px"><DialogHeader><DialogTitle>Remove {detail.ctTechniques.find((item) => item.scannerId === removeScannerId)?.scannerName ?? "scanner"} technique?</DialogTitle><DialogDescription>This removes the saved scanner-specific settings from the current draft.</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setRemoveScannerId(null)} disabled={removeMutation.isPending}>Cancel</Button><Button variant="destructive" onClick={() => removeScannerId !== null && removeMutation.mutate(removeScannerId)} disabled={removeMutation.isPending}>{removeMutation.isPending ? "Removing..." : "Remove technique"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={pendingAction !== null} onClose={() => setPendingAction(null)}><DialogContent className="doctor-protocols-page" maxWidth="460px"><DialogHeader><DialogTitle>Discard unsaved changes?</DialogTitle><DialogDescription>Advanced Technique has unsaved changes.</DialogDescription></DialogHeader><p className="text-sm">Keep editing or discard the scanner-specific changes made in this editor.</p><DialogFooter><Button variant="secondary" onClick={() => setPendingAction(null)}>Keep editing</Button><Button variant="destructive" onClick={discardPendingAction}>Discard changes</Button></DialogFooter></DialogContent></Dialog>
   </section>;
 }
 
 function CanonicalClinicalCtTechniqueFields({ current, vendor, editable, setDraft, onSave, onCancel, onRemove }: { current: ProtocolLibraryCtTechniquePayload; vendor: string; editable: boolean; setDraft: (draft: ProtocolLibraryCtTechniquePayload) => void; onSave: () => void; onCancel: () => void; onRemove: (() => void) | null }) {
   return <div className="space-y-3 rounded-lg border p-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
-    <TechniqueFieldGroup title="Exposure"><Field label="kV mode"><select aria-label="kV mode" className={inputClass()} value={current.kvMode ?? ""} onChange={(event) => setDraft({ ...current, kvMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["kvMode"] })}><option value="">Not specified</option><option value="AUTO">Automatic</option><option value="FIXED">Fixed</option></select></Field>{current.kvMode === "FIXED" ? <NumberField label="kVp" value={current.kvp} positive onChange={(value) => setDraft({ ...current, kvp: nullableNumber(value, true) })} /> : null}<Field label="Tube current mode"><select aria-label="Tube current mode" className={inputClass()} value={current.tubeCurrentMode ?? ""} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : vendor.includes("philips") ? "DoseRight / AEC" : "Automatic modulation"}</option><option value="FIXED_MA">Fixed mA</option><option value="REFERENCE_MAS">Reference mAs</option></select></Field>{current.tubeCurrentMode === "FIXED_MA" ? <NumberField label="Fixed mA" value={current.fixedMa} positive onChange={(value) => setDraft({ ...current, fixedMa: nullableNumber(value, true) })} /> : null}{current.tubeCurrentMode === "REFERENCE_MAS" ? <NumberField label="Reference mAs" value={current.referenceMas} positive onChange={(value) => setDraft({ ...current, referenceMas: nullableNumber(value, true) })} /> : null}{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><Field label="Exposure control"><Input aria-label="Exposure control" value={textValue(current.exposureControl)} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })} placeholder="SmartmA" /></Field><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}{vendor.includes("philips") ? <Field label="Exposure control"><select aria-label="Exposure control" className={inputClass()} value={current.exposureControl ?? ""} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })}><option value="">Not specified</option><option>DoseRight / AEC</option><option>Reference mAs</option></select></Field> : null}</TechniqueFieldGroup>
-    <TechniqueFieldGroup title="Reconstruction"><Field label="Reconstruction method"><select aria-label="Reconstruction method" className={inputClass()} value={current.reconstructionMethod ?? ""} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value), reconstructionStrength: null, reconstructionImageDefinition: null })}><option value="">Not specified</option>{(vendor.includes("ge") ? ["FBP", "ASiR-V", "TrueFidelity", "Other"] : vendor.includes("philips") ? ["FBP", "iDose⁴", "Precise Image", "Other"] : ["FBP", "Other"]).map((value) => <option key={value}>{value}</option>)}</select></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}{current.reconstructionMethod === "TrueFidelity" ? <Field label="TrueFidelity strength"><select aria-label="TrueFidelity strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></Field> : null}{current.reconstructionMethod === "iDose⁴" ? <Field label="iDose⁴ level"><Input aria-label="iDose⁴ level" value={textValue(current.reconstructionStrength)} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })} /></Field> : null}{current.reconstructionMethod === "Precise Image" ? <><Field label="Precise Image definition"><select aria-label="Precise Image definition" className={inputClass()} value={current.reconstructionImageDefinition ?? ""} onChange={(event) => setDraft({ ...current, reconstructionImageDefinition: editableText(event.target.value) })}><option value="">Not specified</option><option>Soft Tissue</option><option>Bone</option><option>Lung</option></select></Field><Field label="Precise Image strength"><select aria-label="Precise Image strength" className={inputClass()} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option>{["Smoother", "Smooth", "Standard", "Sharp", "Sharper"].map((value) => <option key={value}>{value}</option>)}</select></Field></> : null}</TechniqueFieldGroup>
+    <TechniqueFieldGroup title="Exposure"><Field label="kV mode"><select aria-label="kV mode" className={"input-premium " + (inputClass())} value={current.kvMode ?? ""} onChange={(event) => setDraft({ ...current, kvMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["kvMode"] })}><option value="">Not specified</option><option value="AUTO">Automatic</option><option value="FIXED">Fixed</option></select></Field>{current.kvMode === "FIXED" ? <NumberField label="kVp" value={current.kvp} positive onChange={(value) => setDraft({ ...current, kvp: nullableNumber(value, true) })} /> : null}<Field label="Tube current mode"><select aria-label="Tube current mode" className={"input-premium " + (inputClass())} value={current.tubeCurrentMode ?? ""} onChange={(event) => setDraft({ ...current, tubeCurrentMode: (event.target.value || null) as ProtocolLibraryCtTechniquePayload["tubeCurrentMode"] })}><option value="">Not specified</option><option value="AUTOMATIC">{vendor.includes("ge") ? "SmartmA / automatic modulation" : vendor.includes("philips") ? "DoseRight / AEC" : "Automatic modulation"}</option><option value="FIXED_MA">Fixed mA</option><option value="REFERENCE_MAS">Reference mAs</option></select></Field>{current.tubeCurrentMode === "FIXED_MA" ? <NumberField label="Fixed mA" value={current.fixedMa} positive onChange={(value) => setDraft({ ...current, fixedMa: nullableNumber(value, true) })} /> : null}{current.tubeCurrentMode === "REFERENCE_MAS" ? <NumberField label="Reference mAs" value={current.referenceMas} positive onChange={(value) => setDraft({ ...current, referenceMas: nullableNumber(value, true) })} /> : null}{vendor.includes("ge") && current.tubeCurrentMode === "AUTOMATIC" ? <><Field label="Exposure control"><Input aria-label="Exposure control" value={textValue(current.exposureControl)} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })} placeholder="SmartmA" /></Field><NumberField label="Noise Index" value={current.noiseIndex} onChange={(value) => setDraft({ ...current, noiseIndex: nullableNumber(value) })} /><NumberField label="Minimum mA" value={current.minMa} onChange={(value) => setDraft({ ...current, minMa: nullableNumber(value) })} /><NumberField label="Maximum mA" value={current.maxMa} onChange={(value) => setDraft({ ...current, maxMa: nullableNumber(value) })} /></> : null}{vendor.includes("philips") ? <Field label="Exposure control"><select aria-label="Exposure control" className={"input-premium " + (inputClass())} value={current.exposureControl ?? ""} onChange={(event) => setDraft({ ...current, exposureControl: editableText(event.target.value) })}><option value="">Not specified</option><option>DoseRight / AEC</option><option>Reference mAs</option></select></Field> : null}</TechniqueFieldGroup>
+    <TechniqueFieldGroup title="Reconstruction"><Field label="Reconstruction method"><select aria-label="Reconstruction method" className={"input-premium " + (inputClass())} value={current.reconstructionMethod ?? ""} onChange={(event) => setDraft({ ...current, reconstructionMethod: editableText(event.target.value), reconstructionStrength: null, reconstructionImageDefinition: null })}><option value="">Not specified</option>{(vendor.includes("ge") ? ["FBP", "ASiR-V", "TrueFidelity", "Other"] : vendor.includes("philips") ? ["FBP", "iDose⁴", "Precise Image", "Other"] : ["FBP", "Other"]).map((value) => <option key={value}>{value}</option>)}</select></Field>{current.reconstructionMethod === "ASiR-V" ? <NumberField label="ASiR-V strength (%)" value={current.reconstructionStrength ? Number(current.reconstructionStrength) : null} onChange={(value) => setDraft({ ...current, reconstructionStrength: value || null })} /> : null}{current.reconstructionMethod === "TrueFidelity" ? <Field label="TrueFidelity strength"><select aria-label="TrueFidelity strength" className={"input-premium " + (inputClass())} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></Field> : null}{current.reconstructionMethod === "iDose⁴" ? <Field label="iDose⁴ level"><Input aria-label="iDose⁴ level" value={textValue(current.reconstructionStrength)} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })} /></Field> : null}{current.reconstructionMethod === "Precise Image" ? <><Field label="Precise Image definition"><select aria-label="Precise Image definition" className={"input-premium " + (inputClass())} value={current.reconstructionImageDefinition ?? ""} onChange={(event) => setDraft({ ...current, reconstructionImageDefinition: editableText(event.target.value) })}><option value="">Not specified</option><option>Soft Tissue</option><option>Bone</option><option>Lung</option></select></Field><Field label="Precise Image strength"><select aria-label="Precise Image strength" className={"input-premium " + (inputClass())} value={current.reconstructionStrength ?? ""} onChange={(event) => setDraft({ ...current, reconstructionStrength: editableText(event.target.value) })}><option value="">Not specified</option>{["Smoother", "Smooth", "Standard", "Sharp", "Sharper"].map((value) => <option key={value}>{value}</option>)}</select></Field></> : null}</TechniqueFieldGroup>
     <TechniqueFieldGroup title="Image geometry"><NumberField label="Slice thickness (mm)" value={current.sliceThicknessMm} onChange={(value) => setDraft({ ...current, sliceThicknessMm: nullableNumber(value) })} /><NumberField label="Reconstruction interval (mm)" value={current.reconstructionIntervalMm} onChange={(value) => setDraft({ ...current, reconstructionIntervalMm: nullableNumber(value) })} /><Field label="Kernel"><Input aria-label="Kernel" value={textValue(current.kernel)} onChange={(event) => setDraft({ ...current, kernel: editableText(event.target.value) })} /></Field></TechniqueFieldGroup>
     {editable ? <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button><Button type="button" size="sm" onClick={onSave} disabled={!current.scannerId}>Save technique</Button>{onRemove ? <Button type="button" variant="destructive" size="sm" onClick={onRemove}>Remove</Button> : null}</div> : null}
   </div>;
@@ -1334,7 +1334,7 @@ function CtProtocolRows({ detail, presets, draft, editingRowId, editable, setDra
         </div>
       </div>
       <Dialog open={pendingRemove !== null} onClose={() => setPendingRemove(null)}>
-        <DialogContent maxWidth="460px">
+        <DialogContent className="doctor-protocols-page" maxWidth="460px">
           <DialogHeader><DialogTitle>Remove {pendingRemove?.customPhaseName ?? pendingRemove?.ctPhasePresetName ?? "phase"} phase?</DialogTitle><DialogDescription>This removes the phase from the current draft.</DialogDescription></DialogHeader>
           <DialogFooter><Button variant="secondary" onClick={() => setPendingRemove(null)}>Cancel</Button><Button variant="destructive" onClick={() => { if (pendingRemove) onRemove(pendingRemove.id); setPendingRemove(null); }}>Remove phase</Button></DialogFooter>
         </DialogContent>
@@ -1352,7 +1352,7 @@ function CtProtocolRowForm({ draft, presets, setDraft, onSave, onCancel }: { dra
       {legacyPreset && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Legacy preset: {selectedPreset?.name ?? "Unknown preset"} · {formatCtPhaseTiming({ ...draft, presetContrastStatus: selectedPreset?.contrastStatus, presetTimingType: selectedPreset?.timingType, presetDelaySeconds: selectedPreset?.delaySeconds, presetBolusTrackingSite: selectedPreset?.bolusTrackingSite, presetTriggerHu: selectedPreset?.triggerHu, presetInstructions: selectedPreset?.instructions })}</p>}
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Phase name"><Input aria-label="Phase name" value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: editableText(event.target.value) })} /></Field>
-        <Field label="Timing"><select aria-label="Timing" className={inputClass()} value={draft.timingType ?? ""} onChange={(event) => setDraft({ ...draft, timingType: (event.target.value || null) as ProtocolLibraryCtPhaseRowPayload["timingType"] })}>{legacyPreset && <option value="">Keep legacy preset timing</option>}<option value="NON_CONTRAST">Non-contrast</option><option value="FIXED_DELAY_INJECTION_START">Fixed delay after start</option><option value="FIXED_DELAY_INJECTION_END">Fixed delay after completion</option><option value="BOLUS_TRACKING">Bolus tracking</option><option value="MANUAL">Manual</option></select></Field>
+        <Field label="Timing"><select aria-label="Timing" className={"input-premium " + (inputClass())} value={draft.timingType ?? ""} onChange={(event) => setDraft({ ...draft, timingType: (event.target.value || null) as ProtocolLibraryCtPhaseRowPayload["timingType"] })}>{legacyPreset && <option value="">Keep legacy preset timing</option>}<option value="NON_CONTRAST">Non-contrast</option><option value="FIXED_DELAY_INJECTION_START">Fixed delay after start</option><option value="FIXED_DELAY_INJECTION_END">Fixed delay after completion</option><option value="BOLUS_TRACKING">Bolus tracking</option><option value="MANUAL">Manual</option></select></Field>
       </div>
       {draft.timingType === "BOLUS_TRACKING" ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Trigger</p><div className="mt-2 grid gap-3 md:grid-cols-3"><Field label="Tracking site"><Input aria-label="Tracking site" value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field><NumberField label="Trigger threshold (HU)" value={draft.triggerHu} onChange={(value) => setDraft({ ...draft, triggerHu: nullableNumber(value) })} /><NumberField label="Post-trigger delay (sec)" value={draft.postTriggerDelaySeconds} onChange={(value) => setDraft({ ...draft, postTriggerDelaySeconds: nullableNumber(value) })} /></div></div> : null}
       {(draft.timingType === "FIXED_DELAY_INJECTION_START" || draft.timingType === "FIXED_DELAY_INJECTION_END") ? <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}><p className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--text-muted)" }}>Timing</p><div className="mt-2 max-w-xs"><NumberField label={draft.timingType === "FIXED_DELAY_INJECTION_START" ? "Delay after start of IV contrast" : "Delay after completion of IV contrast"} value={draft.delaySeconds} onChange={(value) => setDraft({ ...draft, delaySeconds: nullableNumber(value) })} /></div></div> : null}
@@ -1406,14 +1406,14 @@ function MriProtocolRowForm({ draft, scanners, presets, setDraft, onSave, onCanc
   const selectedPreset = presets.find((preset) => preset.id === draft.mriSequencePresetId) ?? null;
   const selectedAlias = selectedPreset?.scannerAliases?.find((alias) => alias.scannerId === draft.scannerId) ?? null;
   return (
-    <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Scanner"><select aria-label="Scanner" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null, mriSequencePresetId: null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
-      <Field label="MRI sequence preset"><select aria-label="MRI sequence preset" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.mriSequencePresetId ?? ""} onChange={(event) => setDraft({ ...draft, mriSequencePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{filteredPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} - {mriSequencePresetLabel(preset)}</option>)}</select></Field>
-      <Field label="Plane override"><input aria-label="Plane override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.planeOverride)} onChange={(event) => setDraft({ ...draft, planeOverride: editableText(event.target.value) })} /></Field>
-      <Field label="Coverage override"><input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
-      <Field label="b-values override"><input aria-label="b-values override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bValuesOverride)} onChange={(event) => setDraft({ ...draft, bValuesOverride: editableText(event.target.value) })} /></Field>
-      <Field label="Timing override"><input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field>
-      <Field label="Notes override"><input aria-label="Notes override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notesOverride)} onChange={(event) => setDraft({ ...draft, notesOverride: editableText(event.target.value) })} /></Field>
+    <tr><td colSpan={9} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-4">
+      <Field label="Scanner"><select aria-label="Scanner" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.scannerId ?? ""} onChange={(event) => setDraft({ ...draft, scannerId: event.target.value ? Number(event.target.value) : null, mriSequencePresetId: null })}><option value="">Generic / not scanner-specific</option>{scanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
+      <Field label="MRI sequence preset"><select aria-label="MRI sequence preset" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.mriSequencePresetId ?? ""} onChange={(event) => setDraft({ ...draft, mriSequencePresetId: event.target.value ? Number(event.target.value) : null })}><option value="">No preset</option>{filteredPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} - {mriSequencePresetLabel(preset)}</option>)}</select></Field>
+      <Field label="Plane override"><Input aria-label="Plane override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.planeOverride)} onChange={(event) => setDraft({ ...draft, planeOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Coverage override"><Input aria-label="Coverage override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.coverageOverride)} onChange={(event) => setDraft({ ...draft, coverageOverride: editableText(event.target.value) })} /></Field>
+      <Field label="b-values override"><Input aria-label="b-values override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bValuesOverride)} onChange={(event) => setDraft({ ...draft, bValuesOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Timing override"><Input aria-label="Timing override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.timingOverride)} onChange={(event) => setDraft({ ...draft, timingOverride: editableText(event.target.value) })} /></Field>
+      <Field label="Notes override"><Input aria-label="Notes override" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notesOverride)} onChange={(event) => setDraft({ ...draft, notesOverride: editableText(event.target.value) })} /></Field>
       <label className="flex items-end gap-2 text-sm font-medium"><input type="checkbox" checked={draft.isRequired} onChange={(event) => setDraft({ ...draft, isRequired: event.target.checked })} /> Required</label>
       <FormActions saving={false} saveLabel="Save sequence" canSave={Boolean(draft.mriSequencePresetId || draft.planeOverride?.trim() || draft.coverageOverride?.trim())} onSave={onSave} onCancel={onCancel} />
       {selectedPreset && <p className="text-xs md:col-span-4" style={{ color: "var(--text-muted)" }}>Preset reference: {mriSequencePresetLabel(selectedPreset)} · {selectedPreset.defaultCoverage ?? "No default coverage"} · {selectedPreset.defaultBValues ?? "No b-values"}</p>}
@@ -1425,21 +1425,21 @@ function MriProtocolRowForm({ draft, scanners, presets, setDraft, onSave, onCanc
 function RowBuilderActions({ first, last, editing, onEdit, onRemove, onMoveUp, onMoveDown }: { first: boolean; last: boolean; editing: boolean; onEdit: () => void; onRemove: () => void; onMoveUp: () => void; onMoveDown: () => void }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <button type="button" disabled={first} onClick={onMoveUp} className="rounded-lg border px-2 py-1 text-xs font-semibold disabled:opacity-40" style={{ borderColor: "var(--border)" }}>Up</button>
-      <button type="button" disabled={last} onClick={onMoveDown} className="rounded-lg border px-2 py-1 text-xs font-semibold disabled:opacity-40" style={{ borderColor: "var(--border)" }}>Down</button>
-      <button type="button" onClick={onEdit} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{editing ? "Editing" : "Edit"}</button>
-      <button type="button" onClick={onRemove} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Remove</button>
+      <Button variant="secondary" size="sm" type="button" disabled={first} onClick={onMoveUp} className="rounded-lg border px-2 py-1 text-xs font-semibold disabled:opacity-40" style={{ borderColor: "var(--border)" }}>Up</Button>
+      <Button variant="secondary" size="sm" type="button" disabled={last} onClick={onMoveDown} className="rounded-lg border px-2 py-1 text-xs font-semibold disabled:opacity-40" style={{ borderColor: "var(--border)" }}>Down</Button>
+      <Button variant="secondary" size="sm" type="button" onClick={onEdit} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{editing ? "Editing" : "Edit"}</Button>
+      <Button variant="secondary" size="sm" type="button" onClick={onRemove} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>Remove</Button>
     </div>
   );
 }
 
 function RegionForm({ draft, setDraft, saving, onSave, onCancel }: { draft: ProtocolAnatomyRegionPayload; setDraft: (draft: ProtocolAnatomyRegionPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
   return (
-    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Body system"><input aria-label="Body system" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bodySystem)} onChange={(event) => setDraft({ ...draft, bodySystem: editableText(event.target.value) })} /></Field>
-      <Field label="Modality scope"><select aria-label="Modality scope" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modalityScope} onChange={(event) => setDraft({ ...draft, modalityScope: event.target.value as ProtocolAnatomyRegionPayload["modalityScope"] })}><option value="CT">CT</option><option value="MRI">MRI</option><option value="BOTH">BOTH</option></select></Field>
-      <Field label="Default coverage note"><input aria-label="Default coverage note" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverageNote)} onChange={(event) => setDraft({ ...draft, defaultCoverageNote: editableText(event.target.value) })} /></Field>
+    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-4">
+      <Field label="Name"><Input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Body system"><Input aria-label="Body system" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bodySystem)} onChange={(event) => setDraft({ ...draft, bodySystem: editableText(event.target.value) })} /></Field>
+      <Field label="Modality scope"><select aria-label="Modality scope" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.modalityScope} onChange={(event) => setDraft({ ...draft, modalityScope: event.target.value as ProtocolAnatomyRegionPayload["modalityScope"] })}><option value="CT">CT</option><option value="MRI">MRI</option><option value="BOTH">BOTH</option></select></Field>
+      <Field label="Default coverage note"><Input aria-label="Default coverage note" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverageNote)} onChange={(event) => setDraft({ ...draft, defaultCoverageNote: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save region" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -1447,16 +1447,16 @@ function RegionForm({ draft, setDraft, saving, onSave, onCancel }: { draft: Prot
 
 function CtPhaseForm({ draft, setDraft, saving, onSave, onCancel }: { draft: CtPhasePresetPayload; setDraft: (draft: CtPhasePresetPayload | null) => void; saving: boolean; onSave: () => void; onCancel: () => void }) {
   return (
-    <tr><td colSpan={7} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Name"><input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Contrast status"><select aria-label="Contrast status" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastStatus} onChange={(event) => setDraft({ ...draft, contrastStatus: event.target.value as CtPhasePresetPayload["contrastStatus"] })}><option value="NON_CONTRAST">NON_CONTRAST</option><option value="POST_CONTRAST">POST_CONTRAST</option><option value="DELAYED">DELAYED</option><option value="OTHER">OTHER</option></select></Field>
-      <Field label="Timing type"><select aria-label="Timing type" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.timingType} onChange={(event) => setDraft({ ...draft, timingType: event.target.value as CtPhasePresetPayload["timingType"] })}><option value="NONE">NONE</option><option value="FIXED_DELAY">FIXED_DELAY</option><option value="BOLUS_TRACKING">BOLUS_TRACKING</option><option value="MANUAL">MANUAL</option></select></Field>
+    <tr><td colSpan={7} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-4">
+      <Field label="Name"><Input aria-label="Name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Contrast status"><select aria-label="Contrast status" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastStatus} onChange={(event) => setDraft({ ...draft, contrastStatus: event.target.value as CtPhasePresetPayload["contrastStatus"] })}><option value="NON_CONTRAST">NON_CONTRAST</option><option value="POST_CONTRAST">POST_CONTRAST</option><option value="DELAYED">DELAYED</option><option value="OTHER">OTHER</option></select></Field>
+      <Field label="Timing type"><select aria-label="Timing type" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.timingType} onChange={(event) => setDraft({ ...draft, timingType: event.target.value as CtPhasePresetPayload["timingType"] })}><option value="NONE">NONE</option><option value="FIXED_DELAY">FIXED_DELAY</option><option value="BOLUS_TRACKING">BOLUS_TRACKING</option><option value="MANUAL">MANUAL</option></select></Field>
       <NumberField label="Delay seconds" value={draft.delaySeconds} onChange={(value) => setDraft({ ...draft, delaySeconds: nullableNumber(value) })} />
-      <Field label="Bolus tracking site"><input aria-label="Bolus tracking site" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field>
+      <Field label="Bolus tracking site"><Input aria-label="Bolus tracking site" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.bolusTrackingSite)} onChange={(event) => setDraft({ ...draft, bolusTrackingSite: editableText(event.target.value) })} /></Field>
       <NumberField label="Trigger HU" value={draft.triggerHu} onChange={(value) => setDraft({ ...draft, triggerHu: nullableNumber(value) })} />
-      <Field label="Default coverage"><input aria-label="Default coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
-      <Field label="Reconstruction notes"><input aria-label="Reconstruction notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionNotes)} onChange={(event) => setDraft({ ...draft, reconstructionNotes: editableText(event.target.value) })} /></Field>
-      <Field label="Instructions"><input aria-label="Instructions" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructions)} onChange={(event) => setDraft({ ...draft, instructions: editableText(event.target.value) })} /></Field>
+      <Field label="Default coverage"><Input aria-label="Default coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
+      <Field label="Reconstruction notes"><Input aria-label="Reconstruction notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.reconstructionNotes)} onChange={(event) => setDraft({ ...draft, reconstructionNotes: editableText(event.target.value) })} /></Field>
+      <Field label="Instructions"><Input aria-label="Instructions" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.instructions)} onChange={(event) => setDraft({ ...draft, instructions: editableText(event.target.value) })} /></Field>
       <FormActions saving={saving} saveLabel="Save CT phase" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} />
     </div></td></tr>
   );
@@ -1480,23 +1480,23 @@ function MriSequenceForm({ draft, scanners, setDraft, saving, onSave, onCancel }
     });
   };
   return (
-    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-4">
-      <Field label="Sequence name"><input aria-label="Sequence name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-      <Field label="Plane"><select aria-label="Plane" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.defaultPlane ?? ""} onChange={(event) => setDraft({ ...draft, defaultPlane: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_PLANES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-      <Field label="Weighting / family"><select aria-label="Weighting / family" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.weighting ?? ""} onChange={(event) => setDraft({ ...draft, weighting: editableText(event.target.value), genericFamily: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_FAMILIES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-      <Field label="Fat suppression"><select aria-label="Fat suppression" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.fatSuppression ?? ""} onChange={(event) => setDraft({ ...draft, fatSuppression: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_FAT_SUPPRESSION.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-      <Field label="Acquisition type"><select aria-label="Acquisition type" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.acquisitionType ?? ""} onChange={(event) => setDraft({ ...draft, acquisitionType: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_ACQUISITION_TYPES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-      <Field label="Contrast relation"><select aria-label="Contrast relation" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastRelation ?? ""} onChange={(event) => setDraft({ ...draft, contrastRelation: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_CONTRAST_RELATIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
-      <Field label="Notes"><input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
+    <tr><td colSpan={6} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-4">
+      <Field label="Sequence name"><Input aria-label="Sequence name" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <Field label="Plane"><select aria-label="Plane" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.defaultPlane ?? ""} onChange={(event) => setDraft({ ...draft, defaultPlane: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_PLANES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Weighting / family"><select aria-label="Weighting / family" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.weighting ?? ""} onChange={(event) => setDraft({ ...draft, weighting: editableText(event.target.value), genericFamily: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_SEQUENCE_FAMILIES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Fat suppression"><select aria-label="Fat suppression" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.fatSuppression ?? ""} onChange={(event) => setDraft({ ...draft, fatSuppression: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_FAT_SUPPRESSION.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Acquisition type"><select aria-label="Acquisition type" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.acquisitionType ?? ""} onChange={(event) => setDraft({ ...draft, acquisitionType: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_ACQUISITION_TYPES.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Contrast relation"><select aria-label="Contrast relation" className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={draft.contrastRelation ?? ""} onChange={(event) => setDraft({ ...draft, contrastRelation: editableText(event.target.value) })}><option value="">Not specified</option>{MRI_CONTRAST_RELATIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></Field>
+      <Field label="Notes"><Input aria-label="Notes" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.notes)} onChange={(event) => setDraft({ ...draft, notes: editableText(event.target.value) })} /></Field>
       <div className="flex items-end gap-2">
-        <button type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAdvanced(!showAdvanced)}>Advanced details</button>
-        <button type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAliases(!showAliases)}>Scanner-specific names</button>
+        <Button variant="secondary" size="sm" type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAdvanced(!showAdvanced)}>Advanced details</Button>
+        <Button variant="secondary" size="sm" type="button" className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setShowAliases(!showAliases)}>Scanner-specific names</Button>
       </div>
       {showAdvanced && (
         <div className="grid gap-3 rounded-lg border p-3 md:col-span-4 md:grid-cols-4" style={{ borderColor: "var(--border)" }}>
-          <Field label="Coverage"><input aria-label="Coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
-          <Field label="b-values"><input aria-label="b-values" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultBValues)} onChange={(event) => setDraft({ ...draft, defaultBValues: editableText(event.target.value) })} /></Field>
-          <Field label="Dynamic timing"><input aria-label="Dynamic timing" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultDynamicTiming)} onChange={(event) => setDraft({ ...draft, defaultDynamicTiming: editableText(event.target.value) })} /></Field>
+          <Field label="Coverage"><Input aria-label="Coverage" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultCoverage)} onChange={(event) => setDraft({ ...draft, defaultCoverage: editableText(event.target.value) })} /></Field>
+          <Field label="b-values"><Input aria-label="b-values" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultBValues)} onChange={(event) => setDraft({ ...draft, defaultBValues: editableText(event.target.value) })} /></Field>
+          <Field label="Dynamic timing"><Input aria-label="Dynamic timing" className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(draft.defaultDynamicTiming)} onChange={(event) => setDraft({ ...draft, defaultDynamicTiming: editableText(event.target.value) })} /></Field>
           <NumberField label="Estimated scan time minutes" value={draft.estimatedScanTimeMinutes} positive onChange={(value) => setDraft({ ...draft, estimatedScanTimeMinutes: nullableNumber(value, true) })} />
         </div>
       )}
@@ -1504,13 +1504,13 @@ function MriSequenceForm({ draft, scanners, setDraft, saving, onSave, onCancel }
         <div className="grid gap-3 rounded-lg border p-3 md:col-span-4" style={{ borderColor: "var(--border)" }}>
           {aliases.map((alias, index) => (
             <div key={index} className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-              <Field label="Scanner"><select aria-label={`Scanner alias scanner ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.scannerId} onChange={(event) => updateAlias(index, { scannerId: Number(event.target.value) })}>{mriScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
-              <Field label="Vendor sequence name"><input aria-label={`Vendor sequence name ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.vendorSequenceName} onChange={(event) => updateAlias(index, { vendorSequenceName: event.target.value })} /></Field>
-              <Field label="Alias notes"><input aria-label={`Alias notes ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(alias.notes)} onChange={(event) => updateAlias(index, { notes: editableText(event.target.value) })} /></Field>
-              <button type="button" className="mt-6 h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: aliases.filter((_, aliasIndex) => aliasIndex !== index) })}>Remove</button>
+              <Field label="Scanner"><select aria-label={`Scanner alias scanner ${index + 1}`} className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.scannerId} onChange={(event) => updateAlias(index, { scannerId: Number(event.target.value) })}>{mriScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select></Field>
+              <Field label="Vendor sequence name"><Input aria-label={`Vendor sequence name ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={alias.vendorSequenceName} onChange={(event) => updateAlias(index, { vendorSequenceName: event.target.value })} /></Field>
+              <Field label="Alias notes"><Input aria-label={`Alias notes ${index + 1}`} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={textValue(alias.notes)} onChange={(event) => updateAlias(index, { notes: editableText(event.target.value) })} /></Field>
+              <Button variant="secondary" size="sm" type="button" className="mt-6 h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: aliases.filter((_, aliasIndex) => aliasIndex !== index) })}>Remove</Button>
             </div>
           ))}
-          <button type="button" disabled={!mriScanners.length} className="h-10 w-fit rounded-lg border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: [...aliases, { scannerId: mriScanners[0].id, vendorSequenceName: "", notes: null }] })}>Add scanner name</button>
+          <Button variant="secondary" size="sm" type="button" disabled={!mriScanners.length} className="h-10 w-fit rounded-lg border px-3 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }} onClick={() => setDraft({ ...draft, scannerAliases: [...aliases, { scannerId: mriScanners[0].id, vendorSequenceName: "", notes: null }] })}>Add scanner name</Button>
         </div>
       )}
       <FormActions saving={saving} saveLabel="Save MRI sequence" canSave={Boolean(draft.name.trim()) && aliasesValid} onSave={onSave} onCancel={onCancel} />
@@ -1519,14 +1519,14 @@ function MriSequenceForm({ draft, scanners, setDraft, saving, onSave, onCancel }
 }
 
 function NumberField({ label, value, positive = false, onChange }: { label: string; value: number | null; positive?: boolean; onChange: (value: string) => void }) {
-  return <Field label={label}><input aria-label={label} type="number" min={positive ? 1 : 0} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={numberText(value)} onChange={(event) => onChange(event.target.value)} /></Field>;
+  return <Field label={label}><Input aria-label={label} type="number" min={positive ? 1 : 0} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} value={numberText(value)} onChange={(event) => onChange(event.target.value)} /></Field>;
 }
 
 function FormActions({ saving, saveLabel, canSave, onSave, onCancel }: { saving: boolean; saveLabel: string; canSave: boolean; onSave: () => void; onCancel: () => void }) {
   return (
     <div className="flex items-end gap-2">
-      <button type="button" disabled={!canSave || saving} onClick={onSave} className="h-10 rounded-lg bg-teal-600 px-3 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : saveLabel}</button>
-      <button type="button" onClick={onCancel} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+      <Button variant="primary" size="sm" type="button" disabled={!canSave || saving} onClick={onSave} className="h-10 rounded-lg px-3 text-sm font-semibold disabled:opacity-50">{saving ? "Saving..." : saveLabel}</Button>
+      <Button variant="secondary" size="sm" type="button" onClick={onCancel} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</Button>
     </div>
   );
 }
@@ -1553,7 +1553,7 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
         scrollable={false}
         aria-label="Protocoling workspace"
         data-testid="protocoling-appointment-workspace-shell"
-        className="!m-0 !h-[94vh] !max-h-[94vh] !w-[96vw] max-w-2xl min-w-0 !overflow-hidden !p-0"
+        className="doctor-protocols-page !m-0 !h-[94vh] !max-h-[94vh] !w-[96vw] max-w-2xl min-w-0 !overflow-hidden !p-0"
       >
         <header className="flex shrink-0 items-center justify-between border-b px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
           <h2 className="text-lg font-bold text-foreground">Protocoling workspace</h2>
@@ -1565,8 +1565,8 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
           <div className="space-y-4 p-6">
             <p className="text-sm text-red-700" role="alert">{error instanceof Error ? error.message : "Unable to load appointment protocol details."}</p>
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={onRetry} className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white">Retry</button>
-              <button type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</button>
+              <Button variant="primary" size="sm" type="button" onClick={onRetry} className="rounded-lg px-3 py-2 text-sm font-semibold">Retry</Button>
+              <Button variant="secondary" size="sm" type="button" onClick={onClose} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Close</Button>
             </div>
           </div>
         )}
@@ -1576,7 +1576,7 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
 }
 
 function MriProtocolCreateForm({ draft, anatomy, saving, setDraft, onManageAnatomy, onSave, onCancel }: { draft: ProtocolLibraryProtocolPayload; anatomy: ProtocolAnatomyRegion[]; saving: boolean; setDraft: (draft: ProtocolLibraryProtocolPayload | null) => void; onManageAnatomy: () => void; onSave: () => void; onCancel: () => void }) {
-  return <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid gap-3 md:grid-cols-3"><Field label="Protocol name"><input aria-label="Protocol name" className={inputClass()} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Anatomy region"><select aria-label="Anatomy region" className={inputClass()} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">No region</option>{anatomy.filter((region) => region.isActive && (region.modalityScope === "MRI" || region.modalityScope === "BOTH")).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></Field><Field label="Category"><select aria-label="Category" className={inputClass()} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: editableText(event.target.value) })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Indication"><input aria-label="Indication" className={inputClass()} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field><Field label="IV contrast policy"><select aria-label="IV contrast policy" className={inputClass()} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: editableText(event.target.value) })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Oral contrast policy"><input aria-label="Oral contrast policy" className={inputClass()} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field><Field label="Bowel preparation"><input aria-label="Bowel preparation" className={inputClass()} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field><Field label="Preparation notes"><textarea aria-label="Preparation notes" className={`${inputClass()} min-h-20`} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field><Field label="Initial change summary"><input aria-label="Initial change summary" className={inputClass()} value={textValue(draft.changeSummary)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field><Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} value={textValue(draft.protocolNotes)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field><div className="md:col-span-3"><button type="button" className="text-xs underline" onClick={onManageAnatomy}>Manage anatomy regions</button></div><FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} /></div></td></tr>;
+  return <tr><td colSpan={5} className="border-b p-3" style={{ borderColor: "var(--border)" }}><div className="grid w-[calc(100vw-58px)] max-w-full gap-3 md:w-auto md:grid-cols-3"><Field label="Protocol name"><Input aria-label="Protocol name" className={inputClass()} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Anatomy region"><select aria-label="Anatomy region" className={"input-premium " + (inputClass())} value={draft.anatomyRegionId ?? ""} onChange={(event) => setDraft({ ...draft, anatomyRegionId: event.target.value ? Number(event.target.value) : null })}><option value="">No region</option>{anatomy.filter((region) => region.isActive && (region.modalityScope === "MRI" || region.modalityScope === "BOTH")).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></Field><Field label="Category"><select aria-label="Category" className={"input-premium " + (inputClass())} value={draft.category ?? ""} onChange={(event) => setDraft({ ...draft, category: editableText(event.target.value) })}><option value="">Not specified</option>{PROTOCOL_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Indication"><Input aria-label="Indication" className={inputClass()} value={textValue(draft.indication)} onChange={(event) => setDraft({ ...draft, indication: editableText(event.target.value) })} /></Field><Field label="IV contrast policy"><select aria-label="IV contrast policy" className={"input-premium " + (inputClass())} value={draft.contrastPolicy ?? ""} onChange={(event) => setDraft({ ...draft, contrastPolicy: editableText(event.target.value) })}><option value="">Not specified</option>{IV_CONTRAST_POLICIES.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Oral contrast policy"><Input aria-label="Oral contrast policy" className={inputClass()} value={textValue(draft.oralContrastPolicy)} onChange={(event) => setDraft({ ...draft, oralContrastPolicy: editableText(event.target.value) })} /></Field><Field label="Bowel preparation"><Input aria-label="Bowel preparation" className={inputClass()} value={textValue(draft.bowelPreparation)} onChange={(event) => setDraft({ ...draft, bowelPreparation: editableText(event.target.value) })} /></Field><Field label="Preparation notes"><textarea aria-label="Preparation notes" className={`${inputClass()} min-h-20`} value={textValue(draft.preparationNotes)} onChange={(event) => setDraft({ ...draft, preparationNotes: editableText(event.target.value) })} /></Field><Field label="Initial change summary"><Input aria-label="Initial change summary" className={inputClass()} value={textValue(draft.changeSummary)} onChange={(event) => setDraft({ ...draft, changeSummary: editableText(event.target.value) })} /></Field><Field label="Protocol notes"><textarea aria-label="Protocol notes" className={`${inputClass()} min-h-24`} value={textValue(draft.protocolNotes)} onChange={(event) => setDraft({ ...draft, protocolNotes: editableText(event.target.value) })} /></Field><div className="md:col-span-3"><button type="button" className="text-xs underline" onClick={onManageAnatomy}>Manage anatomy regions</button></div><FormActions saving={saving} saveLabel="Create" canSave={Boolean(draft.name.trim())} onSave={onSave} onCancel={onCancel} /></div></td></tr>;
 }
 
 type ProtocolingNavigationProps = {
@@ -1839,7 +1839,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             aria-label={`All (${appointments.length})`}
             className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
               !modality && !appointmentStatus
-                ? "bg-teal-700 text-white"
+                ? "bg-accent text-accent-foreground"
                 : "border bg-background hover:bg-muted text-foreground"
             }`}
             style={{ borderColor: "var(--border)" }}
@@ -1852,7 +1852,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             aria-label={`CT (${appointments.filter((a) => a.modalityCode === "CT").length})`}
             className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
               modality === "CT"
-                ? "bg-teal-700 text-white"
+                ? "bg-accent text-accent-foreground"
                 : "border bg-background hover:bg-muted text-foreground"
             }`}
             style={{ borderColor: "var(--border)" }}
@@ -1865,7 +1865,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             aria-label={`MRI (${appointments.filter((a) => a.modalityCode === "MRI").length})`}
             className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
               modality === "MRI"
-                ? "bg-teal-700 text-white"
+                ? "bg-accent text-accent-foreground"
                 : "border bg-background hover:bg-muted text-foreground"
             }`}
             style={{ borderColor: "var(--border)" }}
@@ -1885,7 +1885,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             Waiting in Clinic <span className="ms-1 rounded-full bg-amber-200 text-amber-900 px-1.5 py-0.2 text-[10px]">{appointments.filter((a) => a.appointmentStatus === "waiting").length}</span>
           </button>
           <div className="ms-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <button
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={() => void queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] })}
               disabled={appointmentsQuery.isFetching}
@@ -1895,21 +1895,21 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
             >
               <span className={appointmentsQuery.isFetching ? "animate-spin" : ""}>↻</span>
               {appointmentsQuery.isFetching ? "Refreshing..." : "Refresh"}
-            </button>
+            </Button>
           </div>
         </div>
         <div className="flex items-end gap-2 md:col-span-3">
-          <button type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(todayIso()); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Today</button>
-          <button type="button" onClick={() => { const tomorrow = addDays(todayIso(), 1); setDateFrom(tomorrow); setDateTo(tomorrow); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Tomorrow</button>
-          <button type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(addDays(todayIso(), 7)); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Next 7 days</button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(todayIso()); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Today</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => { const tomorrow = addDays(todayIso(), 1); setDateFrom(tomorrow); setDateTo(tomorrow); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Tomorrow</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => { setDateFrom(todayIso()); setDateTo(addDays(todayIso(), 7)); }} className="h-10 rounded-lg border px-3 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Next 7 days</Button>
         </div>
         <DateInput label="From" value={dateFrom} onChange={setDateFrom} />
         <DateInput label="To" value={dateTo} onChange={setDateTo} />
-        <label className="text-sm font-medium">Modality<select value={modality} onChange={(event) => setModality(event.target.value as "" | "CT" | "MRI")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All</option><option value="CT">CT</option><option value="MRI">MRI</option></select></label>
-        <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
-        <label className="text-sm font-medium">Appointment status<select value={appointmentStatus} onChange={(event) => setAppointmentStatus(event.target.value as "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show")} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All statuses</option><option value="scheduled">Scheduled</option><option value="arrived">Arrived</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="no-show">No-show</option></select></label>
+        <label className="text-sm font-medium">Modality<select value={modality} onChange={(event) => setModality(event.target.value as "" | "CT" | "MRI")} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All</option><option value="CT">CT</option><option value="MRI">MRI</option></select></label>
+        <label className="text-sm font-medium">Protocol status<select value={protocolStatus} onChange={(event) => setProtocolStatus(event.target.value as "NOT_PROTOCOLLED" | "ASSIGNED" | "ALL")} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="NOT_PROTOCOLLED">Not protocolled</option><option value="ASSIGNED">Protocol assigned</option><option value="ALL">All</option></select></label>
+        <label className="text-sm font-medium">Appointment status<select value={appointmentStatus} onChange={(event) => setAppointmentStatus(event.target.value as "" | "scheduled" | "arrived" | "waiting" | "completed" | "no-show")} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">All statuses</option><option value="scheduled">Scheduled</option><option value="arrived">Arrived</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="no-show">No-show</option></select></label>
         <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={waitingFirst} onCheckedChange={(value) => setWaitingFirst(Boolean(value))} disabled={appointmentStatus !== ""} />Waiting patients first</label>
-        <label className="text-sm font-medium md:col-span-2">Search<input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearchValue(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Name, MRN, Primary ID, accession, phone, exam…" /></label>
+        <label className="text-sm font-medium md:col-span-2">Search<Input aria-label="Search protocoling appointments" value={search} onChange={(event) => setSearchValue(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} placeholder="Name, MRN, Primary ID, accession, phone, exam…" /></label>
       </section> : null}
 
       {!canAssign ? null : appointmentsQuery.isLoading ? (
@@ -1928,11 +1928,11 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
         <SettingsTable
           emptyText="No appointments need protocol assignment."
           headers={[
-            <button key="h-datetime" type="button" onClick={() => toggleSort("dateTime")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Date/time{sortField === "dateTime" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
-            <button key="h-patient" type="button" onClick={() => toggleSort("patient")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Patient{sortField === "patient" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-datetime" type="button" onClick={() => toggleSort("dateTime")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-normal hover:text-foreground">Date/time{sortField === "dateTime" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-patient" type="button" onClick={() => toggleSort("patient")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-normal hover:text-foreground">Patient{sortField === "patient" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
             "Age/sex",
-            <button key="h-modality" type="button" onClick={() => toggleSort("modality")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Modality{sortField === "modality" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
-            <button key="h-exam" type="button" onClick={() => toggleSort("exam")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.12em] hover:text-foreground">Exam type{sortField === "exam" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-modality" type="button" onClick={() => toggleSort("modality")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-normal hover:text-foreground">Modality{sortField === "modality" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
+            <button key="h-exam" type="button" onClick={() => toggleSort("exam")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-normal hover:text-foreground">Exam type{sortField === "exam" ? (sortAsc ? " ▲" : " ▼") : ""}</button>,
             "Category",
             "Notes",
             "Appointment status",
@@ -1942,7 +1942,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
           ]}
         >
           {displayedAppointments.map((appointment) => (
-            <tr key={appointment.appointmentId} onClick={() => openAssignmentModal(appointment.appointmentId)} className="cursor-pointer hover:bg-slate-50">
+            <tr key={appointment.appointmentId} onClick={() => openAssignmentModal(appointment.appointmentId)} className="cursor-pointer hover:bg-muted">
               <Cell>{appointment.appointmentDate} {appointment.appointmentTime ?? ""}</Cell>
               <Cell>{protocolingPatientName(appointment)}</Cell>
               <Cell>{appointment.ageYears ?? "-"} / {appointment.sex ?? "-"}</Cell>
@@ -1970,7 +1970,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
                   return attribution ? <div className="mt-0.5 text-[11px] text-muted-foreground">{attribution}</div> : null;
                 })()}
               </> : "-"}</Cell>
-              <Cell>{appointment.acquisitionSummary?.equipmentName ? <p data-testid="protocoling-performed-acquisition" className="mb-1 max-w-[13rem] truncate text-[11px] text-muted-foreground" title={appointment.acquisitionSummary.equipmentName}>{`Performed on: ${appointment.acquisitionSummary.equipmentName}${appointment.acquisitionSummary.durationSeconds != null ? ` · ${Math.floor(appointment.acquisitionSummary.durationSeconds / 60)} min` : ""}`}</p> : null}<button type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</button></Cell>
+              <Cell>{appointment.acquisitionSummary?.equipmentName ? <p data-testid="protocoling-performed-acquisition" className="mb-1 max-w-[13rem] truncate text-[11px] text-muted-foreground" title={appointment.acquisitionSummary.equipmentName}>{`Performed on: ${appointment.acquisitionSummary.equipmentName}${appointment.acquisitionSummary.durationSeconds != null ? ` · ${Math.floor(appointment.acquisitionSummary.durationSeconds / 60)} min` : ""}`}</p> : null}<Button variant="secondary" size="sm" type="button" onClick={(event) => { event.stopPropagation(); openAssignmentModal(appointment.appointmentId); }} className="rounded-lg border px-2 py-1 text-xs font-semibold" style={{ borderColor: "var(--border)" }}>{appointment.assignment ? "Change" : "Assign"}</Button></Cell>
             </tr>
           ))}
         </SettingsTable>
@@ -2019,7 +2019,7 @@ function ProtocolingWorklist({ canAssign, embeddedAppointmentId, onEmbeddedClose
         />
       )}
       <Dialog open={confirmClearOpen} onClose={() => { if (!clearAssignmentMutation.isPending) setConfirmClearOpen(false); }}>
-        <DialogContent maxWidth="460px">
+        <DialogContent className="doctor-protocols-page" maxWidth="460px">
           <DialogHeader>
             <DialogTitle>Clear protocol assignment?</DialogTitle>
             <DialogDescription>The current protocol assignment for this appointment will be removed.</DialogDescription>
@@ -2442,18 +2442,18 @@ function ProtocolAssignmentModal({
                   <p className="text-xs font-semibold">Report required</p>
                   <div className="mt-2 space-y-1 text-xs"><label className="flex items-center gap-2"><input type="radio" name={`requires-report-${appointment.appointmentId}`} checked={reportDraft} onChange={() => setReportDraft(true)} />Yes</label><label className="flex items-center gap-2"><input type="radio" name={`requires-report-${appointment.appointmentId}`} checked={!reportDraft} onChange={() => setReportDraft(false)} />No</label></div>
                   {reportUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{reportUpdateMutation.error instanceof Error ? reportUpdateMutation.error.message : "Unable to update report requirement."}</p> : null}
-                  <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => { setReportDraft(displayedRequiresReport); setReportEditorOpen(false); }} disabled={reportUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => reportUpdateMutation.mutate()} disabled={reportUpdateMutation.isPending || reportDraft === displayedRequiresReport}>{reportUpdateMutation.isPending ? "Updating..." : "Update"}</button></div>
+                  <div className="mt-3 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => { setReportDraft(displayedRequiresReport); setReportEditorOpen(false); }} disabled={reportUpdateMutation.isPending}>Cancel</Button><Button variant="primary" size="sm" type="button" className="rounded-md px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={() => reportUpdateMutation.mutate()} disabled={reportUpdateMutation.isPending || reportDraft === displayedRequiresReport}>{reportUpdateMutation.isPending ? "Updating..." : "Update"}</Button></div>
                 </div> : null}
               </span>
               {examEditorOpen ? <div className="absolute start-0 top-full z-40 mt-2 max-w-xl rounded-lg border bg-background p-3 shadow-lg" style={{ borderColor: "var(--border)" }} role="dialog" aria-label="Edit examination type">
-                <label className="block text-xs font-semibold">Search examination types<input aria-label="Search examination types" value={examTypeSearch} onChange={(event) => setExamTypeSearch(event.target.value)} className={`${inputClass()} mt-1`} placeholder="Search active exam types" /></label>
-                <label className="mt-2 block text-xs font-semibold">Examination type<select aria-label="Examination type" value={examTypeDraftId} onChange={(event) => setExamTypeDraftId(event.target.value)} className={inputClass()} disabled={examTypesQuery.isLoading}>
+                <label className="block text-xs font-semibold">Search examination types<Input aria-label="Search examination types" value={examTypeSearch} onChange={(event) => setExamTypeSearch(event.target.value)} className={`${inputClass()} mt-1`} placeholder="Search active exam types" /></label>
+                <label className="mt-2 block text-xs font-semibold">Examination type<select aria-label="Examination type" value={examTypeDraftId} onChange={(event) => setExamTypeDraftId(event.target.value)} className={"input-premium " + (inputClass())} disabled={examTypesQuery.isLoading}>
                   <option value="">Select examination type</option>
                   {examTypeOptions.map((examType) => <option key={examType.id} value={examType.id}>{examType.nameEn || examType.name}{examType.code ? ` (${examType.code})` : ""}</option>)}
                 </select></label>
                 {examTypesQuery.isError ? <p className="mt-2 text-xs text-red-700" role="alert">Unable to load examination types.</p> : null}
                 {examTypeUpdateMutation.isError ? <p className="mt-2 text-xs text-red-700" role="alert">{examTypeUpdateMutation.error instanceof Error ? examTypeUpdateMutation.error.message : "Unable to update examination type."}</p> : null}
-                <div className="mt-3 flex justify-end gap-2"><button type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</button><button type="button" className="rounded-md bg-teal-700 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" onClick={() => activeAssignment ? setExamTypeProtocolDecisionOpen(true) : examTypeUpdateMutation.mutate(undefined)} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</button></div>
+                <div className="mt-3 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" className="rounded-md border px-2.5 py-1.5 text-xs font-semibold" onClick={() => setExamEditorOpen(false)} disabled={examTypeUpdateMutation.isPending}>Cancel</Button><Button variant="primary" size="sm" type="button" className="rounded-md px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50" onClick={() => activeAssignment ? setExamTypeProtocolDecisionOpen(true) : examTypeUpdateMutation.mutate(undefined)} disabled={!selectedExamType || String(selectedExamType.id) === String(displayedExamTypeId ?? "") || examTypeUpdateMutation.isPending}>{examTypeUpdateMutation.isPending ? "Updating..." : "Update exam"}</Button></div>
               </div> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 text-xs md:col-span-2 lg:col-span-1 lg:justify-end">
@@ -2463,7 +2463,7 @@ function ProtocolAssignmentModal({
                 <button type="button" onClick={() => requestNavigate(1)} disabled={saving || worklistPosition <= 0 || worklistPosition >= worklistTotal} className="inline-flex h-7 w-7 items-center justify-center rounded disabled:cursor-not-allowed disabled:opacity-40" aria-label="Next appointment" title="Next appointment"><ChevronRight size={15} aria-hidden="true" /></button>
               </div> : null}
               <button type="button" onClick={() => setHistoryOpen((current) => { const next = !current; if (next) { setSelectedHistoryModalities([]); setHistoryLimit(5); } return next; })} disabled={saving} className={`rounded border px-2 py-1.5 font-semibold transition-colors ${historyOpen ? "bg-accent/15 border-accent text-accent" : ""}`}>Patient history</button>
-              <button type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</button>
+              <Button variant="secondary" size="sm" type="button" onClick={() => setDetailsOpen(true)} disabled={saving} className="rounded border px-2 py-1.5 font-semibold" aria-label="Open appointment and patient details">Details</Button>
               <button type="button" onClick={requestClose} disabled={saving} className="rounded border p-1.5 font-semibold" aria-label="Close" title="Close"><X size={16} aria-hidden="true" /></button>
             </div>
           </div>
@@ -2596,7 +2596,7 @@ function ProtocolAssignmentModal({
                           </div>
                         </div>
                       ) : null}
-                      <label className="block text-xs font-semibold">Saved protocol<input aria-label="Saved protocol" list="saved-protocol-options" value={selectedProtocolLabel} onChange={(event) => { const value = event.target.value; setProtocolSearch(value); const match = activeProtocols.find((protocol) => protocolOptionLabel(protocol).toLowerCase() === value.trim().toLowerCase()); setProtocolId(match ? String(match.id) : ""); }} className={`${inputClass()} mt-1`} placeholder="Search by protocol name" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} disabled={protocolsLoading && activeProtocols.length === 0} /><datalist id="saved-protocol-options">{activeProtocols.map((protocol) => <option key={protocol.id} value={protocolOptionLabel(protocol)} />)}</datalist></label>
+                      <label className="block text-xs font-semibold">Saved protocol<Input aria-label="Saved protocol" list="saved-protocol-options" value={selectedProtocolLabel} onChange={(event) => { const value = event.target.value; setProtocolSearch(value); const match = activeProtocols.find((protocol) => protocolOptionLabel(protocol).toLowerCase() === value.trim().toLowerCase()); setProtocolId(match ? String(match.id) : ""); }} className={`${inputClass()} mt-1`} placeholder="Search by protocol name" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} disabled={protocolsLoading && activeProtocols.length === 0} /><datalist id="saved-protocol-options">{activeProtocols.map((protocol) => <option key={protocol.id} value={protocolOptionLabel(protocol)} />)}</datalist></label>
                       <div className="mt-3">
                         <ProtocolVersionPreview modality={appointment.modalityCode} selectedProtocol={selectedProtocol} detail={selectedVersionQuery.data ?? null} loading={selectedVersionQuery.isLoading} error={selectedVersionQuery.error} />
                         {selectedProtocol ? (
@@ -2647,7 +2647,7 @@ function ProtocolAssignmentModal({
                     <div className="mt-3 rounded-lg border" style={{ borderColor: "var(--border)" }}>
                       <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-start text-sm font-semibold" aria-expanded={additionalInstructionsOpen} onClick={() => setAdditionalInstructionsOpen((current) => !current)}>Additional instructions<span aria-hidden="true">{additionalInstructionsOpen ? "−" : "+"}</span></button>
                       {additionalInstructionsOpen ? <div className="space-y-3 border-t p-3" style={{ borderColor: "var(--border)" }}>
-                        <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={inputClass()} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>Optional scanner selection.</span></Field>
+                        <Field label="Scanner"><select aria-label="Scanner" value={scannerId} onChange={(event) => setScannerId(event.target.value)} className={"input-premium " + (inputClass())} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}><option value="">Not selected</option>{matchingScanners.map((scanner) => <option key={scanner.id} value={scanner.id}>{scanner.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>Optional scanner selection.</span></Field>
                         <Field label="Patient-specific instructions"><textarea aria-label="Protocol instructions" value={protocolNotes} onChange={(event) => setProtocolNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
                         <Field label="Contrast/preparation instructions"><textarea aria-label="Contrast/preparation instructions" value={contrastNotes} onChange={(event) => setContrastNotes(event.target.value)} className={`${inputClass()} min-h-20`} style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} /></Field>
                       </div> : null}
@@ -2663,7 +2663,7 @@ function ProtocolAssignmentModal({
                         {activeAssignment ? <button type="button" role="menuitem" disabled={saving} onClick={() => { setActionMenuOpen(false); onClear(); }} className="w-full rounded-md px-2 py-1.5 text-start text-xs font-semibold text-red-700 hover:bg-red-50">Clear assignment</button> : null}
                       </div>, document.body) : null}
                     </div> : null}
-                    <button
+                    <Button variant="secondary" size="sm"
                       type="button"
                       aria-label="Save"
                       disabled={!canSaveAssignment}
@@ -2673,18 +2673,18 @@ function ProtocolAssignmentModal({
                       title="Save assignment (Ctrl+S)"
                     >
                       {saving ? "Saving..." : <>Save <kbd className="ms-1 rounded bg-muted px-1 text-[10px] text-muted-foreground font-mono">Ctrl+S</kbd></>}
-                    </button>
+                    </Button>
                     {!embedded ? (
-                      <button
+                      <Button variant="primary" size="sm"
                         type="button"
                         aria-label="Assign and next"
                         disabled={!canSaveAssignment}
                         onClick={() => executeSave(true)}
-                        className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+                        className="rounded-lg px-3 py-2 text-sm font-semibold"
                         title="Assign protocol and navigate to next appointment (Ctrl+Enter)"
                       >
-                        Assign and next <kbd className="ms-1 rounded bg-teal-800/60 px-1 text-[10px] text-teal-100 font-mono">Ctrl+↵</kbd>
-                      </button>
+                        Assign and next <kbd className="ms-1 rounded bg-black/15 px-1 text-[10px] text-white font-mono">Ctrl+↵</kbd>
+                      </Button>
                     ) : null}
                   </div>
                 </aside>
@@ -2697,7 +2697,7 @@ function ProtocolAssignmentModal({
         <ComplementaryRecallRequestDialog open={recallDialogOpen} onClose={() => setRecallDialogOpen(false)} examLabel={appointment.examTypeName ?? "Unspecified"} submitting={recallMutation.isPending} error={recallMutation.error instanceof Error ? recallMutation.error.message : null} onSubmit={(payload) => recallMutation.mutate(payload)} />
         <ComplementaryRecallWithdrawDialog open={withdrawRecallDialogOpen} status={appointment.activeComplementaryRecall?.status ?? "pending_scheduling"} submitting={withdrawRecallMutation.isPending} error={withdrawRecallMutation.error instanceof Error ? withdrawRecallMutation.error.message : null} onClose={() => setWithdrawRecallDialogOpen(false)} onConfirm={() => withdrawRecallMutation.mutate()} />
         <Dialog open={examTypeProtocolDecisionOpen} onClose={() => { if (!examTypeUpdateMutation.isPending) setExamTypeProtocolDecisionOpen(false); }}>
-          <DialogContent maxWidth="500px" aria-label={t("doctor.protocols.examTypeChangeTitle")}>
+          <DialogContent className="doctor-protocols-page" maxWidth="500px" aria-label={t("doctor.protocols.examTypeChangeTitle")}>
             <DialogHeader>
               <DialogTitle>{t("doctor.protocols.examTypeChangeTitle")}</DialogTitle>
               <DialogDescription>
@@ -2711,9 +2711,9 @@ function ProtocolAssignmentModal({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Dialog open={Boolean(reconciliationStudy)} onClose={()=>{if(!reconciliationMutation.isPending){setReconciliationStudy(null);setReconciliationConfirmed(false);}}}><DialogContent maxWidth="680px"><DialogHeader><DialogTitle>Patient Identity Reconciliation</DialogTitle><DialogDescription>Only the DICOM Patient ID will change. Historical demographics and all imaging identifiers will remain unchanged.</DialogDescription></DialogHeader>{reconciliationStudy?<div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-lg border p-3"><h4 className="font-semibold">Historical DICOM identity</h4><p>Patient ID: {reconciliationStudy.historicalPatientId||"Unavailable"}</p><p>Patient name: {reconciliationStudy.historicalPatientName||"Unavailable"}</p><p>DOB: {reconciliationStudy.historicalPatientBirthDate||"Unavailable"}</p></div><div className="rounded-lg border p-3"><h4 className="font-semibold">Current RISpro identity</h4><p>Patient ID: {historyQuery.data?.currentPatient?.patientId||"Unavailable"}</p><p>Patient name: {historyQuery.data?.currentPatient?.name||"Unavailable"}</p><p>DOB: {historyQuery.data?.currentPatient?.birthDate||"Unavailable"}</p></div><div className="md:col-span-2 rounded-lg border p-3"><p>Study date: {reconciliationStudy.date||"Unknown"}</p><p>Study: {reconciliationStudy.description||"Study"}</p><p>Accession: {reconciliationStudy.accessionNumber||"Unavailable"}</p><p className="break-all text-xs text-muted-foreground">StudyInstanceUID: {reconciliationStudy.studyInstanceUid}</p></div><label className="md:col-span-2 flex items-start gap-2"><Checkbox checked={reconciliationConfirmed} onCheckedChange={(value)=>setReconciliationConfirmed(Boolean(value))}/><span>I confirm that this historical study belongs to the selected RISpro patient.</span></label>{reconciliationMutation.isError?<p role="alert" className="md:col-span-2 text-red-700">{(reconciliationMutation.error as Error).message}</p>:null}</div>:null}<DialogFooter><Button variant="secondary" onClick={()=>setReconciliationStudy(null)} disabled={reconciliationMutation.isPending}>Cancel</Button><Button onClick={()=>reconciliationMutation.mutate()} disabled={!reconciliationConfirmed||reconciliationMutation.isPending}>{reconciliationMutation.isPending?"Submitting...":"Reconcile patient identity"}</Button></DialogFooter></DialogContent></Dialog>
+        <Dialog open={Boolean(reconciliationStudy)} onClose={()=>{if(!reconciliationMutation.isPending){setReconciliationStudy(null);setReconciliationConfirmed(false);}}}><DialogContent className="doctor-protocols-page" maxWidth="680px"><DialogHeader><DialogTitle>Patient Identity Reconciliation</DialogTitle><DialogDescription>Only the DICOM Patient ID will change. Historical demographics and all imaging identifiers will remain unchanged.</DialogDescription></DialogHeader>{reconciliationStudy?<div className="grid gap-3 text-sm md:grid-cols-2"><div className="rounded-lg border p-3"><h4 className="font-semibold">Historical DICOM identity</h4><p>Patient ID: {reconciliationStudy.historicalPatientId||"Unavailable"}</p><p>Patient name: {reconciliationStudy.historicalPatientName||"Unavailable"}</p><p>DOB: {reconciliationStudy.historicalPatientBirthDate||"Unavailable"}</p></div><div className="rounded-lg border p-3"><h4 className="font-semibold">Current RISpro identity</h4><p>Patient ID: {historyQuery.data?.currentPatient?.patientId||"Unavailable"}</p><p>Patient name: {historyQuery.data?.currentPatient?.name||"Unavailable"}</p><p>DOB: {historyQuery.data?.currentPatient?.birthDate||"Unavailable"}</p></div><div className="md:col-span-2 rounded-lg border p-3"><p>Study date: {reconciliationStudy.date||"Unknown"}</p><p>Study: {reconciliationStudy.description||"Study"}</p><p>Accession: {reconciliationStudy.accessionNumber||"Unavailable"}</p><p className="break-all text-xs text-muted-foreground">StudyInstanceUID: {reconciliationStudy.studyInstanceUid}</p></div><label className="md:col-span-2 flex items-start gap-2"><Checkbox checked={reconciliationConfirmed} onCheckedChange={(value)=>setReconciliationConfirmed(Boolean(value))}/><span>I confirm that this historical study belongs to the selected RISpro patient.</span></label>{reconciliationMutation.isError?<p role="alert" className="md:col-span-2 text-red-700">{(reconciliationMutation.error as Error).message}</p>:null}</div>:null}<DialogFooter><Button variant="secondary" onClick={()=>setReconciliationStudy(null)} disabled={reconciliationMutation.isPending}>Cancel</Button><Button onClick={()=>reconciliationMutation.mutate()} disabled={!reconciliationConfirmed||reconciliationMutation.isPending}>{reconciliationMutation.isPending?"Submitting...":"Reconcile patient identity"}</Button></DialogFooter></DialogContent></Dialog>
         <Dialog open={confirmLeaveOpen} onClose={() => { setConfirmLeaveOpen(false); pendingLeaveDirectionRef.current = null; }}>
-          <DialogContent maxWidth="460px">
+          <DialogContent className="doctor-protocols-page" maxWidth="460px">
             <DialogHeader>
               <DialogTitle>Discard unsaved changes?</DialogTitle>
               <DialogDescription>You have unsaved changes to this protocol assignment.</DialogDescription>
@@ -2978,7 +2978,7 @@ export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="doctor-protocols-page space-y-4">
       <div className="flex gap-2 overflow-x-auto">
         {canAssign && <SectionButton label="Protocoling" active={navigation.area === "protocoling"} onClick={() => updateNavigation({ area: "protocoling" }, false)} />}
         {canEditLibrary && <SectionButton label="Protocol Library" active={navigation.area === "library"} onClick={() => updateNavigation({ area: "library" }, false)} />}

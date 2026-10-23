@@ -1,6 +1,7 @@
+import "@/components/shared/compact-controls.css";
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Download, RefreshCw, Search, Trash2 } from "lucide-react";
+import { BookOpenText, Download, RefreshCw, Trash2 } from "lucide-react";
 import {
   applyNameDictionaryToPatients,
   deleteNameDictionaryEntry,
@@ -16,7 +17,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { dictionaryReadOptions } from "@/lib/name-dictionary-query";
 import { DictionaryLoadStatus } from "@/components/name-dictionary/dictionary-load-status";
 import { DictionaryCsvError, parseDictionaryCsv, exportDictionaryCsv } from "@/lib/name-dictionary-csv";
-import { Button, Card } from "@/components/shared";
+import { Button, Card, Input, SearchInput } from "@/components/shared";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
 import type { PersistedDictionaryEntry } from "@/lib/name-generation";
@@ -153,7 +154,7 @@ export default function NameDictionaryPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4" dir={language === "ar" ? "rtl" : "ltr"}>
+    <div className="compact-controls mx-auto max-w-7xl space-y-4" dir={language === "ar" ? "rtl" : "ltr"}>
       {showReauth && <SupervisorReAuthModal onClose={() => setShowReauth(false)} onSuccess={() => { setShowReauth(false); void invalidate(); }} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
@@ -177,9 +178,9 @@ export default function NameDictionaryPage() {
       </div>
 
       {canManage && <Card className="p-4">
-        <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={submitEntry}>
-          <input value={arabicText} onChange={(event) => setArabicText(event.target.value)} className="input-premium input-rtl h-10" placeholder={t("nameDictionary.arabicPlaceholder")} />
-          <input value={englishText} onChange={(event) => setEnglishText(event.target.value)} className="input-premium input-ltr h-10" placeholder={t("nameDictionary.englishPlaceholder")} />
+        <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end" onSubmit={submitEntry}>
+          <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">{t("nameDictionary.arabic")}<Input value={arabicText} onChange={(event) => setArabicText(event.target.value)} className="input-rtl h-10" placeholder={t("nameDictionary.arabicPlaceholder")} /></label>
+          <label className="grid min-w-0 gap-1 text-xs font-semibold text-muted-foreground">{t("nameDictionary.english")}<Input value={englishText} onChange={(event) => setEnglishText(event.target.value)} className="input-ltr h-10" placeholder={t("nameDictionary.englishPlaceholder")} /></label>
           <Button type="submit" disabled={saveMutation.isPending || !arabicText.trim() || !englishText.trim()}>{t("nameDictionary.addOrUpdate")}</Button>
         </form>
       </Card>}
@@ -236,8 +237,7 @@ export default function NameDictionaryPage() {
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="input-premium h-10 w-full pl-9" placeholder={t("nameDictionary.searchPlaceholder")} />
+            <SearchInput aria-label={t("nameDictionary.searchPlaceholder")} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="h-10 w-full" placeholder={t("nameDictionary.searchPlaceholder")} />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="input-premium h-10 text-sm">
@@ -282,8 +282,8 @@ export default function NameDictionaryPage() {
                   <tr key={entry.id} className="hover:bg-muted/30">
                     {editingId === entry.id ? (
                       <>
-                        <td className="p-2"><input value={editForm.arabicText} onChange={(event) => setEditForm((current) => ({ ...current, arabicText: event.target.value }))} className="input-premium input-rtl h-9 w-full" /></td>
-                        <td className="p-2"><input value={editForm.englishText} onChange={(event) => setEditForm((current) => ({ ...current, englishText: event.target.value }))} className="input-premium input-ltr h-9 w-full" /></td>
+                        <td className="p-2"><Input aria-label={t("nameDictionary.arabic")} value={editForm.arabicText} onChange={(event) => setEditForm((current) => ({ ...current, arabicText: event.target.value }))} className="input-premium input-rtl h-9 w-full" /></td>
+                        <td className="p-2"><Input aria-label={t("nameDictionary.english")} value={editForm.englishText} onChange={(event) => setEditForm((current) => ({ ...current, englishText: event.target.value }))} className="input-premium input-ltr h-9 w-full" /></td>
                         <td className="p-2 text-muted-foreground">{entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : "-"}</td>
                         <td className="p-2 text-center">
                           <div className="flex justify-center gap-2">

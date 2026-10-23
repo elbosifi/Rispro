@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,7 +142,7 @@ describe("SopsPage", () => {
     expect(await screen.findByRole("heading", { name: "Import SOP" })).toBeTruthy();
     const input = new File([JSON.stringify({ format: "rispro-sop" })], "invalid.json", { type: "application/json" });
     api.inspectNewSopJsonImport.mockRejectedValueOnce(new Error("File is not a RISpro SOP JSON document."));
-    await user.upload(screen.getByLabelText("SOP JSON file"), input);
+    await user.upload(screen.getByLabelText("SOP JSON file (.json)"), input);
     expect((await screen.findByRole("alert")).textContent).toContain("File is not a RISpro SOP JSON document.");
   });
 
@@ -151,7 +151,7 @@ describe("SopsPage", () => {
     renderPage();
     await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
     expect(await screen.findByRole("heading", { name: "RISpro SOP JSON Example" })).toBeTruthy();
-    expect(screen.getByText("JSON Example Template — configuration only, not a real SOP.")).toBeTruthy();
+    expect(screen.getByText("JSON example template — configuration only, not a real SOP.")).toBeTruthy();
     expect(api.fetchSopJsonExampleConfig).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("sop-structured-editor")).toBeTruthy();
     expect(screen.getByText(/SOP content may be Arabic, English, or bilingual/)).toBeTruthy();
@@ -159,13 +159,13 @@ describe("SopsPage", () => {
     expect(screen.queryByRole("button", { name: "Archive SOP" })).toBeNull();
     expect(screen.queryByText(/Owner:/)).toBeNull();
     expect(screen.queryByText(/Next review:/)).toBeNull();
-    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(false);
-    await user.type(screen.getByLabelText("Example Title"), " Updated");
-    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Save Example" }));
+    expect((screen.getByRole("button", { name: "Download example" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.type(screen.getByLabelText("Example title"), " Updated");
+    expect((screen.getByRole("button", { name: "Download example" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Save example" }));
     await waitFor(() => expect(api.updateSopJsonExampleConfig).toHaveBeenCalledWith(expect.objectContaining({ title: "MRI SOP Example Updated", document: documentJson })));
-    expect((screen.getByRole("button", { name: "Download Example" }) as HTMLButtonElement).disabled).toBe(false);
-    await user.click(screen.getByRole("button", { name: "Download Example" }));
+    expect((screen.getByRole("button", { name: "Download example" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Download example" }));
     expect(api.downloadSopJsonExample).toHaveBeenCalledTimes(1);
   });
 
@@ -175,14 +175,14 @@ describe("SopsPage", () => {
     renderPage();
     await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
     expect(await screen.findByText("Active example: Customized")).toBeTruthy();
-    await user.click(await screen.findByRole("button", { name: "Reset to Default" }));
-    expect(await screen.findByRole("heading", { name: "Reset JSON Example?" })).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Reset to default" }));
+    expect(await screen.findByRole("heading", { name: "Reset JSON example?" })).toBeTruthy();
     expect(screen.getByText("This does not affect any existing SOPs.")).toBeTruthy();
     expect(api.resetSopJsonExampleConfig).not.toHaveBeenCalled();
-    await user.click(screen.getAllByRole("button", { name: "Reset to Default" }).at(-1)!);
+    await user.click(screen.getAllByRole("button", { name: "Reset to default" }).at(-1)!);
     await waitFor(() => expect(api.resetSopJsonExampleConfig).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Active example: Built-in default")).toBeTruthy();
-    expect((screen.getByLabelText("Example Title") as HTMLInputElement).value).toBe("MRI SOP Example");
+    expect((screen.getByLabelText("Example title") as HTMLInputElement).value).toBe("MRI SOP Example");
   });
 
   it("does not fetch or expose the JSON example editor to ordinary users", async () => {
@@ -196,7 +196,7 @@ describe("SopsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("button", { name: "Edit JSON Example" }));
-    await user.type(await screen.findByLabelText("Example Title"), " Unsaved");
+    await user.type(await screen.findByLabelText("Example title"), " Unsaved");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(await screen.findByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
@@ -280,15 +280,15 @@ describe("SopsPage", () => {
     api.fetchSop.mockResolvedValue({ sop: draftSop, versions: [draftVersion] });
     renderPage("supervisor", "/sops/7?version=1.0");
     await user.click(await screen.findByRole("button", { name: "Import Excel" }));
-    await user.upload(screen.getByLabelText("Excel workbook"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    await user.upload(screen.getByLabelText("Excel workbook (.xlsx)"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     expect(await screen.findByText("Workbook structure is valid")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Preview changes" }));
     expect(await screen.findByText("Workbook summary")).toBeTruthy();
-    expect(screen.getAllByText("Changed").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Unchanged").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("changed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("unchanged").length).toBeGreaterThan(0);
     expect(screen.getByText(/Changed sections are imported as normalized SOP text/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Confirm import" }));
-    expect((await screen.findByRole("status")).textContent).toContain("Excel changes imported into draft v1.0. 1 section changed.");
+    expect((await screen.findByRole("status")).textContent).toContain("Imported Excel changes into draft v1.0. Changed sections: 1.");
     expect((screen.getByLabelText("Change summary") as HTMLTextAreaElement).value).toBe("Imported summary");
     expect(api.confirmSopXlsxImport).toHaveBeenCalledWith(7, "1.0", expect.objectContaining({ expectedDraftUpdatedAt: draftVersion.updatedAt }));
   });
@@ -308,7 +308,7 @@ describe("SopsPage", () => {
     });
     renderPage("supervisor", "/sops/7?version=1.0");
     await user.click(await screen.findByRole("button", { name: "Import Excel" }));
-    await user.upload(screen.getByLabelText("Excel workbook"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    await user.upload(screen.getByLabelText("Excel workbook (.xlsx)"), new File(["xlsx"], "sop.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     expect(await screen.findByText("Workbook needs attention")).toBeTruthy();
     expect(screen.getByText("Row 7: Required section 'procedure' cannot be blank.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Preview changes" })).toHaveProperty("disabled", true);
@@ -347,7 +347,7 @@ describe("SopsPage", () => {
     expect(await screen.findByText("Published SOP")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Version history" })).toBeTruthy();
-    expect(screen.getByText("Superseded")).toBeTruthy();
+    expect(screen.getByText("Replaced by a newer version")).toBeTruthy();
   });
 
   it("saves the latest editor state before publishing and renders that state read-only", async () => {
@@ -508,7 +508,7 @@ describe("SopsPage", () => {
     renderPage("supervisor");
     expect(await screen.findByRole("heading", { name: "SOP Library" })).toBeTruthy();
     expect(await screen.findByRole("columnheader", { name: "Owner" })).toBeTruthy();
-    expect(await screen.findByRole("columnheader", { name: "Review Due" })).toBeTruthy();
+    expect(await screen.findByRole("columnheader", { name: "Review due" })).toBeTruthy();
     expect(await screen.findByText("Supervisor User")).toBeTruthy();
 
     const reviewSelect = screen.getByLabelText("Review status");
@@ -523,8 +523,8 @@ describe("SopsPage", () => {
       { ...publishedSop, id: 8, code: "RAD-MRI-002", currentNextReviewDate: "2026-09-30" },
     ] });
     renderPage("supervisor");
-    expect(await screen.findByText("Review due soon")).toBeTruthy();
-    expect(await screen.findByText("Review overdue")).toBeTruthy();
+    expect(within(await screen.findByRole("row", { name: /RAD-MRI-001/ })).getByText("Due soon")).toBeTruthy();
+    expect(within(await screen.findByRole("row", { name: /RAD-MRI-002/ })).getByText("Overdue")).toBeTruthy();
   });
 
   it("shows owner and next review date in details and allows changing owner", async () => {
@@ -533,31 +533,31 @@ describe("SopsPage", () => {
     expect(await screen.findByText("Owner: Supervisor User")).toBeTruthy();
     expect(screen.getByText(/Next review:/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Change Owner" }));
-    expect(await screen.findByRole("heading", { name: "Change SOP Owner" })).toBeTruthy();
-    await user.selectOptions(screen.getByLabelText("Change SOP Owner"), "2");
-    await user.click(screen.getByRole("button", { name: "Save Owner" }));
+    await user.click(screen.getByRole("button", { name: "Change owner" }));
+    expect(await screen.findByRole("heading", { name: "Change owner" })).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Change owner"), "2");
+    await user.click(screen.getByRole("button", { name: "Save owner" }));
     await waitFor(() => expect(api.updateSopOwner).toHaveBeenCalledWith(7, { ownerUserId: 2 }));
   });
 
   it("confirms and records 'Reviewed – No Changes'", async () => {
     const user = userEvent.setup();
     renderPage("supervisor", "/sops/7");
-    expect(await screen.findByRole("button", { name: "Reviewed – No Changes" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Reviewed — no changes" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Reviewed – No Changes" }));
-    expect(await screen.findByRole("heading", { name: "Reviewed – No Changes" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Reviewed — no changes" }));
+    expect(await screen.findByRole("heading", { name: "Reviewed — no changes" })).toBeTruthy();
     expect(screen.getByText(/The SOP version and effective date will remain unchanged/)).toBeTruthy();
     expect(screen.getByText(/The next review date will be moved forward by two years/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Confirm Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm review" }));
     await waitFor(() => expect(api.reviewSopNoChanges).toHaveBeenCalledWith(7, "1.0"));
   });
 
   it("auto-suggests next minor version when creating a revision", async () => {
     const user = userEvent.setup();
     renderPage("supervisor", "/sops/7");
-    await user.click(await screen.findByRole("button", { name: "Create New Revision" }));
+    await user.click(await screen.findByRole("button", { name: "Create new revision" }));
     expect(await screen.findByRole("heading", { name: "Create a new SOP revision" })).toBeTruthy();
     const versionInput = screen.getByLabelText("New version") as HTMLInputElement;
     expect(versionInput.value).toBe("1.1");
@@ -567,8 +567,8 @@ describe("SopsPage", () => {
     const user = userEvent.setup();
     api.fetchSop.mockResolvedValueOnce({ sop: publishedSopWithDraft, versions: [revisionVersion, publishedVersion, oldVersion] });
     renderPage("supervisor", "/sops/7");
-    const openDraft = await screen.findByRole("button", { name: "Open Draft Revision" });
-    expect(screen.queryByRole("button", { name: "Create New Revision" })).toBeNull();
+    const openDraft = await screen.findByRole("button", { name: "Open draft revision" });
+    expect(screen.queryByRole("button", { name: "Create new revision" })).toBeNull();
     await user.click(openDraft);
     expect(screen.getByTestId("router-location").textContent).toBe("/sops/7?version=1.1");
     expect(await screen.findByRole("button", { name: "Save draft" })).toBeTruthy();
@@ -577,16 +577,16 @@ describe("SopsPage", () => {
   it("exposes revision and archive actions only to management users", async () => {
     const user = userEvent.setup();
     const management = renderPage("supervisor", "/sops/7");
-    expect(await screen.findByRole("button", { name: "Create New Revision" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Create new revision" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Archive SOP" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Create New Revision" }));
+    await user.click(screen.getByRole("button", { name: "Create new revision" }));
     expect(await screen.findByRole("heading", { name: "Create a new SOP revision" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     management.unmount();
     api.fetchSop.mockResolvedValueOnce({ sop: publishedSop, versions: [publishedVersion] });
     renderPage("receptionist", "/sops/7");
     expect(await screen.findByText("Published SOP")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Create New Revision" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create new revision" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Archive SOP" })).toBeNull();
   });
 });

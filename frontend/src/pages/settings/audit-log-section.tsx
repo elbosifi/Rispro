@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, Download, RefreshCw, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, Download, RefreshCw, X } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { exportAuditCSV, fetchAuditEntries, type AuditQueryParams } from "@/lib/api-hooks";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -8,6 +8,7 @@ import type { AuditCategory, AuditEntry, AuditOutcome, AuditPagination } from "@
 import { useLanguage } from "@/providers/language-provider";
 import { getUserDisplayName } from "@/lib/user-display-name";
 import { Button } from "@/components/shared/Button";
+import { SearchInput } from "@/components/shared/SearchInput";
 
 type AuditTab = AuditCategory | "all";
 type AuditState = AuditQueryParams & { tab: AuditTab; page: number; pageSize: 25 | 50 | 100 };
@@ -215,17 +216,17 @@ export default function AuditLogSection({ onReAuthRequired }: { onReAuthRequired
 
   return (
     <div className="relative space-y-4">
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3 lg:flex-row lg:items-end">
-        <label className="min-w-0 flex-1 text-xs font-semibold text-muted-foreground">Search
-          <span className="relative mt-1 block"><Search size={16} className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input className="input-premium h-10 w-full ps-9" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Actor, activity, target, status…" /></span>
+      <div className="grid min-w-0 gap-3 rounded-xl border border-border bg-muted/20 p-3 md:grid-cols-2 xl:grid-cols-5">
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground xl:col-span-2">Search
+          <SearchInput aria-label="Search audit log" className="mt-1 h-10 w-full min-w-0" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Actor, activity, target, status…" />
         </label>
-        <label className="text-xs font-semibold text-muted-foreground">From<input type="date" className="input-premium mt-1 h-10" value={state.dateFrom || ""} onChange={(event) => updateState({ dateFrom: event.target.value || undefined, page: 1 })} /></label>
-        <label className="text-xs font-semibold text-muted-foreground">To<input type="date" className="input-premium mt-1 h-10" value={state.dateTo || ""} onChange={(event) => updateState({ dateTo: event.target.value || undefined, page: 1 })} /></label>
-        <label className="text-xs font-semibold text-muted-foreground">Actor<select className="input-premium mt-1 h-10 max-w-48" value={state.changedByUserId || ""} onChange={(event) => updateState({ changedByUserId: event.target.value || undefined, page: 1 })}><option value="">All actors</option>{(auditQuery.data?.meta.users || []).map((user) => <option key={String(user.id)} value={String(user.id)}>{getUserDisplayName({ fullName: user.full_name ?? user.fullName, englishName: user.english_name ?? user.englishName, username: user.username }, language)} {user.username ? `(${user.username})` : ""}</option>)}</select></label>
-        <label className="text-xs font-semibold text-muted-foreground">Entity<select className="input-premium mt-1 h-10 max-w-44" value={state.entityType || ""} onChange={(event) => updateState({ entityType: event.target.value || undefined, page: 1 })}><option value="">All entities</option>{(auditQuery.data?.meta.entityTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
-        <label className="text-xs font-semibold text-muted-foreground">Action<select className="input-premium mt-1 h-10 max-w-44" value={state.actionType || ""} onChange={(event) => updateState({ actionType: event.target.value || undefined, page: 1 })}><option value="">All actions</option>{(auditQuery.data?.meta.actionTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
-        <label className="text-xs font-semibold text-muted-foreground">Outcome<select className="input-premium mt-1 h-10 max-w-40" value={state.outcome || ""} onChange={(event) => updateState({ outcome: event.target.value || undefined, page: 1 })}><option value="">All outcomes</option>{OUTCOMES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-        <div className="flex gap-2"><Button variant="secondary" size="icon" aria-label="Refresh audit log" title="Refresh" onClick={() => void auditQuery.refetch()}><RefreshCw size={16} /></Button><Button variant="secondary" onClick={() => void exportAuditCSV(queryState)}><Download size={16} className="me-2" />Export CSV</Button></div>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">From<input type="date" className="input-premium mt-1 h-10 w-full min-w-0" value={state.dateFrom || ""} onChange={(event) => updateState({ dateFrom: event.target.value || undefined, page: 1 })} /></label>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">To<input type="date" className="input-premium mt-1 h-10 w-full min-w-0" value={state.dateTo || ""} onChange={(event) => updateState({ dateTo: event.target.value || undefined, page: 1 })} /></label>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">Actor<select className="input-premium mt-1 h-10 w-full min-w-0" value={state.changedByUserId || ""} onChange={(event) => updateState({ changedByUserId: event.target.value || undefined, page: 1 })}><option value="">All actors</option>{(auditQuery.data?.meta.users || []).map((user) => <option key={String(user.id)} value={String(user.id)}>{getUserDisplayName({ fullName: user.full_name ?? user.fullName, englishName: user.english_name ?? user.englishName, username: user.username }, language)} {user.username ? `(${user.username})` : ""}</option>)}</select></label>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">Entity<select className="input-premium mt-1 h-10 w-full min-w-0" value={state.entityType || ""} onChange={(event) => updateState({ entityType: event.target.value || undefined, page: 1 })}><option value="">All entities</option>{(auditQuery.data?.meta.entityTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">Action<select className="input-premium mt-1 h-10 w-full min-w-0" value={state.actionType || ""} onChange={(event) => updateState({ actionType: event.target.value || undefined, page: 1 })}><option value="">All actions</option>{(auditQuery.data?.meta.actionTypes || []).map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label>
+        <label className="block min-w-0 text-xs font-semibold text-muted-foreground">Outcome<select className="input-premium mt-1 h-10 w-full min-w-0" value={state.outcome || ""} onChange={(event) => updateState({ outcome: event.target.value || undefined, page: 1 })}><option value="">All outcomes</option>{OUTCOMES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+        <div className="flex items-end gap-2 md:col-span-2 xl:col-span-2 xl:justify-end"><Button variant="secondary" size="icon" aria-label="Refresh audit log" title="Refresh" onClick={() => void auditQuery.refetch()}><RefreshCw size={16} /></Button><Button variant="secondary" onClick={() => void exportAuditCSV(queryState)}><Download size={16} className="me-2" />Export CSV</Button></div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Audit categories">

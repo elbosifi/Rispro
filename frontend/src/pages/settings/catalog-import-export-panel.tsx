@@ -1,11 +1,11 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { ApiError } from "@/lib/api-client";
 import {
   applyCatalogWorkbookImport,
   exportCatalogWorkbook,
   previewCatalogWorkbookImport,
 } from "@/lib/api-hooks";
-import { Button } from "@/components/shared/Button";
+import { Button, Input } from "@/components/shared";
 
 type ImportSummary = {
   modalitiesCreated: number;
@@ -49,6 +49,7 @@ type Draft = {
 type RowFilter = "all" | "selected" | "errors" | "create" | "update" | "skip";
 
 export default function CatalogImportExportPanel({ onImportSuccess }: { onImportSuccess: (summary: ImportSummary) => void }) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -205,7 +206,7 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
     <div className="overflow-x-auto">
       <table className="min-w-full text-xs">
         <thead>
-          <tr className="text-left border-b border-stone-200 dark:border-stone-700">
+          <tr className="text-left border-b border-border">
             <th className="py-2 pr-2">Use</th>
             <th className="py-2 pr-2">Action</th>
             <th className="py-2 pr-2">Row</th>
@@ -219,21 +220,21 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
         </thead>
         <tbody>
           {filteredRows(kind).map((row) => (
-            <tr key={String(row.id)} className="border-b border-stone-100 dark:border-stone-800 align-top">
+            <tr key={String(row.id)} className="border-b border-border align-top">
               <td className="py-2 pr-2">
-                <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow(kind, String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
+                <input type="checkbox" aria-label={`Select ${kind} row ${row.rowNumber}`} checked={Boolean(row.selected)} onChange={(e) => updateDraftRow(kind, String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
               </td>
               <td className="py-2 pr-2"><span className="font-mono uppercase">{String(row.action)}</span></td>
               <td className="py-2 pr-2">{String(row.rowNumber)}</td>
-              {kind === "examTypes" && <td className="py-2 pr-2"><input value={String(row.modalityCode ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "modalityCode", e.target.value)} className="w-24 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>}
-              <td className="py-2 pr-2"><input value={String(row.code ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "code", e.target.value)} className="w-28 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
-              <td className="py-2 pr-2"><input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "nameEn", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
-              <td className="py-2 pr-2"><input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "nameAr", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+              {kind === "examTypes" && <td className="py-2 pr-2"><Input dir="ltr" aria-label={`Modality code row ${row.rowNumber}`} value={String(row.modalityCode ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "modalityCode", e.target.value)} className="!w-24" /></td>}
+              <td className="py-2 pr-2"><Input dir="ltr" aria-label={`Code row ${row.rowNumber}`} value={String(row.code ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "code", e.target.value)} className="!w-28" /></td>
+              <td className="py-2 pr-2"><Input dir="ltr" aria-label={`English name row ${row.rowNumber}`} value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "nameEn", e.target.value)} className="!w-40" /></td>
+              <td className="py-2 pr-2"><Input dir="rtl" aria-label={`Arabic name row ${row.rowNumber}`} value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow(kind, String(row.id), "nameAr", e.target.value)} className="!w-40" /></td>
               <td className="py-2 pr-2">
                 {kind === "modalities" ? (
-                  <input type="number" value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow(kind, String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" />
+                  <Input type="number" aria-label={`Daily capacity row ${row.rowNumber}`} value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow(kind, String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="!w-20" />
                 ) : (
-                  <input type="number" value={row.durationMinutes == null ? "" : Number(row.durationMinutes)} onChange={(e) => updateDraftRow(kind, String(row.id), "durationMinutes", e.target.value === "" ? null : Number(e.target.value))} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" />
+                  <Input type="number" aria-label={`Duration minutes row ${row.rowNumber}`} value={row.durationMinutes == null ? "" : Number(row.durationMinutes)} onChange={(e) => updateDraftRow(kind, String(row.id), "durationMinutes", e.target.value === "" ? null : Number(e.target.value))} className="!w-20" />
                 )}
               </td>
               <td className="py-2 pr-2">
@@ -251,18 +252,18 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
   );
 
   return (
-    <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 bg-stone-50/80 dark:bg-stone-800/40 space-y-3">
+    <div className="rounded-lg border border-border p-4 bg-muted/20 space-y-3" dir="ltr" lang="en">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm">
-          <p className="font-medium text-stone-900 dark:text-white">Excel import/export</p>
-          <p className="description-center">One workbook includes both the Modalities and ExamTypes sheets.</p>
+          <p className="font-medium text-foreground">Excel import/export</p>
+          <p className="text-muted-foreground">One workbook includes both the Modalities and ExamTypes sheets.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={handleExport} disabled={isExporting || isPreviewing || isApplying} className="text-xs">{isExporting ? "Exporting..." : "Export Excel"}</Button>
-          <label className="inline-flex items-center px-3 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium cursor-pointer disabled:opacity-60">
+          <Button type="button" onClick={() => fileInput.current?.click()} disabled={isExporting || isPreviewing || isApplying}>
             {isPreviewing ? "Reviewing..." : "Import Excel"}
-            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} className="sr-only" disabled={isExporting || isPreviewing || isApplying} />
-          </label>
+          </Button>
+          <input ref={fileInput} type="file" tabIndex={-1} aria-label="Import Excel" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} className="sr-only" disabled={isExporting || isPreviewing || isApplying} />
           {draft && <Button variant="secondary" onClick={handleApply} disabled={isApplying || !draft.canApply} className="text-xs">{isApplying ? "Applying..." : "Apply Selected Rows"}</Button>}
         </div>
       </div>
@@ -288,23 +289,23 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
 
       {draft && (
         <div className="space-y-3">
-          <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm bg-white/70 dark:bg-stone-900/20">
+          <div className="rounded-lg border border-border p-3 text-sm bg-card">
             <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
-              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Modality Rows</div><div className="font-semibold">{draft.summary.modalitiesTotal}</div></div>
-              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Exam Rows</div><div className="font-semibold">{draft.summary.examTypesTotal}</div></div>
-              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Selected Modalities</div><div className="font-semibold">{draft.summary.selectedModalities}</div></div>
-              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Selected Exams</div><div className="font-semibold">{draft.summary.selectedExamTypes}</div></div>
-              <div className="rounded border border-amber-200 dark:border-amber-800 p-2"><div className="text-[10px] uppercase font-mono">Warnings</div><div className="font-semibold">{draft.summary.warnings}</div></div>
-              <div className="rounded border border-red-200 dark:border-red-800 p-2"><div className="text-[10px] uppercase font-mono">Errors</div><div className="font-semibold">{draft.summary.errors}</div></div>
+              <div className="rounded border border-border p-2"><div className="text-xs font-medium">Modality Rows</div><div className="font-semibold">{draft.summary.modalitiesTotal}</div></div>
+              <div className="rounded border border-border p-2"><div className="text-xs font-medium">Exam Rows</div><div className="font-semibold">{draft.summary.examTypesTotal}</div></div>
+              <div className="rounded border border-border p-2"><div className="text-xs font-medium">Selected Modalities</div><div className="font-semibold">{draft.summary.selectedModalities}</div></div>
+              <div className="rounded border border-border p-2"><div className="text-xs font-medium">Selected Exams</div><div className="font-semibold">{draft.summary.selectedExamTypes}</div></div>
+              <div className="rounded border border-amber-200 dark:border-amber-800 p-2"><div className="text-xs font-medium">Warnings</div><div className="font-semibold">{draft.summary.warnings}</div></div>
+              <div className="rounded border border-red-200 dark:border-red-800 p-2"><div className="text-xs font-medium">Errors</div><div className="font-semibold">{draft.summary.errors}</div></div>
             </div>
           </div>
 
           {(["modalities", "examTypes"] as const).map((kind) => (
-            <details key={kind} className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-white/70 dark:bg-stone-900/20" open>
+            <details key={kind} className="rounded-lg border border-border p-3 bg-card" open>
               <summary className="cursor-pointer font-medium text-sm">Review {kind === "modalities" ? "modality" : "exam type"} rows</summary>
               <div className="mt-3 space-y-3">
                 <div className="flex flex-wrap gap-2 items-center">
-                  <select value={kind === "modalities" ? modalityFilter : examTypeFilter} onChange={(e) => kind === "modalities" ? setModalityFilter(e.target.value as RowFilter) : setExamTypeFilter(e.target.value as RowFilter)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-xs">
+                  <select aria-label={`Filter ${kind} import rows`} value={kind === "modalities" ? modalityFilter : examTypeFilter} onChange={(e) => kind === "modalities" ? setModalityFilter(e.target.value as RowFilter) : setExamTypeFilter(e.target.value as RowFilter)} className="input-premium !py-1">
                     <option value="all">All {kind === "modalities" ? "modality" : "exam"} rows</option>
                     <option value="selected">Selected only</option>
                     <option value="errors">Errors only</option>
@@ -312,11 +313,11 @@ export default function CatalogImportExportPanel({ onImportSuccess }: { onImport
                     <option value="update">Updates</option>
                     <option value="skip">Skips</option>
                   </select>
-                  <button onClick={() => bulkSetSelected(kind, true, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select Visible</button>
-                  <button onClick={() => bulkSetSelected(kind, false, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear Visible</button>
-                  <button onClick={() => bulkSetSelected(kind, true, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select All</button>
-                  <button onClick={() => bulkSetSelected(kind, false, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear All</button>
-                  <span className="text-xs description-center">{filteredRows(kind).length} visible</span>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => bulkSetSelected(kind, true, "visible")} >Select Visible</Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => bulkSetSelected(kind, false, "visible")} >Clear Visible</Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => bulkSetSelected(kind, true, "all")} >Select All</Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => bulkSetSelected(kind, false, "all")} >Clear All</Button>
+                  <span className="text-xs text-muted-foreground">{filteredRows(kind).length} visible</span>
                 </div>
                 {renderRows(kind)}
               </div>

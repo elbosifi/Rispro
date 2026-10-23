@@ -7,7 +7,7 @@ import {
   hardDeleteExamType,
   updateExamType,
 } from "@/lib/api-hooks";
-import { Button } from "@/components/shared/Button";
+import { Button, Dialog, DialogContent, DialogTitle, Input, Textarea } from "@/components/shared";
 import { Card } from "@/components/shared/Card";
 import { chooseLocalized, type Language } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -79,7 +79,7 @@ function QueryError({ message }: { message: string }) {
 function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-sm description-center">Recent supervisor re-authentication is required for this settings section.</p>
+      <p className="text-sm text-muted-foreground">Recent supervisor re-authentication is required for this settings section.</p>
       <Button onClick={onReAuthRequired} className="text-sm">Re-authenticate</Button>
     </div>
   );
@@ -242,7 +242,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["exam-types"])} />;
     return <QueryError message={msg} />;
   }
-  if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+  if (isLoading) return <p className="text-muted-foreground">{t("settings.loading")}</p>;
 
   return (
     <div className="space-y-4">
@@ -269,7 +269,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setMutationError(null)} className="ms-2">إغلاق</Button>
         </div>
       )}
 
@@ -278,18 +278,18 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 flex-1">
             <label className="text-xs font-medium">
               Search
-              <input aria-label="Search exam types" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" placeholder="Code, English, Arabic" />
+              <Input aria-label="Search exam types" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full input-ltr" placeholder="Code, English, Arabic" />
             </label>
             <label className="text-xs font-medium">
               Modality
-              <select aria-label="Modality filter" value={modalityFilter} onChange={(event) => setModalityFilter(event.target.value)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+              <select aria-label="Modality filter" value={modalityFilter} onChange={(event) => setModalityFilter(event.target.value)} className="input-premium mt-1 w-full !py-1">
                 <option value="all">All modalities</option>
                 {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label className="text-xs font-medium">
               Status
-              <select aria-label="Status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+              <select aria-label="Status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} className="input-premium mt-1 w-full !py-1">
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
                 <option value="all">All</option>
@@ -297,7 +297,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
             </label>
             <label className="text-xs font-medium">
               Preparation
-              <select aria-label="Preparation filter" value={preparationFilter} onChange={(event) => setPreparationFilter(event.target.value as PreparationFilter)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+              <select aria-label="Preparation filter" value={preparationFilter} onChange={(event) => setPreparationFilter(event.target.value as PreparationFilter)} className="input-premium mt-1 w-full !py-1">
                 <option value="all">All</option>
                 <option value="missing_arabic">Missing Arabic</option>
                 <option value="missing_english">Missing English</option>
@@ -309,7 +309,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
             {showCreate ? "Cancel" : "Add exam type"}
           </Button>
         </div>
-        <p className="text-sm description-center">{filteredExamTypes.length} of {examTypes.length} exam types visible</p>
+        <p className="text-sm text-muted-foreground">{filteredExamTypes.length} of {examTypes.length} exam types visible</p>
       </Card>
 
       {showCreate && (
@@ -326,10 +326,10 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
         />
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="min-w-full text-sm">
-          <thead className="bg-stone-50 dark:bg-stone-800/60">
-            <tr className="text-left border-b border-stone-200 dark:border-stone-700">
+          <thead className="bg-muted/20">
+            <tr className="text-left border-b border-border">
               <th className="p-3">Code</th>
               <th className="p-3">English name</th>
               <th className="p-3">Arabic name</th>
@@ -342,7 +342,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
           </thead>
           <tbody>
             {filteredExamTypes.map((row) => (
-              <tr key={row.id} className="border-b border-stone-100 dark:border-stone-800 align-top">
+              <tr key={row.id} className="border-b border-border align-top">
                 {editingId === row.id ? (
                   <td colSpan={8} className="p-3">
                     <ExamTypeFormCard
@@ -389,7 +389,7 @@ export default function ExamTypesSection({ onReAuthRequired }: { onReAuthRequire
               </tr>
             ))}
             {filteredExamTypes.length === 0 && (
-              <tr><td colSpan={8} className="p-4 text-sm description-center">No exam types match the selected filters.</td></tr>
+              <tr><td colSpan={8} className="p-4 text-sm text-muted-foreground">No exam types match the selected filters.</td></tr>
             )}
           </tbody>
         </table>
@@ -466,36 +466,36 @@ function ExamTypeFormCard({
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <label className="text-xs font-medium">
           Code
-          <input aria-label={editMode ? "Edit code" : "Code"} value={form.code} onChange={(event) => onChange({ ...form, code: event.target.value })} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
+          <Input aria-label={editMode ? "Edit code" : "Code"} value={form.code} onChange={(event) => onChange({ ...form, code: event.target.value })} className="mt-1 w-full input-ltr" />
         </label>
         <label className="text-xs font-medium">
           English name
-          <input aria-label={`${prefix}English name`.trim()} value={form.name_en} onChange={(event) => onChange({ ...form, name_en: event.target.value })} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
+          <Input aria-label={`${prefix}English name`.trim()} value={form.name_en} onChange={(event) => onChange({ ...form, name_en: event.target.value })} className="mt-1 w-full input-ltr" />
         </label>
         <label className="text-xs font-medium">
           Arabic name
-          <input aria-label={`${prefix}Arabic name`.trim()} value={form.name_ar} onChange={(event) => onChange({ ...form, name_ar: event.target.value })} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-rtl" />
+          <Input aria-label={`${prefix}Arabic name`.trim()} value={form.name_ar} onChange={(event) => onChange({ ...form, name_ar: event.target.value })} className="mt-1 w-full input-rtl" />
         </label>
         <label className="text-xs font-medium">
           Exam modality
-          <select aria-label={editMode ? "Edit modality" : "Exam modality"} value={form.modalityId} onChange={(event) => onChange({ ...form, modalityId: event.target.value })} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+          <select aria-label={editMode ? "Edit modality" : "Exam modality"} value={form.modalityId} onChange={(event) => onChange({ ...form, modalityId: event.target.value })} className="input-premium mt-1 w-full !py-1">
             <option value="">Select modality</option>
             {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         <label className="text-xs font-medium">
           Duration minutes
-          <input aria-label={editMode ? "Edit duration minutes" : "Duration minutes"} type="number" min={0} value={form.durationMinutes} onChange={(event) => onChange({ ...form, durationMinutes: event.target.value })} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
+          <Input aria-label={editMode ? "Edit duration minutes" : "Duration minutes"} type="number" min={0} value={form.durationMinutes} onChange={(event) => onChange({ ...form, durationMinutes: event.target.value })} className="mt-1 w-full input-ltr" />
         </label>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-xs font-medium">
           Preparation Arabic
-          <textarea aria-label="Preparation Arabic" value={form.specific_instruction_ar} onChange={(event) => onChange({ ...form, specific_instruction_ar: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-rtl" />
+          <Textarea aria-label="Preparation Arabic" value={form.specific_instruction_ar} onChange={(event) => onChange({ ...form, specific_instruction_ar: event.target.value })} rows={2} className="mt-1 w-full input-rtl" />
         </label>
         <label className="text-xs font-medium">
           Preparation English
-          <textarea aria-label="Preparation English" value={form.specific_instruction_en} onChange={(event) => onChange({ ...form, specific_instruction_en: event.target.value })} rows={2} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" />
+          <Textarea aria-label="Preparation English" value={form.specific_instruction_en} onChange={(event) => onChange({ ...form, specific_instruction_en: event.target.value })} rows={2} className="mt-1 w-full input-ltr" />
         </label>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -554,27 +554,27 @@ function InstructionCopyDialog({
     });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div role="dialog" aria-modal="true" aria-label="Copy instructions from existing exam" className="w-full max-w-5xl rounded-lg bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 p-4 space-y-4 shadow-xl">
+    <Dialog open onClose={onClose}>
+      <DialogContent maxWidth="1024px" className="compact-controls space-y-4" aria-label="Copy instructions from existing exam" dir="ltr" lang="en">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="font-semibold text-stone-900 dark:text-white">Copy instructions from existing exam</h4>
+          <DialogTitle className="text-base">Copy instructions from existing exam</DialogTitle>
           <Button variant="secondary" onClick={onClose} className="text-xs">Close</Button>
         </div>
         <div className="grid gap-2 md:grid-cols-3">
           <label className="text-xs font-medium md:col-span-2">
             Search
-            <input aria-label="Search source exams" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm input-ltr" placeholder="Code, name, modality" />
+            <Input aria-label="Search source exams" value={search} onChange={(event) => setSearch(event.target.value)} className="mt-1 w-full input-ltr" placeholder="Code, name, modality" />
           </label>
           <label className="text-xs font-medium">
             Source modality scope
-            <select aria-label="Source modality scope" value={scope} onChange={(event) => setScope(event.target.value as "same" | "all")} className="mt-1 w-full px-3 py-2 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm">
+            <select aria-label="Source modality scope" value={scope} onChange={(event) => setScope(event.target.value as "same" | "all")} className="input-premium mt-1 w-full !py-1">
               <option value="same" disabled={!currentModalityId}>Same modality</option>
               <option value="all">All modalities</option>
             </select>
           </label>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="max-h-80 overflow-auto rounded border border-stone-200 dark:border-stone-700">
+          <div className="max-h-80 overflow-auto rounded border border-border">
             <table className="min-w-full text-xs">
               <thead className="bg-stone-50 dark:bg-stone-800">
                 <tr className="text-left">
@@ -588,7 +588,7 @@ function InstructionCopyDialog({
               </thead>
               <tbody>
                 {visibleRows.map((row) => (
-                  <tr key={row.id} className="border-t border-stone-100 dark:border-stone-800">
+                  <tr key={row.id} className="border-t border-border">
                     <td className="p-2 font-mono">{row.code || "-"}</td>
                     <td className="p-2">{row.name_en || "-"}</td>
                     <td className="p-2 input-rtl">{row.name_ar || "-"}</td>
@@ -600,12 +600,12 @@ function InstructionCopyDialog({
               </tbody>
             </table>
           </div>
-          <div className="rounded border border-stone-200 dark:border-stone-700 p-3 space-y-3 text-sm">
+          <div className="rounded border border-border p-3 space-y-3 text-sm">
             {selected ? (
               <>
                 <div>
                   <p className="font-semibold">{selected.code || "-"} - {selected.name_en || selected.name_ar || "Unnamed exam"}</p>
-                  <p className="description-center text-xs">{modalityLabel(selected, modalityById, "en")}</p>
+                  <p className="text-muted-foreground text-xs">{modalityLabel(selected, modalityById, "en")}</p>
                 </div>
                 <div>
                   <p className="text-xs font-medium">Arabic instruction</p>
@@ -626,11 +626,11 @@ function InstructionCopyDialog({
                 </div>
               </>
             ) : (
-              <p className="description-center">Select an exam to preview its preparation instructions.</p>
+              <p className="text-muted-foreground">Select an exam to preview its preparation instructions.</p>
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

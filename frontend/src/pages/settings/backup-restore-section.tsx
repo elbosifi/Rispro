@@ -1046,7 +1046,7 @@ export const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, 
   };
 
   return (
-    <div className="space-y-4">
+    <div dir="ltr" className="space-y-4">
       <p className="description-center">{t("settings.backupInfo")}</p>
 
       <section dir="ltr" className="rounded-lg border border-stone-200 bg-white p-4 text-left text-sm dark:border-stone-700 dark:bg-stone-900">

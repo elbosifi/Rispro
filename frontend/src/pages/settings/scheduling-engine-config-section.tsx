@@ -707,9 +707,9 @@ export default function SchedulingEngineConfigSection({ onReAuthRequired }: { on
 
       {/* D. Special Quotas */}
       <section className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <h4 className="font-medium text-sm">{SECTION_TITLES.specialQuotas}</h4>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h4 className="min-w-0 font-medium text-sm">{SECTION_TITLES.specialQuotas}</h4>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: [...prev.specialQuotas, { examTypeId: "", dailyExtraSlots: "0", isActive: true }] }))}>
               {ACTION_LABELS.add.specialQuotas}
             </button>

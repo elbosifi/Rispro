@@ -125,7 +125,7 @@ function formFromResponse(data: OhifConfigurationResponse): FormState {
   };
 }
 
-const inputClass = "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm";
+const inputClass = "input-ltr h-10 w-full rounded-lg border border-border bg-background px-3 text-left text-sm";
 const labelClass = "grid gap-1 text-sm font-medium text-foreground";
 
 export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {

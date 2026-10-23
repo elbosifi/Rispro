@@ -8,10 +8,10 @@ const defaultSubject = "RISpro: Additional imaging completed — {{additional_im
 const defaultBody = "Patient: {{patient_name}}\nOriginal examination: {{original_examination}}\nModality: {{modality}}";
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
 
-function renderSection() {
+function renderSection(historyRows = [{ id: 1, eventType: "additional_imaging_completed", recipientEmail: "doctor@example.test", subject: "Imaging complete", status: "accepted", attemptCount: 1, createdAt: "2026-01-01T00:00:00Z" }, { id: 2, eventType: "system_test", recipientEmail: "failed@example.test", subject: "Failed test", status: "failed", attemptCount: 3, lastErrorSummary: "SMTP refused", createdAt: "2026-01-02T00:00:00Z" }]) {
   let rule = { eventType: "additional_imaging_completed", enabled: true, label: "Additional imaging completed", description: "Notify the assigned reporting doctor.", recipientDescription: "Assigned reporting doctor", subjectTemplate: defaultSubject, textBodyTemplate: defaultBody, defaultSubjectTemplate: defaultSubject, defaultTextBodyTemplate: defaultBody, availableBodyPlaceholders: ["patient_name", "original_examination", "modality", "original_accession", "additional_imaging_accession", "reporting_action"], availableSubjectPlaceholders: ["original_examination", "modality", "original_accession", "additional_imaging_accession", "reporting_action"] };
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith("/history")) return response({ history: [{ id: 1, eventType: "additional_imaging_completed", recipientEmail: "doctor@example.test", subject: "Imaging complete", status: "accepted", attemptCount: 1, createdAt: "2026-01-01T00:00:00Z" }, { id: 2, eventType: "system_test", recipientEmail: "failed@example.test", subject: "Failed test", status: "failed", attemptCount: 3, lastErrorSummary: "SMTP refused", createdAt: "2026-01-02T00:00:00Z" }] });
+    if (url.endsWith("/history")) return response({ history: historyRows });
     if (url.endsWith("/rules")) return response({ rules: [rule] });
     if (url.endsWith("/template")) {
       const body = JSON.parse(String(init?.body));
@@ -52,6 +52,13 @@ describe("EmailNotificationsSection", () => {
     expect(screen.getByLabelText("Email message")).toHaveProperty("value", defaultBody);
     expect(screen.getByText("{{patient_name}} is BODY ONLY.")).toBeTruthy();
     expect(screen.queryByText(/booked|case-assigned|future/i)).toBeNull();
+    expect(screen.getByRole("region", { name: "Recent Email Activity" }).getAttribute("tabindex")).toBe("0");
+    expect(screen.getByRole("columnheader", { name: "Time" }).getAttribute("scope")).toBe("col");
+  });
+
+  it("shows an explicit empty state when no email activity is available", async () => {
+    renderSection([]);
+    expect(await screen.findByText("No recent email activity.")).toBeTruthy();
   });
 
   it("submits the full SMTP payload and restores connection and test-email actions", async () => {

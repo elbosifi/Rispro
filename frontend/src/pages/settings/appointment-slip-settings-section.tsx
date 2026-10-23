@@ -248,7 +248,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
             ]}
           />
           <ToggleRow
-            label={chooseLocalized(language, "Ø¬Ø¹Ù„ Ù†Øµ Ø§Ù„ÙˆØµÙ„ Ø¹Ø±ÙŠØ¶Ù‹Ø§", "Bold appointment slip text")}
+            label={chooseLocalized(language, "نص وصل الموعد بخط عريض", "Bold appointment slip text")}
             checked={draft.boldAppointmentSlipText}
             onChange={(checked) => setDraft((current) => ({ ...current, boldAppointmentSlipText: checked }))}
           />
@@ -344,6 +344,8 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
           <div className="grid grid-cols-2 gap-3">
             <InputField label="QR caption (Ar)" value={draft.qrCaptionAr} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionAr: value }))} dir="rtl" />
             <InputField label="QR caption (En)" value={draft.qrCaptionEn} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionEn: value }))} dir="ltr" />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <TextareaField label="QR helper (Ar)" value={draft.qrHelperTextAr} onChange={(value) => setDraft((current) => ({ ...current, qrHelperTextAr: value }))} dir="rtl" />
             <TextareaField label="QR helper (En)" value={draft.qrHelperTextEn} onChange={(value) => setDraft((current) => ({ ...current, qrHelperTextEn: value }))} dir="ltr" />
           </div>
@@ -399,7 +401,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
             onChange={(value) => setDraft((current) => ({ ...current, maxInstructionLinesOnSlip: value }))}
             error={errors.maxInstructionLinesOnSlip}
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <TextareaField label="Fallback instructions (Ar)" value={draft.fallbackInstructionTextAr} onChange={(value) => setDraft((current) => ({ ...current, fallbackInstructionTextAr: value }))} dir="rtl" />
             <TextareaField label="Fallback instructions (En)" value={draft.fallbackInstructionTextEn} onChange={(value) => setDraft((current) => ({ ...current, fallbackInstructionTextEn: value }))} dir="ltr" />
             <TextareaField label="Location text (Ar)" value={draft.locationTextAr} onChange={(value) => setDraft((current) => ({ ...current, locationTextAr: value }))} dir="rtl" />

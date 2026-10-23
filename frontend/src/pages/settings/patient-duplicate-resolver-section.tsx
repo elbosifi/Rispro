@@ -13,7 +13,7 @@ import {
 } from "@/lib/api-hooks";
 import { ApiError } from "@/lib/api-client";
 import { pushToast } from "@/lib/toast";
-import { Button, Badge } from "@/components/shared";
+import { Button, Badge, SearchInput } from "@/components/shared";
 import { useLanguage } from "@/providers/language-provider";
 import type { TranslationKey } from "@/lib/i18n";
 import type { Patient, PatientDirectorySummary, PatientDuplicateBlockers, PatientDuplicateCandidate, PatientDuplicateSummary } from "@/types/api";
@@ -597,8 +597,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
           <p className="text-sm font-semibold text-foreground">{t("patientMerge.candidatePairsFound", { count: candidatesQuery.data?.candidateCount ?? candidates.length })}</p>
         </div>
         <div className="relative w-full lg:max-w-sm">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={candidateQuery} onChange={(event) => setCandidateQuery(event.target.value)} className="input-premium h-10 w-full pl-9" placeholder={t("patientMerge.filterCandidateQueue")} />
+          <SearchInput aria-label={t("patientMerge.filterCandidateQueue")} value={candidateQuery} onChange={(event) => setCandidateQuery(event.target.value)} className="h-10 w-full" placeholder={t("patientMerge.filterCandidateQueue")} />
         </div>
       </div>
 
@@ -710,11 +709,11 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(260px,420px)_1fr]">
           <div className="space-y-3">
             <div className="relative">
-              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input
+              <SearchInput
+                aria-label={t("patientMerge.manualSearchPlaceholder")}
                 value={manualQuery}
                 onChange={(event) => setManualQuery(event.target.value)}
-                className="input-premium h-10 w-full pl-9"
+                className="h-10 w-full"
                 placeholder={t("patientMerge.manualSearchPlaceholder")}
               />
             </div>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 import {
   Dialog,
   DialogContent,
@@ -452,18 +453,18 @@ export default function UsersSection({
         </Button>
       </div>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-        <input
+        <Input
           aria-label={t("settings.users.search")}
           placeholder={t("settings.users.search")}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+          className="min-w-0"
         />
         <select
           aria-label={t("settings.users.allRoles")}
           value={roleFilter}
           onChange={(event) => setRoleFilter(event.target.value as RoleFilter)}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+          className="input-premium min-w-0 px-3 py-2 text-sm"
         >
           <option value="all">{t("settings.users.allRoles")}</option>
           {roleOptions.map((role) => (
@@ -478,7 +479,7 @@ export default function UsersSection({
           onChange={(event) =>
             setStatusFilter(event.target.value as StatusFilter)
           }
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
+          className="input-premium min-w-0 px-3 py-2 text-sm"
         >
           <option value="all">{t("settings.users.allStatuses")}</option>
           <option value="active">{t("settings.active")}</option>
@@ -621,45 +622,45 @@ export default function UsersSection({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
               <span>{t("settings.username")}</span>
-              <input
+              <Input
                 value={createForm.username}
                 onChange={(event) =>
                   setCreateForm((current) => ({ ...current, username: event.target.value, email: createEmailEdited ? current.email : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(event.target.value.trim()) ? event.target.value.trim() : "" }))
                 }
-                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                className="w-full"
               />
             </label>
             <label className="space-y-1 text-sm">
               <span>Email</span>
-              <input aria-label="Email" value={createForm.email} onChange={(event) => { setCreateEmailEdited(true); setCreateForm({ ...createForm, email: event.target.value }); }} className="w-full rounded border px-3 py-2 dark:bg-stone-900" />
+              <Input aria-label="Email" value={createForm.email} onChange={(event) => { setCreateEmailEdited(true); setCreateForm({ ...createForm, email: event.target.value }); }} className="w-full" />
             </label>
             <label className="space-y-1 text-sm">
               <span>{t("settings.arabicName")}</span>
-              <input
+              <Input
                 value={createForm.fullName}
                 onChange={(event) =>
                   setCreateForm({ ...createForm, fullName: event.target.value })
                 }
-                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                className="w-full"
               />
             </label>
             <label className="space-y-1 text-sm">
               <span>{t("settings.englishName")}</span>
-              <input
+              <Input
                 value={createForm.englishName}
                 onChange={(event) => setCreateForm({ ...createForm, englishName: event.target.value })}
-                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                className="w-full"
               />
             </label>
             <label className="space-y-1 text-sm">
               <span>{t("settings.password")}</span>
-              <input
+              <Input
                 type="password"
                 value={createForm.password}
                 onChange={(event) =>
                   setCreateForm({ ...createForm, password: event.target.value })
                 }
-                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                className="w-full"
               />
             </label>
             <label className="space-y-1 text-sm">
@@ -669,7 +670,7 @@ export default function UsersSection({
                 onChange={(event) =>
                   setCreateForm({ ...createForm, role: event.target.value })
                 }
-                className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                className="input-premium w-full px-3 py-2"
               >
                 {createRoleOptions.map((role) => (
                   <option key={role} value={role}>
@@ -728,7 +729,7 @@ export default function UsersSection({
                 <dl className="mt-2 grid gap-2 sm:grid-cols-2">
                   <div>
                     <dt className="description-center">Email</dt>
-                    <dd>{identityEditing ? <input aria-label="Email" value={identityDraft.email} onChange={(event) => setIdentityDraft({ ...identityDraft, email: event.target.value })} className="w-full rounded border px-3 py-2 dark:bg-stone-900" /> : (selectedUser.email || t("settings.users.notAvailable"))}</dd>
+                    <dd>{identityEditing ? <Input aria-label="Email" value={identityDraft.email} onChange={(event) => setIdentityDraft({ ...identityDraft, email: event.target.value })} className="w-full" /> : (selectedUser.email || t("settings.users.notAvailable"))}</dd>
                   </div>
                   <div>
                     <dt className="description-center">
@@ -736,7 +737,7 @@ export default function UsersSection({
                     </dt>
                     <dd>
                       {identityEditing ? (
-                        <input
+                        <Input
                           aria-label={t("settings.arabicName")}
                           value={identityDraft.fullName}
                           onChange={(event) =>
@@ -745,7 +746,7 @@ export default function UsersSection({
                               fullName: event.target.value,
                             })
                           }
-                          className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                          className="w-full"
                         />
                       ) : (
                         selectedUser.fullName
@@ -754,7 +755,7 @@ export default function UsersSection({
                   </div>
                   <div>
                     <dt className="description-center">{t("settings.englishName")}</dt>
-                    <dd>{identityEditing ? <input aria-label={t("settings.englishName")} value={identityDraft.englishName} onChange={(event) => setIdentityDraft({ ...identityDraft, englishName: event.target.value })} className="w-full rounded border px-3 py-2 dark:bg-stone-900" /> : (selectedUser.englishName || t("settings.users.notAvailable"))}</dd>
+                    <dd>{identityEditing ? <Input aria-label={t("settings.englishName")} value={identityDraft.englishName} onChange={(event) => setIdentityDraft({ ...identityDraft, englishName: event.target.value })} className="w-full" /> : (selectedUser.englishName || t("settings.users.notAvailable"))}</dd>
                   </div>
                   <div>
                     <dt className="description-center">
@@ -762,7 +763,7 @@ export default function UsersSection({
                     </dt>
                     <dd>
                       {identityEditing ? (
-                        <input
+                        <Input
                           aria-label={t("settings.username")}
                           value={identityDraft.username}
                           onChange={(event) =>
@@ -771,7 +772,7 @@ export default function UsersSection({
                               username: event.target.value,
                             })
                           }
-                          className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                          className="w-full"
                         />
                       ) : (
                         `@${selectedUser.username}`
@@ -894,7 +895,7 @@ export default function UsersSection({
                         value={roleDraft ?? selectedUser.role}
                         disabled={roleMutation.isPending}
                         onChange={(event) => setRoleDraft(event.target.value as Role)}
-                        className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                        className="input-premium w-full px-3 py-2"
                       >
                         {editRoleOptions.map((role) => (
                           <option key={role} value={role}>
@@ -974,7 +975,7 @@ export default function UsersSection({
                 ) : null}
                 {canModifySelectedUser && selectedUser.role === "receptionist" && (
                   <label className="mt-3 flex items-center gap-2">
-                    <input
+                    <Input
                       type="checkbox"
                       checked={Boolean(selectedUser.canRequestSchedulingOverride)}
                       disabled={permissionMutation.isPending}
@@ -1030,7 +1031,7 @@ export default function UsersSection({
                       type="password"
                       value={passwordDraft}
                       onChange={(event) => setPasswordDraft(event.target.value)}
-                      className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                      className="w-full"
                     />
                     <Button
                       className="mt-2"
@@ -1053,14 +1054,14 @@ export default function UsersSection({
                   </label>
                   <label className="space-y-1">
                     <span>{t("settings.users.temporaryPassword")}</span>
-                    <input
+                    <Input
                       aria-label={t("settings.users.temporaryPassword")}
                       type="password"
                       value={temporaryPasswordDraft}
                       onChange={(event) =>
                         setTemporaryPasswordDraft(event.target.value)
                       }
-                      className="w-full rounded border px-3 py-2 dark:bg-stone-900"
+                      className="w-full"
                     />
                     <p className="text-xs description-center">
                       {t("settings.users.passwordChangeRequired")}

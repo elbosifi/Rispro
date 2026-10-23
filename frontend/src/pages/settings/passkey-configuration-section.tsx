@@ -49,7 +49,7 @@ export default function PasskeyConfigurationSection({ onReAuthRequired, reauthVe
   const saveError = mutation.error instanceof Error ? mutation.error.message : null;
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div dir="ltr" className="max-w-2xl space-y-4">
       <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
         <div className="flex items-center gap-2 font-semibold"><KeyRound className="h-4 w-4" /> Passkey sign-in</div>
         <p className="mt-2 leading-6">RISpro detects the address open in this browser and saves it as the WebAuthn relying-party configuration. Open RISpro through its final HTTPS address before saving.</p>

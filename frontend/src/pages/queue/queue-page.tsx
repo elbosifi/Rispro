@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useState, useRef, useCallback, useEffect, useMemo, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -429,7 +430,7 @@ export default function QueuePage() {
     return (
     <li key={entry.id} className="p-3 sm:p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -470,7 +471,7 @@ export default function QueuePage() {
           )}
           {entry.notes && <p className="text-xs text-muted-foreground">{entry.notes}</p>}
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <div className="flex flex-wrap items-center gap-2 sm:w-1/2 sm:shrink-0 sm:justify-end">
           <Button
             size="sm"
             variant="secondary"
@@ -528,13 +529,13 @@ export default function QueuePage() {
   ];
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto space-y-4">
+    <div className="compact-controls w-full max-w-[1600px] mx-auto space-y-4">
       <div className="space-y-2 sm:space-y-3">
         <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
-              <span className="gradient-text">{t("queue.pageTitle")}</span>
+              <span>{t("queue.pageTitle")}</span>
             </h1>
             <p className="mt-2 text-muted-foreground">{t("queue.pageSubtitle")}</p>
           </div>

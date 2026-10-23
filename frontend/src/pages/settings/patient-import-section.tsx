@@ -61,6 +61,7 @@ export default function PatientImportSection({
   };
 
   const inspectMutation = useMutation({
+    meta: { suppressGlobalToast: true },
     mutationFn: inspectPatientImportWorkbook,
     onSuccess: (result) => {
       const workbook = result.workbook;
@@ -81,6 +82,7 @@ export default function PatientImportSection({
   });
 
   const previewMutation = useMutation({
+    meta: { suppressGlobalToast: true },
     mutationFn: previewPatientImport,
     onSuccess: (result) => {
       setBatchId(Number(result.batch.id));
@@ -323,11 +325,11 @@ export default function PatientImportSection({
         </div>
       )}
 
-      <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 space-y-3">
-        <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <h4 className="text-sm font-semibold text-foreground">
           {language === "ar" ? "1) رفع ملف Excel" : "1) Upload Excel file"}
         </h4>
-        <input type="file" accept=".xlsx,.xls" onChange={handlePickFile} />
+        <input type="file" aria-label={language === "ar" ? "ملف Excel للمرضى" : "Patient Excel workbook"} className="max-w-full text-sm" accept=".xlsx,.xls" onChange={handlePickFile} />
         {fileName ? <p className="text-xs text-stone-500">{fileName}</p> : null}
         <Button
           onClick={() => void handleInspectWorkbook()}
@@ -341,30 +343,30 @@ export default function PatientImportSection({
       </div>
 
       {sheetNames.length > 0 && (
-        <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 space-y-3">
-          <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+        <div className="rounded-lg border border-border p-4 space-y-3">
+          <h4 className="text-sm font-semibold text-foreground">
             {language === "ar" ? "3) اختيار الورقة + ربط الأعمدة" : "3) Select sheet + map columns"}
           </h4>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="text-xs text-stone-700 dark:text-stone-300">
+            <label className="text-sm font-medium text-muted-foreground">
               {language === "ar" ? "Sheet" : "Sheet"}
               <select
                 value={selectedSheetName}
                 onChange={(e) => void handleSheetChange(e.target.value)}
-                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                className="input-premium mt-1 w-full !py-1"
               >
                 {sheetNames.map((sheet) => (
                   <option key={sheet} value={sheet}>{sheet}</option>
                 ))}
               </select>
             </label>
-            <label className="text-xs text-stone-700 dark:text-stone-300">
+            <label className="text-sm font-medium text-muted-foreground">
               {language === "ar" ? "Batch category" : "Batch category"}
               <select
                 value={batchCategory}
                 onChange={(e) => setBatchCategory((e.target.value as "oncology" | "non_oncology") || "non_oncology")}
-                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                className="input-premium mt-1 w-full !py-1"
               >
                 <option value="non_oncology">{language === "ar" ? "غير أورام" : "Non-oncology"}</option>
                 <option value="oncology">{language === "ar" ? "أورام" : "Oncology"}</option>
@@ -373,12 +375,12 @@ export default function PatientImportSection({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label className="text-xs text-stone-700 dark:text-stone-300">
+            <label className="text-sm font-medium text-muted-foreground">
               {language === "ar" ? "Arabic full name (required)" : "Arabic full name (required)"}
               <select
                 value={mapping.arabic_full_name}
                 onChange={(e) => setMapping((prev) => ({ ...prev, arabic_full_name: e.target.value }))}
-                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                className="input-premium mt-1 w-full !py-1"
               >
                 <option value="">--</option>
                 {headers.map((header) => (
@@ -386,12 +388,12 @@ export default function PatientImportSection({
                 ))}
               </select>
             </label>
-            <label className="text-xs text-stone-700 dark:text-stone-300">
+            <label className="text-sm font-medium text-muted-foreground">
               {language === "ar" ? "National ID (required)" : "National ID (required)"}
               <select
                 value={mapping.national_id}
                 onChange={(e) => setMapping((prev) => ({ ...prev, national_id: e.target.value }))}
-                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                className="input-premium mt-1 w-full !py-1"
               >
                 <option value="">--</option>
                 {headers.map((header) => (
@@ -399,12 +401,12 @@ export default function PatientImportSection({
                 ))}
               </select>
             </label>
-            <label className="text-xs text-stone-700 dark:text-stone-300">
+            <label className="text-sm font-medium text-muted-foreground">
               {language === "ar" ? "Phone (optional)" : "Phone (optional)"}
               <select
                 value={mapping.phone}
                 onChange={(e) => setMapping((prev) => ({ ...prev, phone: e.target.value }))}
-                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                className="input-premium mt-1 w-full !py-1"
               >
                 <option value="">--</option>
                 {headers.map((header) => (
@@ -427,8 +429,8 @@ export default function PatientImportSection({
       )}
 
       {batchId !== null && (
-        <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 space-y-4">
-          <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+        <div className="rounded-lg border border-border p-4 space-y-4">
+          <h4 className="text-sm font-semibold text-foreground">
             {language === "ar" ? "5) مراجعة الصفوف" : "5) Review staged rows"}
           </h4>
 
@@ -467,9 +469,9 @@ export default function PatientImportSection({
           {rowsLoading ? (
             <p className="text-sm text-stone-500">{language === "ar" ? "جاري تحميل الصفوف..." : "Loading rows..."}</p>
           ) : (
-            <div className="max-h-[420px] overflow-auto border border-stone-200 dark:border-stone-700 rounded">
-              <table className="w-full text-xs">
-                <thead className="bg-stone-50 dark:bg-stone-800 sticky top-0">
+            <div className="max-h-[420px] overflow-auto border border-border rounded">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="sticky top-0 bg-muted">
                   <tr>
                     <th className="p-2 text-start">#</th>
                     <th className="p-2 text-start">AR</th>
@@ -486,7 +488,7 @@ export default function PatientImportSection({
                 </thead>
                 <tbody>
                   {rowsData.map((row) => (
-                    <tr key={row.id} className="border-t border-stone-200 dark:border-stone-700">
+                    <tr key={row.id} className="border-t border-border">
                       <td className="p-2">{row.row_number}</td>
                       <td className="p-2">{row.arabic_full_name || "-"}</td>
                       <td className="p-2">{row.english_full_name || "-"}</td>
@@ -500,6 +502,7 @@ export default function PatientImportSection({
                       <td className="p-2">
                         <input
                           type="checkbox"
+                          aria-label={language === "ar" ? `تحديد الصف ${row.row_number}` : `Select row ${row.row_number}`}
                           checked={row.is_selected_for_migration}
                           disabled={row.validation_status !== "valid" || selectMutation.isPending}
                           onChange={(event) =>

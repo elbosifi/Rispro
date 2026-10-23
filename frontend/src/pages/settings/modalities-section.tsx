@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/shared/Button";
+import { Badge, Button, Input, Textarea } from "@/components/shared";
 import {
   createModality,
   deactivateModality,
@@ -159,7 +159,7 @@ export default function ModalitiesSection({ onReAuthRequired }: { onReAuthRequir
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["modalities"])} />;
     return <QueryError message={msg} />;
   }
-  if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+  if (isLoading) return <p className="text-muted-foreground">{t("settings.loading")}</p>;
 
   const modalities = Array.isArray(data?.modalities) ? data.modalities : [];
   const createSafetyWarningInvalid = createForm.safety_warning_enabled && !createForm.safety_warning_ar.trim() && !createForm.safety_warning_en.trim();
@@ -206,11 +206,11 @@ export default function ModalitiesSection({ onReAuthRequired }: { onReAuthRequir
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
+          <Button type="button" onClick={() => setMutationError(null)} variant="ghost" size="sm" className="ms-2">إغلاق</Button>
         </div>
       )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm description-center">
+        <p className="text-sm text-muted-foreground">
           {showInactive
             ? "Showing all modalities, including inactive ones."
             : "Showing active modalities only. Deactivated modalities stay hidden from this list."}
@@ -226,116 +226,116 @@ export default function ModalitiesSection({ onReAuthRequired }: { onReAuthRequir
           <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة وسيلة تصوير"}</Button>
         </div>
       </div>
-      <span className="text-sm description-center">{modalities.length} modalities</span>
+      <span className="text-sm text-muted-foreground">{modalities.length} modalities</span>
 
       {showCreate && (
-        <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
-          <div className="grid grid-cols-2 gap-2">
-            <input value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="الرمز" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="الاسم الإنجليزي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="الاسم العربي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="السعة اليومية" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+        <div className="p-4 bg-muted/20 rounded-lg space-y-2 text-sm">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الرمز</span><Input dir="ltr" value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="الرمز" className="w-full" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الاسم الإنجليزي</span><Input dir="ltr" value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="الاسم الإنجليزي" className="w-full" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الاسم العربي</span><Input dir="rtl" value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="الاسم العربي" className="w-full" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>السعة اليومية</span><Input dir="ltr" type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="السعة اليومية" className="w-full" /></label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <textarea value={createForm.general_instruction_ar} onChange={(e) => setCreateForm({ ...createForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-            <textarea value={createForm.general_instruction_en} onChange={(e) => setCreateForm({ ...createForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>ملاحظات الجهاز (عربي)</span><Textarea dir="rtl" value={createForm.general_instruction_ar} onChange={(e) => setCreateForm({ ...createForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="min-h-20 w-full" /></label>
+            <label className="grid min-w-0 gap-1 text-xs font-medium"><span>ملاحظات الجهاز (إنجليزي)</span><Textarea dir="ltr" value={createForm.general_instruction_en} onChange={(e) => setCreateForm({ ...createForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="min-h-20 w-full" /></label>
           </div>
           <div className="flex items-center gap-3 pt-1">
             <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={createForm.safety_warning_enabled} onChange={(e) => setCreateForm({ ...createForm, safety_warning_enabled: e.target.checked })} className="rounded" /> تحذير السلامة مفعل</label>
           </div>
           {createForm.safety_warning_enabled && (
-            <div className="grid grid-cols-2 gap-2">
-              <textarea value={createForm.safety_warning_ar} onChange={(e) => setCreateForm({ ...createForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-              <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="grid min-w-0 gap-1 text-xs font-medium"><span>تحذير السلامة (عربي)</span><Textarea dir="rtl" value={createForm.safety_warning_ar} onChange={(e) => setCreateForm({ ...createForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="min-h-20 w-full" /></label>
+              <label className="grid min-w-0 gap-1 text-xs font-medium"><span>تحذير السلامة (إنجليزي)</span><Textarea dir="ltr" value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="min-h-20 w-full" /></label>
             </div>
           )}
           {createSafetyWarningInvalid ? <p className="text-xs text-red-700" role="alert">Safety warning text is required when modality safety warning is enabled.</p> : null}
-          <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!createForm.safety_warning_enabled} value={createForm.safety_workflow_type} onChange={(e) => setCreateForm({ ...createForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en || createSafetyWarningInvalid} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
+          <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!createForm.safety_warning_enabled} value={createForm.safety_workflow_type} onChange={(e) => setCreateForm({ ...createForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium !py-1"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
+          <Button type="button" onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en || createSafetyWarningInvalid} variant="primary" size="sm">إنشاء</Button>
         </div>
       )}
 
       {modalities.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 p-4 text-sm text-stone-500 dark:text-stone-400">
+        <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 p-4 text-sm text-muted-foreground">
           لم يتم تكوين أي أجهزة بعد.
         </div>
       ) : (
-      <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+      <ul className="divide-y divide-border">
         {modalities.map((modality) => (
           <li key={modality.id} className="py-3">
             {editingId === modality.id ? (
               <div className="space-y-2 text-sm">
-                <div className="grid grid-cols-2 gap-2">
-                  <input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.name_en} onChange={(e) => setEditForm({ ...editForm, name_en: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input type="number" value={editForm.daily_capacity} onChange={(e) => setEditForm({ ...editForm, daily_capacity: parseInt(e.target.value) || 0 })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الرمز</span><Input dir="ltr" value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} className="w-full" /></label>
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الاسم الإنجليزي</span><Input dir="ltr" value={editForm.name_en} onChange={(e) => setEditForm({ ...editForm, name_en: e.target.value })} className="w-full" /></label>
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>الاسم العربي</span><Input dir="rtl" value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="w-full" /></label>
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>السعة اليومية</span><Input dir="ltr" type="number" value={editForm.daily_capacity} onChange={(e) => setEditForm({ ...editForm, daily_capacity: parseInt(e.target.value) || 0 })} className="w-full" /></label>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <textarea value={editForm.general_instruction_ar} onChange={(e) => setEditForm({ ...editForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-                  <textarea value={editForm.general_instruction_en} onChange={(e) => setEditForm({ ...editForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>ملاحظات الجهاز (عربي)</span><Textarea dir="rtl" value={editForm.general_instruction_ar} onChange={(e) => setEditForm({ ...editForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="min-h-20 w-full" /></label>
+                  <label className="grid min-w-0 gap-1 text-xs font-medium"><span>ملاحظات الجهاز (إنجليزي)</span><Textarea dir="ltr" value={editForm.general_instruction_en} onChange={(e) => setEditForm({ ...editForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="min-h-20 w-full" /></label>
                 </div>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.safety_warning_enabled} onChange={(e) => setEditForm({ ...editForm, safety_warning_enabled: e.target.checked })} className="rounded" /> تحذير السلامة مفعل</label>
                   <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" /> مفعل</label>
                 </div>
                 {editForm.safety_warning_enabled && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <textarea value={editForm.safety_warning_ar} onChange={(e) => setEditForm({ ...editForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-                    <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="grid min-w-0 gap-1 text-xs font-medium"><span>تحذير السلامة (عربي)</span><Textarea dir="rtl" value={editForm.safety_warning_ar} onChange={(e) => setEditForm({ ...editForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="min-h-20 w-full" /></label>
+                    <label className="grid min-w-0 gap-1 text-xs font-medium"><span>تحذير السلامة (إنجليزي)</span><Textarea dir="ltr" value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="min-h-20 w-full" /></label>
                   </div>
                 )}
                 {editSafetyWarningInvalid ? <p className="text-xs text-red-700" role="alert">Safety warning text is required when modality safety warning is enabled.</p> : null}
-                <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!editForm.safety_warning_enabled} value={editForm.safety_workflow_type} onChange={(e) => setEditForm({ ...editForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
+                <label className="block text-xs">Safety workflow<select aria-label="Safety workflow" disabled={!editForm.safety_warning_enabled} value={editForm.safety_workflow_type} onChange={(e) => setEditForm({ ...editForm, safety_workflow_type: e.target.value as ModalityFormState["safety_workflow_type"] })} className="mt-1 w-full input-premium !py-1"><option value="standard_acknowledgement">Standard warning acknowledgement</option><option value="mri_primary_implant_screening">MRI primary implant screening</option></select><span className="mt-1 block text-muted-foreground">Choose the safety workflow that users must complete before examination and appointment-date selection. Select MRI primary implant screening only for MRI modalities.</span></label>
                 <div className="flex gap-2">
-                  <button onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending || editSafetyWarningInvalid} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
-                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>
+                  <Button type="button" onClick={() => updateMutation.mutate({ id: modality.id, data: editForm })} disabled={updateMutation.isPending || editSafetyWarningInvalid} variant="primary" size="sm">Save</Button>
+                  <Button type="button" onClick={() => setEditingId(null)} variant="secondary" size="sm">إلغاء</Button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-start">
-                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`}</p>
-                  <p className="text-sm description-center">{t("settings.capacity")}: {modality.daily_capacity ?? "-"}</p>
+                  <p className="font-medium text-foreground">{chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`}</p>
+                  <p className="text-sm text-muted-foreground">{t("settings.capacity")}: {modality.daily_capacity ?? "-"}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${modality.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={modality.is_active ? "success" : "neutral"} size="sm">
                     {modality.is_active ? t("settings.active") : t("settings.inactive")}
-                  </span>
-                  <button onClick={() => startEdit(modality)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  </Badge>
+                  <Button type="button" onClick={() => startEdit(modality)} variant="secondary" size="sm">Edit</Button>
                   {modality.is_active ? (
-                    <button
-                      onClick={() => {
+                    <Button
+                    type="button"                      onClick={() => {
                         if (window.confirm("Deactivate this modality? It will disappear from active lists.")) {
                           deactivateMutation.mutate(modality.id);
                         }
                       }}
-                      className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                      variant="secondary" size="sm"
                     >
                       Deactivate
-                    </button>
+                    </Button>
                   ) : (
-                    <button
-                      onClick={() => {
+                    <Button
+                    type="button"                      onClick={() => {
                         if (window.confirm("Reactivate this modality?")) {
                           updateMutation.mutate({ id: modality.id, data: { ...modality, is_active: true } });
                         }
                       }}
-                      className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors"
+                      variant="secondary" size="sm"
                     >
                       Activate
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    onClick={() => {
+                  <Button
+                    type="button"                    onClick={() => {
                       if (window.confirm("Permanently delete this modality? This cannot be undone.")) {
                         hardDeleteMutation.mutate(modality.id);
                       }
                     }}
-                    className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                    variant="destructive" size="sm"
                   >
                     Hard Delete
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

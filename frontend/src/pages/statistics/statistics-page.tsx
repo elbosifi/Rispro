@@ -1,10 +1,10 @@
+import "@/components/shared/compact-controls.css";
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups, recordReportOutput } from "@/lib/api-hooks";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
-import { Select } from "@/components/common/select";
 import {
   Badge,
   Button,
@@ -126,7 +126,7 @@ function BarCell({ value, max }: { value: number; max: number }) {
 }
 
 function formatRate(numerator: number | undefined, denominator: number | undefined): string {
-  if (!denominator) return "â€”";
+  if (!denominator) return "—";
   return `${Math.round(((numerator ?? 0) / denominator) * 1000) / 10}%`;
 }
 
@@ -215,7 +215,7 @@ function OperationalMetricCard({
     <Card className="statistics-print-card p-4">
       <div className="flex h-full flex-col justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.12em] font-mono text-muted-foreground">{label}</p>
+          <p className="text-sm font-medium text-muted-foreground">{label}</p>
           <p className="mt-2 text-2xl font-bold" style={{ color: "var(--text)" }}>{value}</p>
           {helper ? <p className="mt-1 text-xs text-muted-foreground">{helper}</p> : null}
         </div>
@@ -397,7 +397,7 @@ export default function StatisticsPage() {
   };
 
   return (
-    <div className="statistics-page max-w-7xl mx-auto space-y-6">
+    <div className="statistics-page compact-controls mx-auto w-full min-w-0 max-w-7xl space-y-5">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -454,7 +454,7 @@ export default function StatisticsPage() {
       <Card className="statistics-print-hide p-4">
         <div className="space-y-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+            <p className="text-sm font-medium text-muted-foreground mb-2">
               {t(language, "statistics.quickRange")}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -489,18 +489,22 @@ export default function StatisticsPage() {
               value={dateTo}
               onChange={(value) => updateNavigation({ dateTo: value })}
             />
-            <Select
-              label={t(language, "statistics.modalityCol")}
-              value={modalityId}
-              onChange={(value) => updateNavigation({ modalityId: value })}
-              options={[
-                { value: "", label: t(language, "statistics.all") },
-                ...(lookupsQuery.data?.modalities ?? []).map((m) => ({
-                  value: m.id.toString(),
-                  label: language === "ar" ? m.nameAr : m.nameEn
-                }))
-              ]}
-            />
+            <label className="grid content-start gap-1.5 text-sm font-medium text-muted-foreground">
+              {t(language, "statistics.modalityCol")}
+              <select
+                aria-label={t(language, "statistics.modalityCol")}
+                value={modalityId}
+                onChange={(event) => updateNavigation({ modalityId: event.target.value })}
+                className="input-premium w-full !py-1 text-foreground"
+              >
+                <option value="">{t(language, "statistics.all")}</option>
+                {(lookupsQuery.data?.modalities ?? []).map((modality) => (
+                  <option key={modality.id} value={modality.id.toString()}>
+                    {language === "ar" ? modality.nameAr : modality.nameEn}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       </Card>
@@ -519,7 +523,7 @@ export default function StatisticsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="statistics-print-card p-5">
-          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             {t(language, "statistics.patientRegistryAllTime")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
@@ -527,7 +531,7 @@ export default function StatisticsPage() {
           </p>
         </Card>
         <Card className="statistics-print-card p-5">
-          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             {t(language, "statistics.appointmentsForPeriod")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
@@ -540,7 +544,7 @@ export default function StatisticsPage() {
           </p>
         </Card>
         <Card className="statistics-print-card p-5">
-          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             {t(language, "statistics.oncologyPatientsAllTime")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
@@ -548,7 +552,7 @@ export default function StatisticsPage() {
           </p>
         </Card>
         <Card className="statistics-print-card p-5">
-          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             {t(language, "statistics.nonOncologyPatientsAllTime")}
           </p>
           <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
@@ -573,7 +577,7 @@ export default function StatisticsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
             <OperationalMetricCard
               label={t(language, "statistics.completionRate")}
-              value={stats ? completionRate : "â€”"}
+              value={stats ? completionRate : "—"}
               helper={stats && totalAppointments ? `${stats.summary.completedCount} / ${stats.summary.totalAppointments}` : undefined}
               href={stats?.summary.completedCount ? buildRegistrationsDrilldownUrl({
                 dateMode: "range",
@@ -585,7 +589,7 @@ export default function StatisticsPage() {
             />
             <OperationalMetricCard
               label={t(language, "statistics.noShowRate")}
-              value={stats ? noShowRate : "â€”"}
+              value={stats ? noShowRate : "—"}
               helper={stats && totalAppointments ? `${stats.summary.noShowCount} / ${stats.summary.totalAppointments}` : undefined}
               href={stats?.summary.noShowCount ? buildRegistrationsDrilldownUrl({
                 dateMode: "range",
@@ -597,7 +601,7 @@ export default function StatisticsPage() {
             />
             <OperationalMetricCard
               label={t(language, "statistics.cancellationRate")}
-              value={stats ? cancellationRate : "â€”"}
+              value={stats ? cancellationRate : "—"}
               helper={stats && totalAppointments ? `${stats.summary.cancelledCount} / ${stats.summary.totalAppointments}` : undefined}
               href={stats?.summary.cancelledCount ? buildRegistrationsDrilldownUrl({
                 dateMode: "range",
@@ -654,15 +658,15 @@ export default function StatisticsPage() {
               )}
             </div>
             <div className="statistics-table-scroll overflow-x-auto">
-            <Table>
+            <Table className="min-w-[520px] print:min-w-0">
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t(language, "statistics.statusCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.countCol")}</TableHead>
-                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal ">{t(language, "statistics.statusCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.countCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="divide-border">
                 {statusBreakdown.map((row) => {
                   const href = buildRegistrationsDrilldownUrl({
                     dateMode: "range",
@@ -691,21 +695,21 @@ export default function StatisticsPage() {
               </h3>
             </div>
             <div className="statistics-table-scroll overflow-x-auto">
-            <Table>
+            <Table className="min-w-[900px] print:min-w-0">
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t(language, "statistics.modalityCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.totalCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.scheduledCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.inQueueCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.completedCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.noShowCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.cancelledCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
-                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal ">{t(language, "statistics.modalityCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.totalCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.scheduledCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.inQueueCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.completedCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.noShowCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.cancelledCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="divide-border">
                 {modalityBreakdown.map((row) => {
                   const href = buildRegistrationsDrilldownUrl({
                     dateMode: "range",
@@ -740,19 +744,19 @@ export default function StatisticsPage() {
               </h3>
             </div>
             <div className="statistics-table-scroll overflow-x-auto">
-            <Table>
+            <Table className="min-w-[680px] print:min-w-0">
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t(language, "statistics.dateCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.totalCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.completedCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.noShowCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.cancelledCol")}</TableHead>
-                  <TableHead className="text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
-                  <TableHead className="statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal ">{t(language, "statistics.dateCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.totalCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.completedCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.noShowCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.cancelledCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal text-right">{t(language, "statistics.discontinuedCol")}</TableHead>
+                  <TableHead className="!normal-case !tracking-normal statistics-print-hide text-right">{t(language, "statistics.actionCol")}</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="divide-border">
                 {dailyBreakdown.map((row) => {
                   const href = buildRegistrationsDrilldownUrl({
                     dateMode: "single",

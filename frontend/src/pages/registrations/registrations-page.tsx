@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
@@ -724,7 +725,7 @@ export default function RegistrationsPage() {
   }
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-3 sm:space-y-4">
+    <div className="compact-controls w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-3 sm:space-y-4">
       <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-3 rounded-full border border-accent/30 bg-accent/5 px-5 py-2">
@@ -738,7 +739,7 @@ export default function RegistrationsPage() {
           className="text-2xl sm:text-3xl font-display"
           style={{ color: "var(--foreground)" }}
         >
-          <span className="gradient-text">{t("registrations.pageTitle")}</span>
+          <span>{t("registrations.pageTitle")}</span>
         </h1>
       </div>
 

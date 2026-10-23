@@ -1,12 +1,13 @@
+import "@/components/shared/compact-controls.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { Search, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useAuth } from "@/providers/auth-provider";
 import type { TranslationKey } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { Card } from "@/components/shared/Card";
+import { Button, Card, SearchInput } from "@/components/shared";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
 import MwlPolicySection from "./mwl-policy-section";
@@ -123,7 +124,7 @@ export default function SettingsPage() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5">
+    <div className="compact-controls mx-auto w-full min-w-0 max-w-7xl space-y-5">
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-4 lg:hidden">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
@@ -137,16 +138,15 @@ export default function SettingsPage() {
           <Card className="p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-1">
-                <h2 className="text-xl font-semibold text-stone-900 dark:text-white">{t("settings.optionsTitle")}</h2>
-                <p className="text-sm description-center">{t("settings.optionsDescription")}</p>
+                <h2 className="text-xl font-semibold text-foreground">{t("settings.optionsTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("settings.optionsDescription")}</p>
               </div>
-              <div className="relative w-full lg:max-w-sm">
-                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
+              <div className="w-full lg:max-w-sm">
+                <SearchInput
                   value={settingsQuery}
                   onChange={(event) => setSettingsQuery(event.target.value)}
                   placeholder={t("settings.searchOptions")}
-                  className="input-premium h-11 w-full pl-10"
+                  className="w-full"
                   aria-label={t("settings.searchOptions")}
                 />
               </div>
@@ -174,7 +174,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             {SETTINGS_GROUPS.filter((group) => group !== "all").map((group) => (
               <div key={group} className="rounded-xl border border-border bg-muted/30 p-3">
-                <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">{groupLabel(t, group)}</p>
+                <p className="text-xs font-medium text-muted-foreground">{groupLabel(t, group)}</p>
                 <p className="mt-1 text-lg font-semibold text-foreground">
                   {SETTINGS_MENU_SECTIONS.filter((key) => SECTION_GROUPS[key] === group).length}
                 </p>
@@ -198,8 +198,8 @@ export default function SettingsPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-base font-semibold text-stone-900 dark:text-white">{label}</p>
-                        <p className="mt-1 line-clamp-2 text-sm description-center">{t("settings.configureSection", { section: label })}</p>
+                        <p className="truncate text-base font-semibold text-foreground">{label}</p>
+                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{t("settings.configureSection", { section: label })}</p>
                       </div>
                       {group === "admin" || group === "system" ? (
                         <ShieldCheck size={18} className="mt-0.5 shrink-0 text-amber-600" />
@@ -216,15 +216,12 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <button
-            onClick={returnToMenu}
-            className="pill-soft text-sm font-medium"
-          >
-            {t("common.back")} - {t("settings.backToMenu")}
-          </button>
+          <Button type="button" variant="secondary" size="sm" onClick={returnToMenu}>
+            {t("settings.backToMenu")}
+          </Button>
 
-           <Card className="p-6">
-            <h3 className="text-xl font-bold text-stone-900 dark:text-white mb-4">{sectionLabel(t, section)}</h3>
+           <Card className="p-4 sm:p-5">
+            <h3 className="text-xl font-bold text-foreground mb-4">{sectionLabel(t, section)}</h3>
 
             {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
             {section === "action_pin_policy" && <ActionPinPolicySection onReAuthRequired={requestReAuth} />}

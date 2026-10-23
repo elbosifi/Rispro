@@ -1,5 +1,6 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, Input } from "@/components/shared";
 import { ApiError, api } from "@/lib/api-client";
 import { fetchSettings, saveSettings } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
@@ -417,7 +418,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 compact-controls" dir="ltr" lang="en">
       {statusMessage && (
         <div className="p-3 rounded-lg bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-sm text-stone-700 dark:text-stone-300">
           {statusMessage}
@@ -425,7 +426,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
       )}
 
       <div className="space-y-4">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Orthanc MWL Sync Configuration</h4>
+        <h4 className="text-lg font-semibold text-foreground">Orthanc MWL Sync Configuration</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SettingField
             label="Enable Orthanc MWL sync"
@@ -568,7 +569,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
         </div>
 
         <section className="space-y-3">
-          <h4 className="text-lg font-semibold text-stone-900 dark:text-white">DICOM Tag Compatibility</h4>
+          <h4 className="text-lg font-semibold text-foreground">DICOM Tag Compatibility</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <SettingField
               label="Specific Character Set"
@@ -628,9 +629,9 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
 
         <section className="space-y-3">
           <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Length Safeguards</h4>
-          <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700">
-            <table className="w-full text-sm">
-              <thead className="bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-muted text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold">Tag</th>
                   <th className="px-3 py-2 text-left font-semibold">Sync</th>
@@ -640,11 +641,12 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
               </thead>
               <tbody>
                 {ORTHANC_TAG_FIELDS.map((field) => (
-                  <tr key={field.key} className="border-t border-stone-200 dark:border-stone-700">
-                    <td className="px-3 py-2 text-stone-800 dark:text-stone-100">{field.label}</td>
+                  <tr key={field.key} className="border-t border-border">
+                    <td className="px-3 py-2 text-foreground">{field.label}</td>
                     <td className="px-3 py-2">
                       <input
                         type="checkbox"
+                        aria-label={`${field.label} included in worklist`}
                         checked={enabledTags[field.key] !== false}
                         onChange={(event) => updateJsonMap(
                           "mwl_enabled_tags_json",
@@ -658,6 +660,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
                       <input
                         type="number"
                         min={1}
+                        aria-label={`${field.label} maximum length`}
                         value={tagLimits[field.key] || field.defaultMax}
                         onChange={(event) => {
                           const parsed = Number(event.target.value);
@@ -668,11 +671,12 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
                             tagLimits
                           );
                         }}
-                        className="w-24 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                        className="input-premium w-24 !py-1"
                       />
                     </td>
                     <td className="px-3 py-2">
                       <select
+                        aria-label={`${field.label} overflow policy`}
                         value={overflowPolicies[field.key] || field.defaultPolicy}
                         onChange={(event) => updateJsonMap(
                           "mwl_overflow_policy_json",
@@ -680,7 +684,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
                           event.target.value === field.defaultPolicy ? null : event.target.value as OverflowPolicy,
                           overflowPolicies
                         )}
-                        className="w-full px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                        className="input-premium w-full !py-1"
                       >
                         {OVERFLOW_POLICY_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
@@ -696,9 +700,10 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <h5 className="text-sm font-semibold text-stone-900 dark:text-white">Advanced Optional Tags</h5>
-              <button
+              <Button
                 type="button"
-                className="btn-secondary text-xs"
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   setForm((prev) => ({
                     ...prev,
@@ -708,7 +713,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
                 }}
               >
                 Add Tag
-              </button>
+              </Button>
             </div>
             {extraTags.length === 0 ? (
               <p className="text-xs text-stone-500 dark:text-stone-400">No advanced tags configured.</p>
@@ -738,16 +743,17 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
                       onChange={(value) => updateExtraTag(index, { policy: value as OverflowPolicy })}
                       options={OVERFLOW_POLICY_OPTIONS}
                     />
-                    <button
+                    <Button
                       type="button"
-                      className="btn-secondary text-xs"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         setForm((prev) => ({ ...prev, mwl_extra_tags_json: jsonStringify(extraTags.filter((_, itemIndex) => itemIndex !== index)) }));
                         setDirty(true);
                       }}
                     >
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -756,24 +762,25 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
         </section>
 
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
-            className="btn-primary text-sm disabled:opacity-50"
+            size="sm"
             disabled={saveMutation.isPending || !dirty}
             onClick={() => saveMutation.mutate()}
           >
             {saveMutation.isPending ? "Saving..." : "Save Orthanc Settings"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-secondary text-sm"
+            variant="secondary"
+            size="sm"
             onClick={() => {
               setForm(toInitialForm(settingsData as Record<string, string>));
               setDirty(false);
             }}
           >
             Reset
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -835,30 +842,32 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
           <SettingField label="Limit" type="number" value={limit} onChange={setLimit} placeholder="5000" />
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
+          <Button
             type="button"
-            className="btn-secondary text-sm disabled:opacity-50"
+            variant="secondary"
+            size="sm"
             disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
             onClick={() => reconcileMutation.mutate({ apply: false })}
           >
             {reconcileMutation.isPending ? "Running..." : "Dry Run Reconciliation"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-primary text-sm disabled:opacity-50"
+            size="sm"
             disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
             onClick={() => reconcileMutation.mutate({ apply: true })}
           >
             {reconcileMutation.isPending ? "Applying..." : "Reconcile + Re-enqueue"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-secondary text-sm disabled:opacity-50"
+            variant="destructive"
+            size="sm"
             disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
             onClick={() => resetWindowMutation.mutate()}
           >
             {resetWindowMutation.isPending ? "Resetting..." : "Delete in Window + Resync"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -901,13 +910,13 @@ function SettingField({
   options?: Array<{ value: string; label: string }>;
 }) {
   return (
-    <div className="space-y-1">
-      <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>
+    <label className="block space-y-1 text-sm font-medium text-foreground">
+      <span className="block">{label}</span>
       {type === "select" ? (
         <select
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+          className="input-premium w-full !py-1"
         >
           {(options || []).map((option) => (
             <option key={option.value} value={option.value}>
@@ -916,15 +925,15 @@ function SettingField({
           ))}
         </select>
       ) : (
-        <input
+        <Input
           type={type}
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+          className="w-full"
         />
       )}
-    </div>
+    </label>
   );
 }
 
@@ -942,9 +951,9 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Re-authentication required</p>
       <p className="text-xs text-amber-600 dark:text-amber-400">Please re-authenticate to access Orthanc settings.</p>
-      <button onClick={onReAuthRequired} className="btn-primary text-sm">
+      <Button type="button" onClick={onReAuthRequired} size="sm">
         Re-authenticate
-      </button>
+      </Button>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { ApiError, api } from "@/lib/api-client";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { Button } from "@/components/shared";
+import { Badge, Button, Input } from "@/components/shared";
 
 const SETTINGS_LOAD_TIMEOUT_MS = 5000;
 
@@ -345,11 +345,11 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 compact-controls">
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button type="button" onClick={() => setMutationError(null)} className="ml-2 underline">{t(language, "common.dismiss")}</button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setMutationError(null)} className="ms-2">{t(language, "common.dismiss")}</Button>
         </div>
       )}
 
@@ -357,9 +357,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           <p className="font-medium">{t(language, "settings.pacs.remoteModalitiesLoadFailed")}</p>
           <p className="text-xs mt-1">{(error as Error).message}</p>
-          <button type="button" onClick={() => queryClient.invalidateQueries({ queryKey: ["pacs", "orthanc-modalities"] })} className="mt-2 underline">
+          <Button type="button" variant="secondary" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["pacs", "orthanc-modalities"] })} className="mt-2">
             {t(language, "common.tryAgain")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -370,9 +370,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
             {t(language, "settings.pacs.remoteModalitiesDescription")}
           </p>
         </div>
-        <button type="button" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">
+        <Button type="button" variant="secondary" size="sm" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">
           {showCreate ? t(language, "common.cancel") : t(language, "settings.pacs.addOrthancModality")}
-        </button>
+        </Button>
       </div>
 
       {showCreate && (
@@ -387,7 +387,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
 
       <ul className="space-y-3">
         {data?.modalities?.map((modality) => (
-          <li key={modality.key} className="p-4 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800">
+          <li key={modality.key} className="p-4 rounded-lg border border-border bg-card">
             {editingKey === modality.key ? (
               <OrthancModalityForm
                 form={editForm}
@@ -402,13 +402,13 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-stone-900 dark:text-white">{modality.key}</span>
-                    <span className="px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded">{t(language, "settings.pacs.orthanc")}</span>
+                    <Badge variant="info" size="sm">{t(language, "settings.pacs.orthanc")}</Badge>
                     {modality.isDefault && (
-                      <span className="px-1.5 py-0.5 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded">
+                      <Badge variant="success" size="sm">
                         {t(language, "settings.pacs.default")}
-                      </span>
+                      </Badge>
                     )}
-                    {modality.isCdRobot && <span className="px-1.5 py-0.5 text-xs bg-violet-100 text-violet-700 rounded">{t(language, "settings.pacs.cdRobot")}</span>}
+                    {modality.isCdRobot && <Badge variant="accent" size="sm">{t(language, "settings.pacs.cdRobot")}</Badge>}
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
                     {modality.host || t(language, "settings.pacs.missingHost")}:{modality.port ?? t(language, "settings.pacs.invalidPort")} | {t(language, "settings.pacs.aet")}: {modality.aet || t(language, "settings.pacs.missingAet")}
@@ -424,25 +424,29 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
+                <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     aria-label={t(language, "settings.pacs.testModality", { key: modality.key })}
                     onClick={() => testMutation.mutate(modality.key)}
                     disabled={testingKey === modality.key}
-                    className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                    className="text-xs"
                   >
                     {testingKey === modality.key ? t(language, "settings.pacs.testing") : t(language, "settings.pacs.test")}
-                  </button>
-                  <button type="button" aria-label={t(language, "settings.pacs.editModality", { key: modality.key })} onClick={() => startEdit(modality)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">{t(language, "common.edit")}</button>
-                  <button
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" aria-label={t(language, "settings.pacs.editModality", { key: modality.key })} onClick={() => startEdit(modality)} className="text-xs">{t(language, "common.edit")}</Button>
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     aria-label={t(language, "settings.pacs.deleteModality", { key: modality.key })}
                     onClick={() => { if (window.confirm(`${t(language, "common.delete")} "${modality.key}"?`)) deleteMutation.mutate(modality.key); }}
-                    className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                    className="text-xs"
                   >
                     {t(language, "common.delete")}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -463,7 +467,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
         return <div className="border-t border-stone-200 dark:border-stone-700 pt-4 space-y-3" data-testid="clinical-document-export-settings">
           <div><h4 className="font-semibold text-stone-900 dark:text-white">Clinical document export</h4><p className="text-xs text-stone-500 dark:text-stone-400 mt-1">RISpro sends generated clinical-document DICOM through the internal Orthanc gateway to this PACS.</p></div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(event) => setClinicalDraft({ ...draft, enabled: event.target.checked })} /> Automatically send approved scanned documents to PACS</label>
-          <label className="block text-sm">Destination<select aria-label="Clinical document export destination" className="input mt-1 w-full" value={draft.destinationKey} onChange={(event) => { setClinicalDraft({ ...draft, destinationKey: event.target.value }); setClinicalMessage(null); }}><option value="">Select a configured modality</option>{data?.modalities.map((item) => <option key={item.key} value={item.key} disabled={!item.aet || !item.host || item.port == null || Boolean(item.configurationError)}>{item.key} — {item.aet || "missing AET"} — {item.host || "missing host"}:{item.port ?? "missing port"}</option>)}</select></label>
+          <label className="block space-y-1 text-sm font-medium text-foreground">Destination<select aria-label="Clinical document export destination" className="input-premium mt-1 w-full !py-1" value={draft.destinationKey} onChange={(event) => { setClinicalDraft({ ...draft, destinationKey: event.target.value }); setClinicalMessage(null); }}><option value="">Select a configured modality</option>{data?.modalities.map((item) => <option key={item.key} value={item.key} disabled={!item.aet || !item.host || item.port == null || Boolean(item.configurationError)}>{item.key} — {item.aet || "missing AET"} — {item.host || "missing host"}:{item.port ?? "missing port"}</option>)}</select></label>
           {selected && <p className="text-xs text-muted-foreground">{selected.aet} — {selected.host}:{selected.port}</p>}
           {clinicalMessage && <p className="text-sm">{clinicalMessage}</p>}
           {draft.enabled && !valid && <p className="text-sm text-red-600">Select a valid PACS destination before enabling export.</p>}
@@ -478,7 +482,13 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
         </div>
         {dicomRemapRetentionQuery.error ? <p className="text-sm text-red-600">Could not load DICOM Remap source retention settings: {(dicomRemapRetentionQuery.error as Error).message}</p> : (
           <>
-            <label className="block text-sm">Keep successful source for<input aria-label="Keep successful source for" type="number" min={1} max={30} step={1} className="input mt-1 w-28" value={dicomRemapRetentionDays ?? String(dicomRemapRetentionQuery.data?.settings.sentSourceRetentionDays ?? 4)} onChange={(event) => { setDicomRemapRetentionDays(event.target.value); setDicomRemapRetentionMessage(null); }} /> <span className="ml-1">days</span></label>
+          <div className="space-y-1.5 text-sm">
+            <label htmlFor="dicom-remap-retention-days" className="block font-medium text-foreground">Keep successful source for</label>
+            <div className="flex items-center gap-2">
+              <Input id="dicom-remap-retention-days" aria-label="Keep successful source for" type="number" min={1} max={30} step={1} className="!w-24" value={dicomRemapRetentionDays ?? String(dicomRemapRetentionQuery.data?.settings.sentSourceRetentionDays ?? 4)} onChange={(event) => { setDicomRemapRetentionDays(event.target.value); setDicomRemapRetentionMessage(null); }} />
+              <span className="text-muted-foreground">days</span>
+            </div>
+          </div>
             {dicomRemapRetentionMessage && <p className="text-sm">{dicomRemapRetentionMessage}</p>}
             <Button type="button" disabled={saveDicomRemapRetentionMutation.isPending || dicomRemapRetentionQuery.isLoading} onClick={() => {
               const value = dicomRemapRetentionDays ?? String(dicomRemapRetentionQuery.data?.settings.sentSourceRetentionDays ?? 4);
@@ -535,7 +545,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
             const testDetails = autoTestResults[setting.modality_id];
             const diagnostics = testDetails?.diagnostics;
             return (
-              <div key={setting.modality_id} className="p-4 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 space-y-3">
+              <div key={setting.modality_id} className="p-4 rounded-lg border border-border bg-card space-y-3">
                 <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
                   <div>
                     <div className="font-medium text-stone-900 dark:text-white">
@@ -561,7 +571,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.orthancTarget")}</span>
                     <select
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={targetValue || "local"}
                       onChange={(event) => {
                         if (event.target.value === "local") {
@@ -582,7 +592,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.matchingStrategy")}</span>
                     <select
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.matchingStrategy}
                       onChange={() => updateDraft({ matchingStrategy: "study_uid_preferred_accession_fallback" })}
                     >
@@ -592,7 +602,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.completionThreshold")}</span>
                     <select
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.completionThreshold}
                       onChange={(event) => updateDraft({ completionThreshold: event.target.value as CompletionThreshold })}
                     >
@@ -606,7 +616,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <input
                       type="number"
                       min={1}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.minimumSeriesCount}
                       onChange={(event) => updateDraft({ minimumSeriesCount: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -614,7 +624,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.belowMinimumSeriesAction")}</span>
                     <select
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.belowMinimumSeriesAction}
                       onChange={(event) => updateDraft({ belowMinimumSeriesAction: event.target.value as BelowMinimumSeriesAction })}
                     >
@@ -627,7 +637,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <input
                       type="number"
                       min={1}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.pollIntervalMinutes}
                       onChange={(event) => updateDraft({ pollIntervalMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -638,7 +648,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                       type="number"
                       min={2}
                       step={1}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.inactivityCompletionMinutes}
                       onChange={(event) => updateDraft({ inactivityCompletionMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -650,7 +660,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                       type="number"
                       min={30}
                       step={1}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.mppsStaleFallbackMinutes}
                       onChange={(event) => updateDraft({ mppsStaleFallbackMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -661,7 +671,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <input
                       type="number"
                       min={0}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.lookbackHours}
                       onChange={(event) => updateDraft({ lookbackHours: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -671,7 +681,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <input
                       type="number"
                       min={1}
-                      className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full"
+                      className="input-premium w-full !py-1"
                       value={draft.stopAfterHours}
                       onChange={(event) => updateDraft({ stopAfterHours: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -679,9 +689,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 </div>
                 <p className="text-xs text-stone-500 dark:text-stone-400">{t(language, "settings.pacs.inactivityCompletionHelp")}</p>
                 <div className="flex flex-wrap gap-2">
-                  <button
+                  <Button
                     type="button"
-                    className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors"
+                    size="sm"
                     disabled={saveAutoMutation.isPending}
                     onClick={() => {
                       const pollIntervalMinutes = Math.max(1, Number(draft.pollIntervalMinutes) || 1);
@@ -702,10 +712,11 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     }}
                   >
                     {saveAutoMutation.isPending ? t(language, "settings.pacs.saving") : t(language, "settings.pacs.saveAutoCompletion")}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-sm rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                    variant="secondary"
+                    size="sm"
                     disabled={autoTestingId === setting.modality_id}
                     onClick={() => testAutoMutation.mutate({
                       modalityId: setting.modality_id,
@@ -713,7 +724,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     })}
                   >
                     {autoTestingId === setting.modality_id ? t(language, "settings.pacs.testing") : t(language, "settings.pacs.testVerification")}
-                  </button>
+                  </Button>
                 </div>
                 <label className="block text-xs text-stone-600 dark:text-stone-300">
                   {t(language, "settings.pacs.bookingIdToTest")}
@@ -721,7 +732,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     type="text"
                     inputMode="text"
                     placeholder={t(language, "settings.pacs.bookingIdToTestPlaceholder")}
-                    className="mt-1 px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full max-w-xs"
+                    className="mt-1 input-premium w-full !py-1 max-w-xs"
                     value={autoTestBookingIds[setting.modality_id] || ""}
                     onChange={(event) => setAutoTestBookingIds((current) => ({
                       ...current,
@@ -781,45 +792,45 @@ function OrthancModalityForm({
 }) {
   const { language } = useLanguage();
   return (
-    <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-3 text-sm">
+    <div className="p-4 bg-muted/30 border border-border rounded-lg space-y-3 text-sm">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="space-y-1">
           <span className="block text-xs text-stone-500">{t(language, "settings.pacs.orthancKey")}</span>
-          <input
+          <Input
             value={form.key}
             onChange={(e) => onChange({ ...form, key: e.target.value })}
             placeholder={t(language, "settings.pacs.orthancKeyPlaceholder")}
             disabled={keyReadOnly}
-            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono disabled:opacity-60"
+            className="w-full font-mono input-ltr disabled:opacity-60"
           />
         </label>
         <label className="space-y-1">
           <span className="block text-xs text-stone-500">{t(language, "settings.pacs.remoteAet")}</span>
-          <input
+          <Input
             value={form.aet}
             onChange={(e) => onChange({ ...form, aet: e.target.value.toUpperCase() })}
             placeholder={t(language, "settings.pacs.remoteAet")}
             maxLength={16}
-            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+            className="w-full font-mono input-ltr"
           />
         </label>
         <label className="space-y-1">
           <span className="block text-xs text-stone-500">{t(language, "settings.pacs.host")}</span>
-          <input
+          <Input
             value={form.host}
             onChange={(e) => onChange({ ...form, host: e.target.value })}
             placeholder={t(language, "settings.pacs.hostPlaceholder")}
-            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+            className="w-full font-mono input-ltr"
           />
         </label>
         <label className="space-y-1">
           <span className="block text-xs text-stone-500">{t(language, "settings.pacs.port")}</span>
-          <input
+          <Input
             type="number"
             value={form.port}
             onChange={(e) => onChange({ ...form, port: e.target.value === "" ? "" : Number(e.target.value) })}
             placeholder={t(language, "settings.pacs.port")}
-            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+            className="w-full input-ltr"
           />
         </label>
       </div>
@@ -836,17 +847,17 @@ function OrthancModalityForm({
         {t(language, "settings.pacs.cdRobotDestination")}
       </label>
       <div className="flex gap-2">
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={onSubmit}
           disabled={isPending || !form.key || !form.host || !form.aet || form.port === ""}
-          className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors"
         >
           {isPending ? t(language, "settings.pacs.saving") : t(language, "common.save")}
-        </button>
-        <button type="button" onClick={onCancel} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
           {t(language, "common.cancel")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -867,9 +878,9 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{t(language, "settings.pacs.reauthRequired")}</p>
       <p className="text-xs text-amber-600 dark:text-amber-400">{t(language, "settings.pacs.reauthDescription")}</p>
-      <button type="button" onClick={onReAuthRequired} className="btn-primary text-sm">
+      <Button type="button" onClick={onReAuthRequired} size="sm">
         {t(language, "common.reAuthenticate")}
-      </button>
+      </Button>
     </div>
   );
 }

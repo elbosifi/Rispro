@@ -337,8 +337,8 @@ describe("PrintPage autoprint", () => {
     vi.mocked(apiHooks.fetchAppointments).mockResolvedValueOnce([mockAppointment99, mockAppointment42]);
     renderWithRouter("/print");
 
-    expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Daily appointment list").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("print.reportCenter.title")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("print.reportTemplate.daily-appointments.title").length).toBeGreaterThan(0);
   });
 
   it("autoprint resets and fires again when appointmentId changes", async () => {

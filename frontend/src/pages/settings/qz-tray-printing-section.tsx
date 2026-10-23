@@ -69,7 +69,7 @@ export default function QzTrayPrintingSection() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" dir="ltr">
       <div className="rounded-xl border border-border bg-muted/20 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

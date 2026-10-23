@@ -106,7 +106,7 @@ export default function RequestScanAutomationSection({ onReAuthRequired, reauthV
   };
 
   return (
-    <div className="space-y-4">
+    <div dir="ltr" className="space-y-4">
       <p className="text-sm text-muted-foreground">Monitor one SMB Incoming folder for PDF and JPEG appointment requests.</p>
       <div className="grid gap-3 md:grid-cols-2">
         <label>Enabled<select className="input-premium mt-1 w-full" value={settings.enabled ? "enabled" : "disabled"} onChange={(event) => change("enabled", event.target.value === "enabled")}><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select></label>

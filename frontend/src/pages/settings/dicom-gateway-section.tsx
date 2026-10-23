@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Button, Input } from "@/components/shared";
 import { useLanguage } from "@/providers/language-provider";
 import { fetchSettings, saveSettings } from "@/lib/api-hooks";
 
@@ -116,11 +117,11 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 compact-controls">
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">{language === "ar" ? "إخفاء" : "Dismiss"}</button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setMutationError(null)} className="ms-2">{language === "ar" ? "إخفاء" : "Dismiss"}</Button>
         </div>
       )}
 
@@ -132,7 +133,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
 
       {/* Gateway Settings */}
       <div className="space-y-4">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">{language === "ar" ? "بوابة DICOM" : "DICOM Gateway"}</h4>
+        <h4 className="text-lg font-semibold text-foreground">{language === "ar" ? "بوابة DICOM" : "DICOM Gateway"}</h4>
         <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
           {language === "ar"
             ? "قائمة العمل المضمنة قديمة وتبقى للتوافق فقط. اضبط توافق قائمة العمل من قسم Orthanc MWL أو Sante Worklist."
@@ -186,20 +187,24 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
           />
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{language === "ar" ? "سر الاستدعاء" : "Callback Secret"}</label>
+            <label className="text-sm font-medium text-foreground">{language === "ar" ? "سر الاستدعاء" : "Callback Secret"}</label>
             <div className="flex gap-2">
-              <input
+              <Input
                 type="password"
                 value={getField("callback_secret")}
                 readOnly
-                className="flex-1 px-3 py-1.5 rounded border bg-stone-100 dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+                aria-label={language === "ar" ? "سر الاستدعاء" : "Callback Secret"}
+                className="min-w-0 flex-1 font-mono"
               />
-              <button
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
                 onClick={handleRotateSecret}
-                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded transition-colors"
+                className="whitespace-nowrap"
               >
                 {language === "ar" ? "تدوير" : "Rotate"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -246,21 +251,24 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
           />
         </div>
 
-        <div className="flex gap-3">
-          <button
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
             onClick={handleSave}
             disabled={saveMutation.isPending || !isEditing}
-            className="btn-primary text-sm disabled:opacity-50"
           >
             {saveMutation.isPending ? (language === "ar" ? "جاري الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الإعدادات" : "Save Settings")}
-          </button>
+          </Button>
 
-          <button
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
             onClick={handleResetDefaults}
-            className="btn-secondary text-sm"
           >
             {language === "ar" ? "إعادة الضبط للقيم الافتراضية" : "Reset to Defaults"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -285,30 +293,30 @@ function SettingField({
   options?: Array<{ value: string; label: string }>;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>
+    <label className="block space-y-1.5 text-sm font-medium text-foreground">
+      <span className="block">{label}</span>
 
       {type === "select" ? (
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+          className="input-premium w-full !py-1"
         >
           {options?.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
       ) : (
-        <input
+        <Input
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           maxLength={maxLength}
-          className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+          className="w-full font-mono"
         />
       )}
-    </div>
+    </label>
   );
 }
 

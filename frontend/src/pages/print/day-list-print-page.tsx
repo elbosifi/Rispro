@@ -1,3 +1,4 @@
+import { Button } from "@/components/shared";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -81,19 +82,27 @@ export default function DayListPrintPage() {
         .print-route-page { min-height: 100vh; background: #fff; color: #111827; font-family: Arial, Helvetica, sans-serif; padding: 20px; }
         .screen-actions { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
         .screen-actions button { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 8px 12px; font-weight: 700; }
-        .print-sheet { border: 1px solid #0f766e; border-radius: 10px; padding: 14px; }
+        .print-sheet { border: 1px solid #2563eb; border-radius: 10px; padding: 14px; }
         .print-header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d1d5db; padding-bottom: 10px; margin-bottom: 10px; }
-        .brand { font-size: 18px; font-weight: 800; color: #0f766e; margin: 0; }
+        .brand { font-size: 18px; font-weight: 800; color: #2563eb; margin: 0; }
         .title { font-size: 22px; font-weight: 800; margin: 6px 0 0; }
         .meta { text-align: end; font-size: 11px; color: #4b5563; line-height: 1.45; }
         .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; font-size: 11px; }
         .filters span { border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 8px; }
         table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
         th, td { border: 1px solid #d1d5db; padding: 6px; text-align: start; vertical-align: top; }
-        th { background: #e6f4f1; color: #064e3b; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+        th { background: #eff6ff; color: #1e3a8a; font-size: 9px; text-transform: uppercase; letter-spacing: normal; }
         tbody tr:nth-child(even) { background: #f8fafc; }
         .arabic { direction: rtl; text-align: right; }
         .footer { display: flex; justify-content: space-between; border-top: 1px dashed #d1d5db; margin-top: 10px; padding-top: 8px; font-size: 10px; color: #6b7280; }
+        @media screen {
+          .print-table-scroll { overflow-x: auto; }
+          .print-table-scroll table { min-width: 900px; }
+        }
+        @media screen and (max-width: 640px) {
+          .print-header { flex-direction: column; gap: 8px; }
+          .meta { text-align: start; }
+        }
         @media print {
           .screen-actions { display: none !important; }
           .print-route-page { padding: 0; }
@@ -103,9 +112,9 @@ export default function DayListPrintPage() {
         }
       `}</style>
       <div className="screen-actions">
-        <button type="button" onClick={() => window.print()} disabled={isLoading || Boolean(error)}>
+        <Button size="sm" variant="secondary" type="button" onClick={() => window.print()} disabled={isLoading || Boolean(error)}>
           {t(language, "print.dayList.print")}
-        </button>
+        </Button>
       </div>
       <section className="print-sheet" data-testid="day-list-print-page">
         <header className="print-header">
@@ -130,7 +139,7 @@ export default function DayListPrintPage() {
         ) : appointments.length === 0 ? (
           <p>{t(language, "print.dayList.empty")}</p>
         ) : (
-          <AppointmentPrintTable appointments={appointments} columns={columns} language={language} />
+          <div className="print-table-scroll"><AppointmentPrintTable appointments={appointments} columns={columns} language={language} /></div>
         )}
         <footer className="footer">
           <span>{t(language, "print.generatedBy")}</span>

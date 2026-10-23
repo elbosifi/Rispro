@@ -1,3 +1,4 @@
+import "./doctor-workspace.css";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -165,7 +166,7 @@ function ShortcutCard({ title, body, to }: { title: string; body: string; to: st
   return (
     <Link
       to={to}
-      className="rounded-lg border p-4 text-left transition hover:border-teal-600"
+      className="rounded-lg border p-4 text-start transition hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
       style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
     >
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -191,7 +192,7 @@ function SetupSectionButton({
     <button
       type="button"
       onClick={onClick}
-      className="rounded-lg border p-4 text-left transition hover:border-teal-600"
+      className="rounded-lg border p-4 text-start transition hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
       style={{
         backgroundColor: active ? "color-mix(in srgb, var(--accent) 8%, var(--card))" : "var(--card)",
         borderColor: active ? "var(--accent)" : "var(--border)",

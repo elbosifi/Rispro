@@ -11,6 +11,7 @@ import {
 } from "@/lib/page-visibility";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
 import { isReAuthRequiredError } from "./settings-page.helpers";
+import { Button } from "@/components/shared/Button";
 
 const ROLE_LABELS: Record<string, string> = {
   receptionist: "Receptionist",
@@ -122,23 +123,23 @@ export default function RolePageAccessSection({ onReAuthRequired }: { onReAuthRe
 
   return (
     <div className="space-y-4">
-      <p className="text-sm description-center">
+      <p className="text-sm text-muted-foreground">
         Configure which roles can see which pages in navigation. This affects sidebar/mobile visibility only.
       </p>
-      <div className="overflow-auto border border-stone-200 dark:border-stone-700 rounded-lg">
+      <div role="region" aria-label="Role page access matrix. Scroll horizontally to view all roles." tabIndex={0} className="overflow-auto rounded-lg border border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         <table className="w-full min-w-[900px] text-sm">
           <thead>
-            <tr className="bg-stone-100 dark:bg-stone-800">
-              <th className="text-start p-2 font-semibold">Page</th>
+            <tr className="bg-muted/40">
+              <th scope="col" className="p-2 text-start font-semibold">Page</th>
               {PAGE_VISIBILITY_ROLES.map((role) => (
-                <th key={role} className="text-center p-2 font-semibold">{ROLE_LABELS[role]}</th>
+                <th key={role} scope="col" className="p-2 text-center font-semibold">{ROLE_LABELS[role]}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {PAGE_VISIBILITY_ROUTE_KEYS.map((routeKey) => (
-              <tr key={routeKey} className="border-t border-stone-200 dark:border-stone-700">
-                <td className="p-2">{PAGE_LABELS[routeKey]}</td>
+              <tr key={routeKey} className="border-t border-border">
+                <th scope="row" className="p-2 text-start font-medium">{PAGE_LABELS[routeKey]}</th>
                 {PAGE_VISIBILITY_ROLES.map((role) => {
                   const checked = draft[routeKey]?.includes(role) ?? false;
                   const isSettingsSuperAdmin = routeKey === "settings" && role === "super_admin";
@@ -146,6 +147,7 @@ export default function RolePageAccessSection({ onReAuthRequired }: { onReAuthRe
                     <td key={`${routeKey}-${role}`} className="text-center p-2">
                       <input
                         type="checkbox"
+                        aria-label={`${PAGE_LABELS[routeKey]} for ${ROLE_LABELS[role]}`}
                         checked={checked}
                         disabled={isSettingsSuperAdmin}
                         onChange={(event) => {
@@ -173,19 +175,21 @@ export default function RolePageAccessSection({ onReAuthRequired }: { onReAuthRe
           </tbody>
         </table>
       </div>
-      <div className="flex items-center gap-2">
-        <button className="btn-primary text-sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" className="text-sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save"}
-        </button>
-        <button
-          className="btn-secondary text-sm"
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          className="text-sm"
           onClick={() => setDraft(serverDraft)}
           disabled={saveMutation.isPending}
         >
           Reset
-        </button>
+        </Button>
       </div>
-      {message ? <div className="p-3 rounded border border-stone-200 dark:border-stone-700 text-sm">{message}</div> : null}
+      {message ? <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm" role="status">{message}</div> : null}
     </div>
   );
 }

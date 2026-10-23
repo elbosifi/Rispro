@@ -1,3 +1,4 @@
+import { Button, Input } from "@/components/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -108,18 +109,18 @@ function CaseTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
-      <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-        <thead style={{ backgroundColor: "var(--card)" }}>
+    <div className="overflow-x-auto rounded-lg border border-border bg-card" style={{ borderColor: "var(--border)" }}>
+      <table className="min-w-full divide-y divide-border text-sm" style={{ borderColor: "var(--border)" }}>
+        <thead className="bg-muted">
           <tr>
             {["Patient", "Appointment", "Modality", "Exam", "Category", "Report", "Points", "Doctor", "Team", "Roster assignment", "Expected report", "Protocol", "Status", "Actions"].map((header) => (
-              <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
+              <th key={header} className="px-3 py-2 text-start text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
                 {header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+        <tbody className="divide-y divide-border" style={{ borderColor: "var(--border)" }}>
           {cases.map((row) => (
             <DraggableCaseRow key={`${row.appointmentId}-${row.assignmentType ?? "unassigned"}`} row={row} canManage={canManage}>
               <td className="px-3 py-2 font-medium text-foreground">{patientName(row)}</td>
@@ -139,34 +140,34 @@ function CaseTable({
                 {canManage && (
                   editingId === row.appointmentId ? (
                     <div className="flex min-w-72 flex-col gap-2">
-                      <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
+                      <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="input-premium rounded-lg border px-2 py-1 text-xs">
                         <option value="">No roster slot</option>
                         {rosterAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.label}</option>)}
                       </select>
-                      <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
+                      <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="input-premium rounded-lg border px-2 py-1 text-xs">
                         <option value="">Doctor</option>
                         {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
                       </select>
-                      <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={row.assignedDoctorId ? "Reassignment reason" : "Assignment reason"} className="rounded-lg border px-2 py-1 text-xs" />
+                      <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={row.assignedDoctorId ? "Reassignment reason" : "Assignment reason"} className="rounded-lg border px-2 py-1 text-xs" />
                       <div className="flex gap-2">
-                        <button type="button" disabled={!doctorId || (Boolean(row.assignedDoctorId) && !reason.trim())} onClick={() => {
+                        <Button variant="primary" size="sm" type="button" disabled={!doctorId || (Boolean(row.assignedDoctorId) && !reason.trim())} onClick={() => {
                           onAssignDoctor(row.appointmentId, Number(doctorId), rosterAssignmentId ? Number(rosterAssignmentId) : null, reason);
                           setEditingId(null);
                           setDoctorId("");
                           setRosterAssignmentId("");
                           setReason("");
-                        }} className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-400">Assign to doctor</button>
-                        <button type="button" onClick={() => setEditingId(null)} className="rounded border px-2 py-1 text-xs">Cancel</button>
+                        }} className="rounded px-2 py-1 text-xs font-semibold">Assign to doctor</Button>
+                        <Button variant="secondary" size="sm" type="button" onClick={() => setEditingId(null)} className="rounded border px-2 py-1 text-xs">Cancel</Button>
                       </div>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => {
+                    <Button variant="secondary" size="sm" type="button" onClick={() => {
                       setEditingId(row.appointmentId);
                       setDoctorId(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
                       setRosterAssignmentId(row.rosterAssignmentId ? String(row.rosterAssignmentId) : "");
                     }} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
                       {row.assignedDoctorId ? "Reassign" : "Assign"}
-                    </button>
+                    </Button>
                   )
                 )}
               </td>
@@ -213,25 +214,25 @@ function QuickAssignCaseCard({
           </p>
         </div>
         <div className="grid gap-2">
-          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">Select doctor</option>
             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{getDoctorDisplayName(doctor, language)}</option>)}
           </select>
-          <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+          <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="input-premium rounded-lg border px-3 py-2 text-sm">
             <option value="">Optional roster slot</option>
             {rosterAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.label}</option>)}
           </select>
           {needsReason && (
-            <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reassignment reason" className="rounded-lg border px-3 py-2 text-sm" />
+            <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reassignment reason" className="rounded-lg border px-3 py-2 text-sm" />
           )}
-          <button
+          <Button variant="primary" size="sm"
             type="button"
             disabled={!doctorId || (needsReason && !reason.trim())}
             onClick={() => onAssignDoctor(row.appointmentId, Number(doctorId), rosterAssignmentId ? Number(rosterAssignmentId) : null, reason)}
-            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400"
+            className="rounded-lg px-3 py-2 text-sm font-semibold"
           >
             {needsReason ? "Reassign" : "Assign"}
-          </button>
+          </Button>
         </div>
       </div>
     </article>
@@ -386,7 +387,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
 
   return (
     <DndContext onDragEnd={handleDragEnd}>
-      <div className="space-y-4">
+      <div className="doctor-cases-page space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
@@ -395,24 +396,24 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
           <h2 className="mt-1 text-2xl font-semibold text-foreground">{canManage ? "Today’s Cases" : "Report Worklist"}</h2>
         </div>
         {canManage && (
-          <button type="button" onClick={() => setDetailedView((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          <Button variant="secondary" size="sm" type="button" onClick={() => setDetailedView((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             {detailedView ? "Simple view" : "Detailed view"}
-          </button>
+          </Button>
         )}
       </div>
 
       <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <label className="text-sm font-medium">
           From
-          <input type="date" value={navigationState.dateFrom} onChange={(event) => updateNavigation({ dateFrom: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
+          <Input type="date" value={navigationState.dateFrom} onChange={(event) => updateNavigation({ dateFrom: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
         </label>
         <label className="text-sm font-medium">
           To
-          <input type="date" value={navigationState.dateTo} onChange={(event) => updateNavigation({ dateTo: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
+          <Input type="date" value={navigationState.dateTo} onChange={(event) => updateNavigation({ dateTo: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} />
         </label>
         <label className="text-sm font-medium">
           Modality
-          <select value={navigationState.modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             {(lookupsQuery.data?.modalities ?? []).map((modality) => (
               <option key={modality.id} value={modality.id}>{modality.nameEn}</option>
@@ -421,7 +422,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </label>
         <label className="text-sm font-medium">
           Assignment
-          <select value={navigationState.status} onChange={(event) => updateNavigation({ status: event.target.value as typeof navigationState.status })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.status} onChange={(event) => updateNavigation({ status: event.target.value as typeof navigationState.status })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="active">Active</option>
             <option value="unassigned">Unassigned</option>
@@ -429,14 +430,14 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </label>
         <label className="text-sm font-medium">
           Report
-          <select value={navigationState.requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as typeof navigationState.requiresReport })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.requiresReport} onChange={(event) => updateNavigation({ requiresReport: event.target.value as typeof navigationState.requiresReport })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="true">Required</option>
           </select>
         </label>
         <label className="text-sm font-medium">
           Category
-          <select value={navigationState.category} onChange={(event) => updateNavigation({ category: event.target.value as typeof navigationState.category })} className="mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
+          <select value={navigationState.category} onChange={(event) => updateNavigation({ category: event.target.value as typeof navigationState.category })} className="input-premium mt-1 w-full rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}>
             <option value="">All</option>
             <option value="oncology">Oncology</option>
             <option value="non_oncology">Non-oncology</option>
@@ -472,16 +473,16 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
             Case {dropTarget.appointmentId} will be assigned to roster target {dropTarget.rosterAssignmentId}.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <input value={dropReason} onChange={(event) => setDropReason(event.target.value)} placeholder="Correction reason" className="min-w-80 rounded-lg border px-3 py-2 text-sm" />
-            <button
+            <Input value={dropReason} onChange={(event) => setDropReason(event.target.value)} placeholder="Correction reason" className="w-full min-w-0 sm:w-80 rounded-lg border px-3 py-2 text-sm" />
+            <Button variant="primary" size="sm"
               type="button"
               disabled={!dropReason.trim() || reassignMutation.isPending}
               onClick={() => reassignMutation.mutate({ ...dropTarget, reason: dropReason })}
-              className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400"
+              className="rounded-lg px-3 py-2 text-sm font-semibold"
             >
               Submit reassignment
-            </button>
-            <button type="button" onClick={() => setDropTarget(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+            </Button>
+            <Button variant="secondary" size="sm" type="button" onClick={() => setDropTarget(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</Button>
           </div>
           {dropError && <p className="mt-2 text-sm text-red-600">{dropError}</p>}
         </section>

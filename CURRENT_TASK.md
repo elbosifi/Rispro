@@ -1,20 +1,21 @@
-# User Management and Account Security Goal
+# Complete Application UI Polish Goal
 
 ## Task
 
-Continue the User Management and Account Security Goal from the user-provided objective. Preserve the committed role editor; implement only remaining security controls, last-login data, effective-access visibility, account-specific security history, and confirmed session-security fixes.
+Polish the remaining active frontend screens using the committed five-screen visual language. Preserve clinical workflows, backend authority, permissions, integration behavior, actions, and practical information density. Track the inventory, evidence, validation, decisions, and milestones in [application-ui-polish.md](docs/plans/active/application-ui-polish.md).
 
 ## Git workflow
 
-- Temporary local branch: `codex/user-management-security-goal`
-- Starting `main` SHA: `daddb2ab716402ea6582e42dc8230329ec708490`
+- Temporary local branch: `codex/application-ui-polish-goal`
+- Starting `main` SHA: `50514e038eaf1e8792b89864b3b2854fc27dfccd`
 - No push, pull request, or deployment.
 - After required validation, squash-apply onto unchanged local `main`, leave review changes uncommitted, and retain the temporary branch.
 
 ## Constraints
 
-- Reuse `auth_version`, existing User Management and Doctor Directory services, audit infrastructure, shared UI components, and React Query conventions.
-- Do not modify migration `231_user_auth_version.sql`; add a later migration only if needed.
-- Do not add a sessions table, generic permission framework, or unrelated refactors.
-- Run focused backend and DB tests, relevant frontend checks, typechecks/build/lint, and Chromium desktop/mobile plus English/Arabic/RTL checks.
-- Report blocked or unrun validations accurately.
+- Reuse existing shared primitives and theme tokens; keep changes localized.
+- Use synthetic data and keep screenshots outside tracked application source.
+- No backend logic, schema, scheduling, patient identity, reporting calculation, auth, audit, or integration changes.
+- Each batch requires browser evidence and targeted tests; verify desktop/mobile and relevant RTL states.
+- After the final frontend edit, run both frontend typecheck and production build on the final tree.
+- Report blocked or unrun checks accurately; do not squash-apply if required validation fails.

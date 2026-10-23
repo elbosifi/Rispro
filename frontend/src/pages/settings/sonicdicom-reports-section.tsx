@@ -300,6 +300,7 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
       {props.label}
       <input
         type={props.type || "text"}
+        dir="ltr"
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
@@ -312,7 +313,7 @@ function Textarea(props: { label: string; value: string; onChange: (value: strin
   return (
     <label className="block text-sm font-semibold text-slate-700">
       {props.label}
-      <textarea value={props.value} onChange={(e) => props.onChange(e.target.value)} rows={3} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm" />
+      <textarea dir="ltr" value={props.value} onChange={(e) => props.onChange(e.target.value)} rows={3} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-left text-sm" />
     </label>
   );
 }

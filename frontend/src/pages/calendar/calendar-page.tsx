@@ -1,3 +1,4 @@
+import "@/components/shared/compact-controls.css";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -13,7 +14,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { printDayListFromRoute } from "@/lib/day-list-printing";
-import { Button, Card, Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
+import { Input, Button, Card, Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
 import { useV2Availability } from "@/v2/appointments/api";
 import type { AvailabilityDayDto } from "@/v2/appointments/types";
@@ -312,7 +313,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto space-y-4 sm:space-y-6">
+    <div className="compact-controls w-full max-w-[1600px] mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
@@ -320,7 +321,7 @@ export default function CalendarPage() {
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
-            <span className="gradient-text">{t(language, "calendar.title")}</span>
+            <span>{t(language, "calendar.title")}</span>
           </h1>
         </div>
       </div>
@@ -333,7 +334,7 @@ export default function CalendarPage() {
                 <Search size={12} />
                 {t(language, "calendar.search")}
               </span>
-              <input
+              <Input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 className="input-premium h-11 w-full"
@@ -410,9 +411,9 @@ export default function CalendarPage() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         {/* Calendar Grid */}
-        <Card className="overflow-hidden p-0 xl:col-span-3">
+        <Card className="overflow-hidden p-0">
           {/* Header */}
           <div className="border-b border-border p-3 sm:p-4">
             <div className="flex items-center justify-between gap-2">
@@ -625,11 +626,11 @@ export default function CalendarPage() {
               </div>
             ) : (
               <div className="max-h-[600px] space-y-2 overflow-y-auto p-3 sm:p-4" data-testid="selected-day-summary-list">
-                <div className="grid grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] gap-2 px-2 text-[10px] font-mono uppercase leading-tight tracking-[0.08em] text-muted-foreground">
+                <div className="grid grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] gap-2 px-2 text-[10px] font-semibold leading-tight tracking-normal text-muted-foreground">
                   <span className="min-w-0">{t(language, "calendar.modalityFilter")}</span>
-                  <span className="break-words text-right">{t(language, "calendar.totalLabel")}</span>
-                  <span className="break-words text-right">{t(language, "calendar.oncologyLabel")}</span>
-                  <span className="break-words text-right">{t(language, "calendar.nonOncologyLabel")}</span>
+                  <span className="break-words text-end">{t(language, "calendar.totalLabel")}</span>
+                  <abbr className="text-end no-underline" title={t(language, "calendar.oncologyLabel")}>{t(language, "calendar.oncologyShort")}</abbr>
+                  <abbr className="text-end no-underline" title={t(language, "calendar.nonOncologyLabel")}>{t(language, "calendar.nonOncologyShort")}</abbr>
                 </div>
                 {selectedDateSummaries.map((summary) => (
                   <button
@@ -638,12 +639,12 @@ export default function CalendarPage() {
                     onClick={() => openModalitySummary(summary)}
                     data-testid={`modality-summary-${summary.key}`}
                     aria-label={`${summary.label}, ${registrationCountLabel(language, summary.total)}`}
-                    className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] items-center gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_2rem_2.5rem_2.5rem] items-center gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-start transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    <span className="min-w-0 whitespace-nowrap text-xs font-semibold">{summary.label}</span>
-                    <span className="text-right font-semibold tabular-nums">{summary.total}</span>
-                    <span className="text-right tabular-nums text-rose-700">{summary.oncology}</span>
-                    <span className="text-right tabular-nums text-sky-700">{summary.nonOncology}</span>
+                    <span className="min-w-0 whitespace-normal break-words text-xs font-semibold" title={summary.label}>{summary.label}</span>
+                    <span className="text-end font-semibold tabular-nums">{summary.total}</span>
+                    <span className="text-end tabular-nums text-rose-700">{summary.oncology}</span>
+                    <span className="text-end tabular-nums text-sky-700">{summary.nonOncology}</span>
                   </button>
                 ))}
               </div>

@@ -17,6 +17,22 @@ describe("AuthoritativeOrthancSection", () => {
     expect(link.getAttribute("href")).toBe("/systems/authoritative-orthanc");
   });
 
+  it("shows a clear empty state without an empty scrollable table", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.endsWith("/settings")) return { settings };
+      if (path.endsWith("/pacs/orthanc-modalities")) return { modalities };
+      if (path.includes("patient-identity-reconciliations")) return { jobs: [], total: 0 };
+      throw new Error(`Unexpected ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole("button", { name: "Patient Identity Reconciliation" }));
+
+    expect((await screen.findByRole("status")).textContent).toBe("No reconciliation history found.");
+    expect(screen.queryByRole("region", { name: "Patient Identity Reconciliation history" })).toBeNull();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
@@ -29,7 +45,7 @@ describe("AuthoritativeOrthancSection", () => {
     });
   });
 
-  it("shows reconciliation history and exposes reversal only for effective completed jobs",async()=>{const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));expect(await screen.findByText("ACC-1")).toBeTruthy();await user.click(screen.getByRole("button",{name:"Reverse"}));expect(screen.getByRole("dialog").textContent).toContain("current Patient ID NEW back to OLD");});
+  it("shows reconciliation history and exposes reversal only for effective completed jobs",async()=>{const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));expect(await screen.findByRole("region",{name:"Patient Identity Reconciliation history"})).toBeTruthy();expect(await screen.findByText("ACC-1")).toBeTruthy();await user.click(screen.getByRole("button",{name:"Reverse"}));expect(screen.getByRole("dialog").textContent).toContain("current Patient ID NEW back to OLD");});
 
   it("sends reconciliation history search to the bounded admin endpoint",async()=>{const user=userEvent.setup();renderSection();await user.click(await screen.findByRole("button",{name:"Patient Identity Reconciliation"}));await user.type(await screen.findByRole("textbox",{name:"Search reconciliation history"}),"OLD-9");await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([path])=>String(path).includes("search=OLD-9")&&String(path).includes("limit=50"))).toBe(true));});
 

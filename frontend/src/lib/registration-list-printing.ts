@@ -27,7 +27,7 @@ export function prepareAppointmentListHtml(rows: AppointmentWithDetails[], label
     .registration-list { width: 100%; min-height: 100%; }
     .header { display: flex; align-items: center; justify-content: center; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
     .logo { width: 20mm; height: 20mm; object-fit: contain; flex: 0 0 auto; } .brand-wrap { text-align: center; }
-    .brand { margin: 0; font-size: 17px; font-weight: 800; color: #0f766e; } .brand-ar { margin: 2px 0 0; font-size: 12px; font-weight: 700; color: #0f766e; direction: rtl; }
+    .brand { margin: 0; font-size: 17px; font-weight: 800; color: #2563eb; } .brand-ar { margin: 2px 0 0; font-size: 12px; font-weight: 700; color: #2563eb; direction: rtl; }
     .title { margin: 3px 0 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: .14em; } .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
     .row { display: grid; grid-template-columns: 22mm 2fr 22mm 1fr 22mm 1.1fr 22mm 1.5fr; gap: 5px 7px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 11px; break-inside: avoid; }
     .row:nth-child(odd) { background: #f8fafc; } .row:nth-child(even) { background: #eef6f5; } .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }

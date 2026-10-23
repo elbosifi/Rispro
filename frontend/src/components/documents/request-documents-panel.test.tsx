@@ -399,7 +399,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
   });
 
   it("uses scoped Reporting Desk list and view URLs without querying the generic protocol policy", async () => {
-    const document = { ...documentFixture(12, "scan.tiff", "image/tiff"), viewUrl: "/reporting/saved-views/public/token/mobile/cases/42/documents/12/view" };
+    const document = { ...documentFixture(12, "scan.tiff", "image/tiff"), viewUrl: "/api/reporting/saved-views/public/token/mobile/cases/42/documents/12/view" };
     mockListReportingDeskDocuments.mockResolvedValue([document]);
 
     renderPanel({ previewMode: "inline", readOnly: true, reportingBoardScope: { token: "token", caseId: 42 } });
@@ -408,6 +408,25 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(mockListReportingDeskDocuments).toHaveBeenCalledWith("token", 42);
     expect(mockListAppointmentDocuments).not.toHaveBeenCalled();
     expect(mockFetchRequestDocumentProtocolPolicy).not.toHaveBeenCalled();
+  });
+
+  it("keeps workspace previews, thumbnails and open links on the scoped Reporting Desk URL", async () => {
+    const document = { ...documentFixture(12, "request.png", "image/png"), viewUrl: "/api/reporting/saved-views/public/token/mobile/cases/42/documents/12/view" };
+    mockListReportingDeskDocuments.mockResolvedValue([document]);
+    const { container } = renderPanel({ layout: "workspace", readOnly: true, reportingBoardScope: { token: "token", caseId: 42 } });
+
+    const preview = await screen.findByRole("img", { name: "request.png" });
+    fireEvent.load(preview);
+    const images = Array.from(container.querySelectorAll("img"));
+    expect(images.length).toBeGreaterThanOrEqual(2);
+    expect(images.every((image) => image.getAttribute("src") === document.viewUrl)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const openLinks = screen.getAllByRole("link", { name: "Open in new tab" });
+    expect(openLinks.length).toBeGreaterThanOrEqual(3);
+    expect(openLinks.every((link) => link.getAttribute("href") === document.viewUrl)).toBe(true);
+    expect(mockListAppointmentDocuments).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("document-file-input")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("prepares scan and uploads a NAPS2 scanned appointment request through existing document upload API", async () => {

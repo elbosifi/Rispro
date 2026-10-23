@@ -1,3 +1,5 @@
+import "@/components/shared/compact-controls.css";
+import { Button, Input, Card } from "@/components/shared";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -229,15 +231,15 @@ export default function WorklistMonitorPage() {
     : null;
 
   return (
-    <div className="space-y-5">
+    <div dir="ltr" className="compact-controls space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-stone-900 dark:text-white">MWL Monitor</h1>
-          <p className="text-sm text-stone-500 dark:text-stone-400">Operational view for Orthanc DICOM MWL and Sante HL7 worklist delivery.</p>
+          <h1 className="text-2xl font-semibold text-foreground">MWL Monitor</h1>
+          <p className="text-sm text-muted-foreground">Operational view for Orthanc DICOM MWL and Sante HL7 worklist delivery.</p>
         </div>
-        <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => navigate("/settings")}>
+        <Button variant="secondary" type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => navigate("/settings")}>
           <Settings size={16} /> Settings
-        </button>
+        </Button>
       </div>
 
       {message && <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">{message}</div>}
@@ -248,7 +250,7 @@ export default function WorklistMonitorPage() {
               <p className="font-semibold">Supervisor re-authentication required</p>
               <p className="text-xs text-amber-700">Confirm your identity with your passkey or password to load MWL status and controls.</p>
             </div>
-            <button type="button" className="btn-secondary text-xs" onClick={() => setShowReauth(true)}>Re-authenticate</button>
+            <Button variant="secondary" type="button" className="btn-secondary text-xs" onClick={() => setShowReauth(true)}>Re-authenticate</Button>
           </div>
         </div>
       ) : (entriesQuery.error || orthancSummary.error || santeSummary.error) && (
@@ -294,8 +296,8 @@ export default function WorklistMonitorPage() {
         <Field label="Date from" value={dateFrom} onChange={(value) => updateNavigation({ dateFrom: value })} type="date" />
         <Field label="Date to" value={dateTo} onChange={(value) => updateNavigation({ dateTo: value })} type="date" />
         <label className="space-y-1 text-sm">
-          <span className="text-stone-600 dark:text-stone-300">Modality</span>
-          <select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
+          <span className="text-muted-foreground">Modality</span>
+          <select value={modalityId} onChange={(event) => updateNavigation({ modalityId: event.target.value })} className="input-premium w-full">
             <option value="">All modalities</option>
             {(modalityOptions.data || []).map((modality) => (
               <option key={modality.id} value={String(modality.id)}>
@@ -305,8 +307,8 @@ export default function WorklistMonitorPage() {
           </select>
         </label>
         <label className="space-y-1 text-sm">
-          <span className="text-stone-600 dark:text-stone-300">Status</span>
-          <select value={status} onChange={(event) => updateNavigation({ status: event.target.value as WorklistMonitorStatus })} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900">
+          <span className="text-muted-foreground">Status</span>
+          <select value={status} onChange={(event) => updateNavigation({ status: event.target.value as WorklistMonitorStatus })} className="input-premium w-full">
             <option value="all">All</option>
             <option value="failed">Failed</option>
             <option value="pending">Pending</option>
@@ -319,24 +321,24 @@ export default function WorklistMonitorPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => void entriesQuery.refetch()}>
+        <Button variant="secondary" type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" onClick={() => void entriesQuery.refetch()}>
           <RefreshCw size={16} /> Refresh
-        </button>
-        <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" disabled={reconcile.isPending} onClick={() => reconcile.mutate(false)}>
+        </Button>
+        <Button variant="secondary" type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" disabled={reconcile.isPending} onClick={() => reconcile.mutate(false)}>
           <Wrench size={16} /> Reconcile dry-run
-        </button>
+        </Button>
         {isSuperAdmin && (
           <>
-            <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" disabled={reconcile.isPending} onClick={() => {
+            <Button variant="primary" type="button" className="btn-primary inline-flex items-center gap-2 text-sm" disabled={reconcile.isPending} onClick={() => {
               if (window.confirm("Apply reconcile for this date range?")) reconcile.mutate(true);
             }}>
               <Wrench size={16} /> Apply reconcile
-            </button>
-            <button type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" disabled={reset.isPending} onClick={() => {
+            </Button>
+            <Button variant="secondary" type="button" className="btn-secondary inline-flex items-center gap-2 text-sm" disabled={reset.isPending} onClick={() => {
               if (window.confirm("Reset/requeue this date range?")) reset.mutate();
             }}>
               <RotateCcw size={16} /> Reset / requeue
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -369,9 +371,9 @@ export default function WorklistMonitorPage() {
                 <td className="px-3 py-2">{entry.sante.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : entry.sante.status}<div className="text-xs text-stone-500">{entry.sante.lastAttemptAt || ""}</div>{entry.sante.lastError && <div className="max-w-xs truncate text-xs text-red-600">{entry.sante.lastError}</div>}</td>
                 <td className="px-3 py-2">
                   {tab === "orthanc" ? (
-                    <button className="btn-secondary text-xs" disabled={orthancRetry.isPending} onClick={() => orthancRetry.mutate(entry.bookingId)}>Retry Orthanc</button>
+                    <Button variant="secondary" className="btn-secondary text-xs" disabled={orthancRetry.isPending} onClick={() => orthancRetry.mutate(entry.bookingId)}>Retry Orthanc</Button>
                   ) : entry.sante.outboxId ? (
-                    <button className="btn-secondary text-xs" disabled={santeRetry.isPending} onClick={() => santeRetry.mutate(entry.sante.outboxId as number)}>Retry Sante</button>
+                    <Button variant="secondary" className="btn-secondary text-xs" disabled={santeRetry.isPending} onClick={() => santeRetry.mutate(entry.sante.outboxId as number)}>Retry Sante</Button>
                   ) : (
                     <span className="text-xs text-stone-500">No outbox</span>
                   )}
@@ -386,13 +388,13 @@ export default function WorklistMonitorPage() {
       </div>
 
       {selected && (
-        <div className="fixed inset-y-0 right-0 z-40 w-full max-w-2xl overflow-y-auto border-l border-stone-200 bg-white p-5 shadow-xl dark:border-stone-700 dark:bg-stone-950">
+        <div className="fixed inset-y-0 right-0 z-[70] w-full max-w-2xl overflow-y-auto border-l border-stone-200 bg-white p-5 shadow-xl dark:border-stone-700 dark:bg-stone-950">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">{selected.accessionNumber}</h2>
               <p className="text-sm text-stone-500">{selected.patientName} / {selected.modality} / {selected.procedure || "-"}</p>
             </div>
-            <button className="btn-secondary text-sm" onClick={() => setSelected(null)}>Close</button>
+            <Button variant="secondary" className="btn-secondary text-sm" onClick={() => setSelected(null)}>Close</Button>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Info label="Orthanc status" value={selected.orthanc.status === "waiting_for_protocol" ? t("worklistMonitor.waitingForProtocol") : selected.orthanc.status} />
@@ -417,10 +419,10 @@ export default function WorklistMonitorPage() {
 
 function StatusCard({ title, lines }: { title: string; lines: string[] }) {
   return (
-    <div className="rounded border border-stone-200 bg-white p-3 text-sm dark:border-stone-700 dark:bg-stone-900">
-      <h3 className="mb-2 font-semibold text-stone-900 dark:text-white">{title}</h3>
-      {lines.map((line, index) => <p key={`${title}-${index}`} className="text-stone-600 dark:text-stone-300">{line || "-"}</p>)}
-    </div>
+    <Card variant="compact" className="!p-3 text-sm">
+      <h3 className="mb-2 font-semibold text-foreground">{title}</h3>
+      {lines.map((line, index) => <p key={`${title}-${index}`} className="text-muted-foreground">{line || "-"}</p>)}
+    </Card>
   );
 }
 
@@ -431,8 +433,8 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
 function Field({ label, value, onChange, type = "text", placeholder }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string }) {
   return (
     <label className="space-y-1 text-sm">
-      <span className="text-stone-600 dark:text-stone-300">{label}</span>
-      <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="w-full rounded border border-stone-300 bg-white px-2 py-2 dark:border-stone-600 dark:bg-stone-900" />
+      <span className="text-muted-foreground">{label}</span>
+      <Input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="input-premium w-full" />
     </label>
   );
 }

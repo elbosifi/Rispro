@@ -817,13 +817,8 @@ describe("ModalityPage modality board", () => {
       source: "manual_upload",
     })));
 
-    await user.click(screen.getByRole("button", { name: "Scan Paper" }));
-    await waitFor(() => expect(createScanSessionMock).toHaveBeenCalledWith({
-      appointmentId: 25,
-      patientId: 10,
-      documentType: "clinical_document",
-      appointmentRefType: "v2_booking",
-    }));
+    expect(screen.queryByRole("button", { name: "Scan Paper" })).toBeNull();
+    expect(createScanSessionMock).not.toHaveBeenCalled();
   });
 
   it("combines Missing and Uploaded document filters with board status filters", async () => {

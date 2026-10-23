@@ -1,3 +1,5 @@
+import "@/components/shared/compact-controls.css";
+import { Button, Input } from "@/components/shared";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { api } from "@/lib/api-client";
 import { pushToast } from "@/lib/toast";
@@ -405,18 +407,18 @@ export default function LegacyAccessViewerPage() {
   // -----------------------------------------------------------------------
 
   const sectionStyle: React.CSSProperties = {
-    border: "1px solid #c5c5c5",
-    borderRadius: 4,
-    padding: "6px 10px",
-    background: "#fafafa",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    padding: "12px 16px",
+    background: "var(--card)",
     marginBottom: 6
   };
   const sectionTitleStyle: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: 700,
-    color: "#333",
+    color: "var(--foreground)",
     marginBottom: 4,
-    borderBottom: "1px solid #ddd",
+    borderBottom: "1px solid var(--border)",
     paddingBottom: 2
   };
   const fieldRowStyle: React.CSSProperties = {
@@ -433,97 +435,82 @@ export default function LegacyAccessViewerPage() {
     flex: "0 0 auto"
   };
   const labelStyle: React.CSSProperties = {
-    fontSize: 10,
-    color: "#555",
+    fontSize: 12,
+    color: "var(--muted-foreground)",
     fontWeight: 600
   };
   const inputStyle: React.CSSProperties = {
-    fontSize: 11,
-    padding: "2px 4px",
-    border: "1px solid #bbb",
-    borderRadius: 3,
-    background: "#fff",
-    color: "#222",
+    fontSize: 14,
+    height: "var(--control-height-sm)",
+    minWidth: 0,
+    boxShadow: "none",
+    padding: "4px 10px",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--card)",
+    color: "var(--foreground)",
     direction: "rtl"
   };
   const selectStyle: React.CSSProperties = {
     ...inputStyle,
     cursor: "pointer"
   };
-  const btnPrimaryStyle: React.CSSProperties = {
-    fontSize: 11,
-    fontWeight: 700,
-    padding: "3px 14px",
-    border: "1px solid #0f766e",
-    borderRadius: 3,
-    background: "#0f766e",
-    color: "#fff",
-    cursor: "pointer"
-  };
-  const btnSecondaryStyle: React.CSSProperties = {
-    fontSize: 11,
-    padding: "3px 10px",
-    border: "1px solid #999",
-    borderRadius: 3,
-    background: "#eee",
-    color: "#333",
-    cursor: "pointer"
-  };
-
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
 
   return (
-    <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", color: "#222", background: "#e8e8e8", minHeight: "100vh", padding: 8 }}>
+    <div dir="rtl" lang="ar" className="compact-controls mx-auto w-full min-w-0 max-w-[1400px] space-y-3 text-foreground">
       {/* Page header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, padding: "4px 10px", background: "#0f766e", color: "#fff", borderRadius: 4 }}>
-        <h1 style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>منظومة الاستقبال القديمة</h1>
-        <span style={{ fontSize: 10, opacity: 0.85 }}>Access MDB Viewer</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8, flexWrap: "wrap", padding: "14px 16px", background: "var(--accent)", color: "var(--accent-foreground)", borderRadius: "var(--radius-sm)" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>منظومة الاستقبال القديمة</h1>
+        <span style={{ fontSize: 12, opacity: 0.85 }}>Access MDB Viewer</span>
       </div>
 
       {/* Upload bar */}
       {mdbStatus.hasActiveFile ? (
-        <div style={{ ...sectionStyle, display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f0f7f6" }}>
-          <span style={{ fontSize: 11, color: "#0f766e" }}>
+        <div style={{ ...sectionStyle, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, background: "var(--card)" }}>
+          <span style={{ fontSize: 14, color: "var(--accent)" }}>
             الملف النشط: <strong>{mdbStatus.fileName}</strong>
           </span>
           <input
             ref={fileInputRef}
             type="file"
+            aria-label="ملف قاعدة البيانات MDB"
             accept=".mdb,.accdb"
             onChange={handleFileUpload}
             disabled={uploading}
-            style={{ fontSize: 10 }}
+            style={{ fontSize: 12, maxWidth: "100%" }}
           />
         </div>
       ) : (
         <div style={{ ...sectionStyle, textAlign: "center", padding: 16 }}>
-          <p style={{ fontSize: 12, margin: "0 0 6px", color: "#555" }}>لا يوجد ملف MDB نشط — الرجاء اختيار ملف قاعدة البيانات</p>
+          <p style={{ fontSize: 12, margin: "0 0 6px", color: "var(--muted-foreground)" }}>لا يوجد ملف MDB نشط — الرجاء اختيار ملف قاعدة البيانات</p>
           <input
             ref={fileInputRef}
             type="file"
+            aria-label="ملف قاعدة البيانات MDB"
             accept=".mdb,.accdb"
             onChange={handleFileUpload}
             disabled={uploading}
-            style={{ fontSize: 11 }}
+            style={{ fontSize: 14 }}
           />
-          {uploading && <span style={{ fontSize: 11, color: "#888", marginRight: 8 }}>جاري التحميل...</span>}
-          {uploadError && <span style={{ fontSize: 11, color: "#c00", marginRight: 8 }}>{uploadError}</span>}
+          {uploading && <span style={{ fontSize: 14, color: "var(--muted-foreground)", marginRight: 8 }}>جاري التحميل...</span>}
+          {uploadError && <span style={{ fontSize: 14, color: "#c00", marginRight: 8 }}>{uploadError}</span>}
         </div>
       )}
 
       {/* Summary strip */}
       {mdbStatus.hasActiveFile && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
           {[
-            { label: "اليوم", value: summary.todayCount, color: "#0f766e" },
+            { label: "اليوم", value: summary.todayCount, color: "var(--accent)" },
             { label: "غدًا", value: summary.tomorrowCount, color: "#d97706" },
-            { label: "هذا الأسبوع", value: summary.weekCount, color: "#2563eb" }
+            { label: "هذا الأسبوع", value: summary.weekCount, color: "var(--accent)" }
           ].map((s) => (
-            <div key={s.label} style={{ flex: 1, border: "1px solid #ccc", borderRadius: 3, background: "#fff", padding: "4px 8px", textAlign: "center" }}>
-              <span style={{ fontSize: 9, color: "#666" }}>{s.label}</span>
-              <span style={{ fontSize: 16, fontWeight: 800, color: s.color, marginRight: 6 }}>{s.value}</span>
+            <div key={s.label} style={{ flex: 1, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--card)", padding: "4px 8px", textAlign: "center" }}>
+              <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{s.label}</span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: s.color, marginRight: 6 }}>{s.value}</span>
             </div>
           ))}
         </div>
@@ -532,52 +519,52 @@ export default function LegacyAccessViewerPage() {
       {/* Filter / work area */}
       {mdbStatus.hasActiveFile && (
         <>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <div style={{ flex: 1, ...sectionStyle }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0, ...sectionStyle }}>
               <div style={sectionTitleStyle}>بيانات المريض</div>
               <div style={fieldRowStyle}>
                 <div style={{ ...fieldStyle, flex: "1 1 160px" }}>
-                  <label style={labelStyle}>اسم المريض</label>
-                  <input type="text" value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="بحث جزئي..." style={inputStyle} />
+                  <label htmlFor="legacy-patient-name" style={labelStyle}>اسم المريض</label>
+                  <Input id="legacy-patient-name" type="text" value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="بحث جزئي..." style={inputStyle} />
                 </div>
                 <div style={{ ...fieldStyle, flex: "0 0 100px" }}>
-                  <label style={labelStyle}>الجنس</label>
-                  <select value={sex} onChange={(e) => setSex(e.target.value)} style={selectStyle}>
+                  <label htmlFor="legacy-sex" style={labelStyle}>الجنس</label>
+                  <select id="legacy-sex" value={sex} onChange={(e) => setSex(e.target.value)} style={selectStyle}>
                     <option value="">الكل</option>
                     {filterOptions.sexes.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div style={{ ...fieldStyle, flex: "0 0 140px" }}>
-                  <label style={labelStyle}>من تاريخ</label>
-                  <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
+                  <label htmlFor="legacy-from-date" style={labelStyle}>من تاريخ</label>
+                  <Input id="legacy-from-date" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
                 </div>
                 <div style={{ ...fieldStyle, flex: "0 0 140px" }}>
-                  <label style={labelStyle}>إلى تاريخ</label>
-                  <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
+                  <label htmlFor="legacy-to-date" style={labelStyle}>إلى تاريخ</label>
+                  <Input id="legacy-to-date" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
                 </div>
               </div>
             </div>
 
-            <div style={{ flex: 1, ...sectionStyle }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0, ...sectionStyle }}>
               <div style={sectionTitleStyle}>بيانات الفحص</div>
               <div style={fieldRowStyle}>
                 <div style={{ ...fieldStyle, flex: "0 0 130px" }}>
-                  <label style={labelStyle}>نوع الجهاز</label>
-                  <select value={modality} onChange={(e) => setModality(e.target.value)} style={selectStyle}>
+                  <label htmlFor="legacy-modality" style={labelStyle}>نوع الجهاز</label>
+                  <select id="legacy-modality" value={modality} onChange={(e) => setModality(e.target.value)} style={selectStyle}>
                     <option value="">الكل</option>
                     {filterOptions.modalities.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div style={{ ...fieldStyle, flex: "0 0 140px" }}>
-                  <label style={labelStyle}>نوع الفحص</label>
-                  <select value={exam} onChange={(e) => setExam(e.target.value)} style={selectStyle}>
+                  <label htmlFor="legacy-exam" style={labelStyle}>نوع الفحص</label>
+                  <select id="legacy-exam" value={exam} onChange={(e) => setExam(e.target.value)} style={selectStyle}>
                     <option value="">الكل</option>
                     {filterOptions.exams.map((ex) => <option key={ex} value={ex}>{ex}</option>)}
                   </select>
                 </div>
                 <div style={{ ...fieldStyle, flex: "0 0 130px" }}>
-                  <label style={labelStyle}>الجهة / المصدر</label>
-                  <select value={source} onChange={(e) => setSource(e.target.value)} style={selectStyle}>
+                  <label htmlFor="legacy-source" style={labelStyle}>الجهة / المصدر</label>
+                  <select id="legacy-source" value={source} onChange={(e) => setSource(e.target.value)} style={selectStyle}>
                     <option value="">الكل</option>
                     {filterOptions.sources.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -587,70 +574,70 @@ export default function LegacyAccessViewerPage() {
           </div>
 
           {/* Action toolbar */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 6, padding: "4px 8px", background: "#fff", border: "1px solid #ccc", borderRadius: 3, alignItems: "center" }}>
-            <button onClick={handleSearch} disabled={loading} style={btnPrimaryStyle}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6, padding: "4px 8px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", alignItems: "center" }}>
+            <Button type="button" onClick={handleSearch} disabled={loading} variant="primary">
               {loading ? "جاري البحث..." : "بحث"}
-            </button>
-            <button onClick={handleResetFilters} style={btnSecondaryStyle}>مسح الفلاتر</button>
-            <button onClick={handleRefreshAll} style={btnSecondaryStyle}>تحديث</button>
+            </Button>
+            <Button type="button" onClick={handleResetFilters} variant="secondary">مسح الفلاتر</Button>
+            <Button type="button" onClick={handleRefreshAll} variant="secondary">تحديث</Button>
             <div style={{ flex: 1 }} />
-            <button onClick={handlePrintList} disabled={appointments.length === 0} style={btnSecondaryStyle}>طباعة القائمة</button>
-            {error && <span style={{ fontSize: 11, color: "#c00", marginRight: 8 }}>{error}</span>}
+            <Button type="button" onClick={handlePrintList} disabled={appointments.length === 0} variant="secondary">طباعة القائمة</Button>
+            {error && <span style={{ fontSize: 14, color: "#c00", marginRight: 8 }}>{error}</span>}
           </div>
         </>
       )}
 
       {/* Empty state */}
       {!mdbStatus.hasActiveFile && !uploading && (
-        <div style={{ textAlign: "center", padding: 40, color: "#999" }}>
+        <div style={{ textAlign: "center", padding: 40, color: "var(--muted-foreground)" }}>
           <svg style={{ width: 48, height: 48, margin: "0 auto 8px", opacity: 0.4 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 7h16M4 12h16M4 17h10M4 21h6" />
             <rect x="2" y="3" width="20" height="18" rx="2" strokeWidth={2} fill="none" />
           </svg>
           <p style={{ fontSize: 13 }}>لا يوجد ملف MDB نشط</p>
-          <p style={{ fontSize: 11 }}>الرجاء اختيار ملف قاعدة البيانات لعرض المواعيد</p>
+          <p style={{ fontSize: 14 }}>الرجاء اختيار ملف قاعدة البيانات لعرض المواعيد</p>
         </div>
       )}
 
       {/* Results table */}
       {mdbStatus.hasActiveFile && (
-        <div style={{ border: "1px solid #bbb", borderRadius: 3, background: "#fff", overflow: "hidden" }}>
-          <div style={{ padding: "3px 8px", background: "#f5f5f5", borderBottom: "1px solid #ddd", fontSize: 10, color: "#666", display: "flex", justifyContent: "space-between" }}>
+        <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--card)", overflow: "hidden" }}>
+          <div style={{ padding: "3px 8px", background: "var(--muted)", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--muted-foreground)", display: "flex", justifyContent: "space-between" }}>
             <span>النتائج: {appointments.length} موعد</span>
             <span>{loading ? "جاري التحميل..." : ""}</span>
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
-                <tr style={{ background: "#e8e8e8" }}>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 28 }}>#</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 55 }}>التاريخ</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 40 }}>الوقت</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "right" }}>اسم المريض</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 28 }}>العمر</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 28 }}>الجنس</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 60 }}>نوع الجهاز</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 70 }}>نوع الفحص</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 70 }}>الجهة</th>
-                  <th style={{ padding: "3px 4px", border: "1px solid #ccc", textAlign: "center", width: 50 }}>إجراءات</th>
+                <tr style={{ background: "var(--muted)" }}>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 28 }}>#</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 55 }}>التاريخ</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 40 }}>الوقت</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "right" }}>اسم المريض</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 28 }}>العمر</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 28 }}>الجنس</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 60 }}>نوع الجهاز</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 70 }}>نوع الفحص</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 70 }}>الجهة</th>
+                  <th style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", width: 50 }}>إجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {appointments.map((row, idx) => (
-                  <tr key={`${row.appointmentId}-${idx}`} style={{ background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{idx + 1}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center", fontFamily: "monospace", fontSize: 10 }}>{formatDisplayDate(row.date)}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center", fontFamily: "monospace", fontSize: 10 }}>{row.time ?? "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "right", direction: "rtl", fontWeight: 600 }}>{row.patientName ?? "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{row.age ?? "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{row.sex ?? "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{row.modality || "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{row.exam || "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>{row.source || "—"}</td>
-                    <td style={{ padding: "2px 4px", border: "1px solid #ddd", textAlign: "center" }}>
+                  <tr key={`${row.appointmentId}-${idx}`} style={{ background: idx % 2 === 0 ? "var(--card)" : "var(--card)" }}>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{idx + 1}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>{formatDisplayDate(row.date)}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}>{row.time ?? "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "right", direction: "rtl", fontWeight: 600 }}>{row.patientName ?? "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{row.age ?? "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{row.sex ?? "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{row.modality || "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{row.exam || "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>{row.source || "—"}</td>
+                    <td style={{ padding: "8px", border: "1px solid var(--border)", textAlign: "center" }}>
                       <div style={{ display: "flex", gap: 2, justifyContent: "center" }}>
-                        <button onClick={() => printCurrentStyle(row)} style={{ fontSize: 9, padding: "1px 5px", border: "1px solid #0f766e", borderRadius: 2, background: "#0f766e", color: "#fff", cursor: "pointer" }}>طباعة</button>
-                        <button onClick={() => printLegacyStyle(row)} style={{ fontSize: 9, padding: "1px 5px", border: "1px solid #999", borderRadius: 2, background: "#eee", color: "#333", cursor: "pointer" }}>قديم</button>
+                        <Button type="button" onClick={() => printCurrentStyle(row)} variant="primary" size="sm">طباعة</Button>
+                        <Button type="button" onClick={() => printLegacyStyle(row)} variant="secondary" size="sm">قديم</Button>
                       </div>
                     </td>
                   </tr>
@@ -658,7 +645,7 @@ export default function LegacyAccessViewerPage() {
               </tbody>
             </table>
             {appointments.length === 0 && !loading && (
-              <div style={{ textAlign: "center", padding: 20, color: "#999", fontSize: 12 }}>لا توجد مواعيد مطابقة</div>
+              <div style={{ textAlign: "center", padding: 20, color: "var(--muted-foreground)", fontSize: 12 }}>لا توجد مواعيد مطابقة</div>
             )}
           </div>
         </div>

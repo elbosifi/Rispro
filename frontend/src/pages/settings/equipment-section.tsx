@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { Button } from "@/components/shared/Button";
-import { Input } from "@/components/shared/Input";
+import { Button, Input, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/shared";
 import { createEquipment, deactivateEquipment, fetchDicomDevices, fetchEquipment, saveEquipmentDicomIdentity, updateEquipment } from "@/lib/api-hooks";
 import { fetchModalitiesSettings } from "@/lib/api/catalog";
 import { ReAuthPrompt } from "./settings-section-helpers";
@@ -93,7 +92,7 @@ export default function EquipmentSection({ onReAuthRequired }: { onReAuthRequire
   const usedDeviceIds = new Set((allEquipment.data?.equipment ?? []).map((item) => Number(value(item, "dicomDeviceId", "dicom_device_id"))).filter(Boolean));
   const compatibleDevices = (devices.data?.devices ?? []).filter((device) => String(device.modalityId) === form?.modalityId && !usedDeviceIds.has(device.id));
 
-  return <div className="space-y-4">
+  return <div className="space-y-4" dir="ltr" lang="en">
     {errors.length > 0 && !reauth ? <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage(errors[0])}</div> : null}
     <div className="flex items-center justify-between gap-3">
       <label className="text-sm"><input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} /> Show inactive</label>
@@ -122,10 +121,10 @@ export default function EquipmentSection({ onReAuthRequired }: { onReAuthRequire
             <Input id="equipment-notes" placeholder="Optional note" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
           </Field>
           <Field id="equipment-type" label="Equipment type" hint="Choose the physical equipment category.">
-            <select id="equipment-type" className="input-premium" value={form.equipmentType} onChange={e => setForm({ ...form, equipmentType: e.target.value })}>{TYPES.map(t => <option key={t}>{t}</option>)}</select>
+            <select id="equipment-type" className="input-premium !py-1" value={form.equipmentType} onChange={e => setForm({ ...form, equipmentType: e.target.value })}>{TYPES.map(t => <option key={t}>{t}</option>)}</select>
           </Field>
           <Field id="equipment-modality" label="Linked RIS modality" hint="This must match the modality used by appointments before DICOM is configured.">
-            <select id="equipment-modality" className="input-premium" value={form.modalityId} onChange={e => setForm({ ...form, modalityId: e.target.value })}><option value="">No linked modality</option>{modalities.data?.modalities.map(m => <option key={m.id} value={m.id}>{m.name_en} - {m.code}</option>)}</select>
+            <select id="equipment-modality" className="input-premium !py-1" value={form.modalityId} onChange={e => setForm({ ...form, modalityId: e.target.value })}><option value="">No linked modality</option>{modalities.data?.modalities.map(m => <option key={m.id} value={m.id}>{m.name_en} - {m.code}</option>)}</select>
           </Field>
           {form.equipmentType === "MRI" ? <Field id="equipment-field-strength" label="Field strength" hint="For example, 1.5T or 3T.">
             <Input id="equipment-field-strength" placeholder="e.g. 1.5T" value={form.fieldStrength} onChange={e => setForm({ ...form, fieldStrength: e.target.value })} />
@@ -174,12 +173,12 @@ export default function EquipmentSection({ onReAuthRequired }: { onReAuthRequire
         </div> : null}
         {!dicomExpanded && !value((equipment.data?.equipment ?? []).find((item) => Number(item.id) === editing) ?? {}, "dicomDeviceId", "dicom_device_id") && compatibleDevices.length > 0 ? <div className="mt-4 flex flex-wrap items-end gap-3">
           <Field id="link-existing-dicom" label="Existing DICOM identity" hint="Reuse an unlinked identity for this RIS modality.">
-            <select id="link-existing-dicom" className="input-premium max-w-md" value={linkId} onChange={e => setLinkId(e.target.value)}><option value="">Select a DICOM identity</option>{compatibleDevices.map(d => <option key={d.id} value={d.id}>{d.deviceName} - AE {d.modalityAeTitle}</option>)}</select>
+            <select id="link-existing-dicom" className="input-premium max-w-md !py-1" value={linkId} onChange={e => setLinkId(e.target.value)}><option value="">Select a DICOM identity</option>{compatibleDevices.map(d => <option key={d.id} value={d.id}>{d.deviceName} - AE {d.modalityAeTitle}</option>)}</select>
           </Field>
           <Button variant="secondary" disabled={!linkId || linkDicom.isPending} onClick={() => linkDicom.mutate()}>Link identity</Button>
         </div> : null}
       </section> : <p className="border-t border-border pt-4 text-sm text-muted-foreground">Create Equipment first, then configure its optional DICOM identity here.</p>}
     </div> : null}
-    <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr><th>Name</th><th>Type</th><th>Linked modality</th><th>Manufacturer / Vendor</th><th>Model</th><th>Location</th><th>DICOM status</th><th>Status</th><th>Actions</th></tr></thead><tbody>{equipment.data?.equipment.map(item => { const isActive = Boolean(value(item, "isActive", "is_active")); const identity = value(item, "dicomIdentity", "dicom_identity") as RecordValue | null; return <tr key={String(item.id)}><td>{asText(item.name)}</td><td>{asText(value(item, "equipmentType", "equipment_type"))}</td><td>{asText(value(item, "modalityCode", "modality_code") ?? "-")}</td><td>{asText(item.vendor || "-")}</td><td>{asText(item.model || "-")}</td><td>{asText(item.location || "-")}</td><td>{identity ? <span>DICOM configured<br /><span dir="ltr" className="text-xs text-muted-foreground">AE: {asText(identity.modalityAeTitle)}</span></span> : "DICOM not configured"}</td><td>{isActive ? "Active" : "Inactive"}</td><td className="whitespace-nowrap"><button className="underline" onClick={() => startEdit(item)}>Edit</button>{isActive ? <button className="ml-2 underline" onClick={() => deactivate.mutate(Number(item.id))}>Deactivate</button> : null}</td></tr>; })}</tbody></table></div>
+    <div className="overflow-x-auto"><Table className="w-full min-w-[760px] text-sm"><TableHeader><TableRow><TableHead className="!normal-case !tracking-normal">Name</TableHead><TableHead className="!normal-case !tracking-normal">Type</TableHead><TableHead className="!normal-case !tracking-normal">Linked modality</TableHead><TableHead className="!normal-case !tracking-normal">Manufacturer / Vendor</TableHead><TableHead className="!normal-case !tracking-normal">Model</TableHead><TableHead className="!normal-case !tracking-normal">Location</TableHead><TableHead className="!normal-case !tracking-normal">DICOM status</TableHead><TableHead className="!normal-case !tracking-normal">Status</TableHead><TableHead className="!normal-case !tracking-normal">Actions</TableHead></TableRow></TableHeader><TableBody className="divide-border">{equipment.data?.equipment.map(item => { const isActive = Boolean(value(item, "isActive", "is_active")); const identity = value(item, "dicomIdentity", "dicom_identity") as RecordValue | null; return <TableRow key={String(item.id)}><TableCell>{asText(item.name)}</TableCell><TableCell>{asText(value(item, "equipmentType", "equipment_type"))}</TableCell><TableCell>{asText(value(item, "modalityCode", "modality_code") ?? "-")}</TableCell><TableCell>{asText(item.vendor || "-")}</TableCell><TableCell>{asText(item.model || "-")}</TableCell><TableCell>{asText(item.location || "-")}</TableCell><TableCell>{identity ? <span>DICOM configured<br /><span dir="ltr" className="text-xs text-muted-foreground">AE: {asText(identity.modalityAeTitle)}</span></span> : "DICOM not configured"}</TableCell><TableCell>{isActive ? "Active" : "Inactive"}</TableCell><TableCell className="whitespace-nowrap"><Button type="button" variant="secondary" size="sm" onClick={() => startEdit(item)}>Edit</Button>{isActive ? <Button type="button" variant="secondary" size="sm" className="ms-2" onClick={() => deactivate.mutate(Number(item.id))}>Deactivate</Button> : null}</TableCell></TableRow>; })}</TableBody></Table></div>
   </div>;
 }

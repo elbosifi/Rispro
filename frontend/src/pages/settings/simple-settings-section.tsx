@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/shared/Button";
+import { Button, Input, LoadingState } from "@/components/shared";
 import { fetchSettings, saveSettings } from "@/lib/api-hooks";
 import type { TranslationKey } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -174,15 +174,16 @@ function MrnPrefixSettingEditor({
       </div>
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
         <div className="flex-1">
-          <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-amber-700 mb-1.5">
+          <label htmlFor="settings-mrn-prefix" className="mb-1.5 block text-sm font-medium text-amber-800">
             {t("settings.patientRegistration.mrnPrefix")}
           </label>
-          <input
+          <Input
+            id="settings-mrn-prefix"
             type="text"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder={t("settings.patientRegistration.mrnPrefix")}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-amber-200 bg-white text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+            className="w-full"
           />
         </div>
         <Button
@@ -228,7 +229,7 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", category])} />;
     return <QueryError message={msg} />;
   }
-  if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+  if (isLoading) return <LoadingState message={t("settings.loading")} />;
   const settingsValues: Record<string, string> = data ?? {};
   const serverMrnPrefix = String(data?.mrn_prefix ?? "");
 
@@ -260,18 +261,19 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
         const label = control.label || friendlySettingLabel(category, key, t);
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
         return (
-          <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
-            <div>
-              <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{label}</span>
-              {control.description && <p className="text-stone-500 dark:text-stone-400 text-xs mt-1 max-w-2xl">{control.description}</p>}
+          <div key={key} className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <label htmlFor={control.type === "text" ? undefined : `setting-${key}`} className="text-sm font-medium text-foreground">{label}</label>
+              {control.description && <p className="text-muted-foreground text-xs mt-1 max-w-2xl">{control.description}</p>}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-sm sm:shrink-0">
               {control.type === "dropdown" && control.options && (
                 <select
+                  id={`setting-${key}`}
                   value={String(value)}
                   onChange={(e) => handleSave(key, e.target.value)}
                   disabled={isPending}
-                  className="px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50"
+                  className="input-premium w-full !py-1 sm:max-w-sm"
                 >
                   {control.options.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -279,7 +281,8 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
                 </select>
               )}
               {control.type === "number" && (
-                <input
+                <Input
+                  id={`setting-${key}`}
                   type="number"
                   value={String(value)}
                   onChange={(e) => handleSave(key, e.target.value)}
@@ -287,23 +290,24 @@ export default function SimpleSettingsSection({ category, onReAuthRequired }: { 
                   min={control.min}
                   max={control.max}
                   step={control.step}
-                  className="w-20 px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50 text-right"
+                  className="w-24 text-right"
                 />
               )}
               {control.type === "time" && (
-                <input
+                <Input
+                  id={`setting-${key}`}
                   type="time"
                   value={String(value)}
                   onChange={(e) => handleSave(key, e.target.value)}
                   disabled={isPending}
-                  className="px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50"
+                  className="w-full sm:w-40"
                 />
               )}
               {control.type === "text" && (
                 <span className="text-stone-900 dark:text-white text-sm">{String(value)}</span>
               )}
               {isPending && (
-                <span className="w-4 h-4 border-2 border-stone-300 border-t-teal-600 rounded-full animate-spin" />
+                <span className="w-4 h-4 border-2 border-stone-300 border-t-accent rounded-full animate-spin" />
               )}
             </div>
           </div>
