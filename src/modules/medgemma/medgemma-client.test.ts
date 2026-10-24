@@ -88,3 +88,63 @@ test("bounds input before network access and handles timeouts, cancellations and
   await withServer((_req, res) => res.end(), async (connection) => { closedConnection = connection; });
   await assert.rejects(cleanupMedGemmaDictation(closedConnection, "", "input"), /unreachable/);
 });
+
+const ollama = (connection: MedGemmaConnection): MedGemmaConnection => ({ ...connection, provider: "ollama", baseUrl: "https://standalone.invalid", ollamaBaseUrl: connection.baseUrl, ollamaModel: "medgemma1.5:4b" });
+test("Ollama health checks the installed model list and never sends the standalone key", async () => {
+  const lists: Array<Array<{ name?: string; model?: string }>> = [[{ name: "medgemma1.5:4b" }], [{ model: "medgemma1.5:4b" }], [{ name: "another-model" }], []];
+  for (const models of lists) {
+    await withServer((req, res) => {
+      assert.equal(req.url, "/api/tags"); assert.equal(req.method, "GET");
+      assert.equal(req.headers["x-api-key"], undefined); assert.equal(req.headers.authorization, undefined);
+      res.end(JSON.stringify({ models }));
+    }, async (connection) => {
+      if (models.some((model) => model.name === "medgemma1.5:4b" || model.model === "medgemma1.5:4b")) assert.deepEqual(await checkMedGemmaHealth(ollama(connection), "standalone-secret"), { model: "medgemma1.5:4b" });
+      else await assert.rejects(checkMedGemmaHealth(ollama(connection), "standalone-secret"), /medgemma1\.5:4b.*not installed/);
+    });
+  }
+});
+test("Ollama forwards all four tasks, separated instructions/source and actual generation settings", async () => {
+  for (const task of MEDGEMMA_TASKS) await withServer((req, res) => {
+    assert.equal(req.url, "/api/chat"); assert.equal(req.method, "POST");
+    assert.equal(req.headers["x-api-key"], undefined); assert.equal(req.headers.authorization, undefined);
+    let body = ""; req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+      assert.deepEqual(JSON.parse(body), { model: "custom/medgemma:local", stream: false,
+        messages: [{ role: "user", content: `Task: ${task}\nInstructions:\n${DEFAULT_MEDGEMMA_INSTRUCTIONS[task]}\n\nOriginal text:\nSynthetic source\nUnchanged measurements: 2.5 cm.` }],
+        options: { temperature: 0, num_predict: 512 } });
+      assert.doesNotMatch(body, /standalone-secret/);
+      res.end(JSON.stringify({ message: { role: "assistant", content: "Generated result" }, done: true, total_duration: 2_500_000_000, extra: "not forwarded" }));
+    });
+  }, async (connection) => {
+    assert.deepEqual(await generateMedGemma({ ...ollama(connection), ollamaModel: "custom/medgemma:local" }, "standalone-secret", { task, text: "Synthetic source\nUnchanged measurements: 2.5 cm.", instructions: DEFAULT_MEDGEMMA_INSTRUCTIONS[task], temperature: 0, maxGeneratedTokens: 512 }), { text: "Generated result", processing_seconds: 2.5 });
+  });
+});
+test("Ollama uses measured request duration when timing is unavailable", async () => {
+  await withServer((_req, res) => res.end(JSON.stringify({ message: { content: "Generated result" } })), async (connection) => {
+    const result = await generateMedGemma(ollama(connection), "", { task: "cleanup_dictation", text: "source", instructions: "saved instructions", temperature: 0.2, maxGeneratedTokens: 1024 });
+    assert.equal(result.text, "Generated result"); assert.ok(Number.isFinite(result.processing_seconds)); assert.ok(result.processing_seconds >= 0);
+  });
+});
+test("Ollama retains response validation and bounded errors", async () => {
+  for (const response of ["bad json", "null", "[]", "{}", JSON.stringify({ message: { content: "" } }), JSON.stringify({ message: { content: "x".repeat(32_001) } }), JSON.stringify({ message: { content: "partial" }, done: false }), "x".repeat(256 * 1024 + 1)]) {
+    await withServer((_req, res) => res.end(response), async (connection) => {
+      await assert.rejects(generateMedGemma(ollama(connection), "secret", { task: "cleanup_dictation", text: "source", instructions: "saved instructions", temperature: 0.1, maxGeneratedTokens: 2048 }), /invalid|too large/);
+      await assert.rejects(checkMedGemmaHealth(ollama(connection), "secret"), /invalid|too large/);
+    });
+  }
+});
+test("Ollama retains HTTP error, redirect, timeout, cancellation and unreachable handling", async () => {
+  const input = { task: "cleanup_dictation" as const, text: "private source", instructions: "instructions", temperature: 0.1, maxGeneratedTokens: 2048 };
+  for (const status of [302, 401, 403, 500]) await withServer((_req, res) => { res.writeHead(status, { Location: "/redirect" }); res.end("private-upstream-body"); }, async (connection) => {
+    await assert.rejects(generateMedGemma(ollama(connection), "standalone-secret", input), (error: Error) => {
+      assert.match(error.message, /Ollama/); assert.doesNotMatch(error.message, /private|standalone-secret/); return true;
+    });
+  });
+  await withServer((_req, _res) => {}, async (connection) => {
+    await assert.rejects(generateMedGemma({ ...ollama(connection), timeoutSeconds: 0.02 }, "", input), /timed out/);
+    await assert.rejects(generateMedGemma(ollama(connection), "", input, AbortSignal.abort()), /cancelled/);
+  });
+  let closed!: MedGemmaConnection;
+  await withServer((_req, res) => res.end(), async (connection) => { closed = ollama(connection); });
+  await assert.rejects(generateMedGemma(closed, "", input), /Ollama server is unreachable/);
+});

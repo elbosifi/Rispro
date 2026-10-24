@@ -6,12 +6,12 @@ import { getMedGemmaSettings, resolveMedGemmaSettings } from "./medgemma-setting
 export interface MedGemmaHealth { status: "connected" | "unavailable" | "disabled" | "not_configured"; model?: string; message?: string }
 export async function medGemmaHealth(): Promise<MedGemmaHealth> {
   const saved = await getMedGemmaSettings();
-  if (!saved.baseUrl) return { status: "not_configured" };
+  if (!(saved.provider === "ollama" ? saved.ollamaBaseUrl : saved.baseUrl)) return { status: "not_configured" };
   if (!saved.enabled) return { status: "disabled" };
   try {
     const settings = await resolveMedGemmaSettings();
     return { status: "connected", ...await checkMedGemmaHealth(settings, settings.apiKey) };
-  } catch (error) { return { status: "unavailable", message: error instanceof HttpError ? error.message : "Unable to check MedGemma readiness." }; }
+  } catch (error) { return { status: "unavailable", ...(saved.provider === "ollama" ? { model: saved.ollamaModel } : {}), message: error instanceof HttpError ? error.message : "Unable to check MedGemma readiness." }; }
 }
 export async function generateMedGemmaText(task: MedGemmaTask, text: string, instructionsOverride?: string, signal?: AbortSignal) {
   const settings = await resolveMedGemmaSettings();

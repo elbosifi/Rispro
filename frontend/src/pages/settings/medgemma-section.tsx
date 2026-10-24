@@ -35,17 +35,26 @@ export default function MedGemmaSection({ onReAuthRequired, reauthVersion = 0 }:
     } finally { setBusy(false); }
   };
   if (!settings) return error ? <ErrorState message={error} onRetry={() => void load()} /> : <LoadingState message={t("medgemma.loading")} />;
-  const status = health?.status ?? (!settings.baseUrl ? "not_configured" : !settings.enabled ? "disabled" : null);
+  const ollama = settings.provider === "ollama";
+  const encryptionRequired = !ollama && !settings.encryptionReady;
+  const status = health?.status ?? (!(ollama ? settings.ollamaBaseUrl : settings.baseUrl) ? "not_configured" : !settings.enabled ? "disabled" : null);
   const change = <K extends keyof MedGemmaSettings>(key: K, value: MedGemmaSettings[K]) => { setSettings({ ...settings, [key]: value }); setDirty(true); setHealth(null); setMessage(""); };
   return <div className="space-y-4">
     <p className="text-sm text-muted-foreground">{t("medgemma.settingsDescription")}</p>
-    <div className="flex items-center gap-3"><span dir="ltr" className="inline-flex"><Switch id="medgemma-enabled" aria-label={t("medgemma.enable")} checked={settings.enabled} disabled={busy || (!settings.encryptionReady && !settings.enabled)} onChange={(e) => change("enabled", e.target.checked)} /></span><label htmlFor="medgemma-enabled">{t("medgemma.enable")}</label></div>
-    {!settings.encryptionReady && <p role="alert" className="text-sm text-destructive">{t("medgemma.encryptionMissing")}</p>}
+    <label className="block">{t("medgemma.provider")}<select className="input-premium mt-1 w-full" value={settings.provider} disabled={busy} onChange={(e) => change("provider", e.target.value as MedGemmaSettings["provider"])}><option value="standalone">{t("medgemma.standaloneProvider")}</option><option value="ollama">Ollama</option></select></label>
+    <div className="flex items-center gap-3"><span dir="ltr" className="inline-flex"><Switch id="medgemma-enabled" aria-label={t("medgemma.enable")} checked={settings.enabled} disabled={busy || (encryptionRequired && !settings.enabled)} onChange={(e) => change("enabled", e.target.checked)} /></span><label htmlFor="medgemma-enabled">{t("medgemma.enable")}</label></div>
+    {encryptionRequired && <p role="alert" className="text-sm text-destructive">{t("medgemma.encryptionMissing")}</p>}
+    {ollama && <p className="text-sm text-muted-foreground">{t("medgemma.ollamaHint")}</p>}
     <div className="grid gap-4 md:grid-cols-2">
-      <label>{t("medgemma.serverAddress")}<Input dir="ltr" type="url" className="mt-1 w-full" placeholder="https://medgemma.example.org:8000" value={settings.baseUrl} disabled={busy} onChange={(e) => change("baseUrl", e.target.value)} /></label>
+      {ollama ? <>
+        <label>{t("medgemma.ollamaServerAddress")}<Input dir="ltr" type="url" className="mt-1 w-full" placeholder="http://192.168.1.50:11434" value={settings.ollamaBaseUrl} disabled={busy} onChange={(e) => change("ollamaBaseUrl", e.target.value)} /></label>
+        <label>{t("medgemma.ollamaModelName")}<Input dir="ltr" className="mt-1 w-full" maxLength={200} value={settings.ollamaModel} disabled={busy} onChange={(e) => change("ollamaModel", e.target.value)} /></label>
+      </> : <label>{t("medgemma.serverAddress")}<Input dir="ltr" type="url" className="mt-1 w-full" placeholder="https://medgemma.example.org:8000" value={settings.baseUrl} disabled={busy} onChange={(e) => change("baseUrl", e.target.value)} /></label>}
       <label>{t("medgemma.timeout")}<Input type="number" min={10} max={600} className="mt-1 w-full" value={settings.timeoutSeconds} disabled={busy} onChange={(e) => change("timeoutSeconds", Number(e.target.value))} /></label>
+      {!ollama && <>
       <div><label>{t("medgemma.apiKey")}<Input dir="ltr" type="password" autoComplete="new-password" className="mt-1 w-full" placeholder={t("medgemma.keepKey")} value={apiKey} disabled={busy || removeApiKey || !settings.encryptionReady} onChange={(e) => { setApiKey(e.target.value); setDirty(true); }} /></label><p className="mt-1 text-sm">{settings.apiKeyConfigured ? t("medgemma.keyConfigured") : t("medgemma.keyNotConfigured")}</p></div>
       <label className="flex items-center gap-2"><Checkbox checked={removeApiKey} disabled={busy || !settings.apiKeyConfigured} onChange={(e) => { setRemoveApiKey(e.target.checked); setApiKey(""); setDirty(true); }} />{t("medgemma.removeKey")}</label>
+      </>}
     </div>
     <label className="flex items-start gap-2"><Checkbox className="mt-1 shrink-0" checked={settings.allowInsecureHttp} disabled={busy} onChange={(e) => change("allowInsecureHttp", e.target.checked)} /><span className="text-sm">{t("medgemma.httpAcknowledgement")}</span></label>
     <div className="space-y-3 border-t border-border pt-4">

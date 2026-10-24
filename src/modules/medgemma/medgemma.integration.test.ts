@@ -77,6 +77,7 @@ after(async () => {
 test("disabled defaults need no migration; admin writes/tests require recent re-auth", async () => {
   const initial = await json("/medgemma/settings");
   assert.equal(initial.data.settings.enabled, false); assert.equal(initial.data.settings.timeoutSeconds, 180);
+  assert.equal(initial.data.settings.provider, "standalone"); assert.equal(initial.data.settings.ollamaModel, "medgemma1.5:4b");
   assert.equal((await json("/medgemma/health", doctor)).data.status, "not_configured");
   assert.equal((await json("/medgemma/settings", "")).status, 401);
   for (const cookie of [doctor, supervisor, receptionist]) for (const [path, method] of [["/settings", "GET"], ["/settings", "PUT"], ["/test-connection", "POST"]]) {
@@ -175,10 +176,12 @@ test("instruction presets and generation controls persist, forward immediately a
 });
 test("legacy saved connections acquire defaults without replacing encrypted credentials", async () => {
   const stored = (await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value;
-  await pool.query("update system_settings set setting_value=setting_value - 'instructions' - 'temperature' - 'maxGeneratedTokens' where category='medgemma'");
+  await pool.query("update system_settings set setting_value=setting_value - 'instructions' - 'temperature' - 'maxGeneratedTokens' - 'provider' - 'ollamaBaseUrl' - 'ollamaModel' where category='medgemma'");
   const loaded = (await json("/medgemma/settings")).data.settings;
   assert.deepEqual(loaded.instructions, DEFAULT_MEDGEMMA_INSTRUCTIONS); assert.equal(loaded.temperature, 0.1); assert.equal(loaded.maxGeneratedTokens, 2048);
   assert.equal(loaded.apiKeyConfigured, true);
+  assert.equal(loaded.provider, "standalone"); assert.equal(loaded.baseUrl, stored.baseUrl);
+  assert.deepEqual((await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value.apiKeySecret, stored.apiKeySecret);
   assert.equal((await json("/medgemma/generate", doctor, "POST", { task: "cleanup_dictation", text: "input" })).status, 200);
   await pool.query("update system_settings set setting_value=$1 where category='medgemma'", [stored]);
 });
@@ -200,6 +203,85 @@ test("per-test instructions are restricted to clinical super admins and never ch
 test("rejects invalid generation settings and unknown or empty instruction presets", async () => {
   for (const change of [{ temperature: -0.1 }, { temperature: 1.1 }, { temperature: "0.1" }, { maxGeneratedTokens: 127 }, { maxGeneratedTokens: 8193 }, { maxGeneratedTokens: 200.5 }, { instructions: null }, { instructions: [] }, { instructions: { unknown: "test" } }, { instructions: { cleanup_dictation: "" } }, { instructions: { correct_terminology: "x".repeat(8001) } }]) {
     assert.equal((await settings({ ...connection, ...change })).status, 400);
+  }
+});
+
+test("Ollama switches without replacing standalone credentials and uses saved instructions through unchanged routes", async () => {
+  const previous = (await json("/medgemma/settings")).data.settings;
+  const stored = (await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value;
+  const encryptionKey = process.env.RISPRO_SECRET_ENCRYPTION_KEY;
+  let installed = true;
+  let ollamaRequest: Record<string, unknown> | undefined;
+  const model = "medgemma1.5:4b";
+  const server = http.createServer((req, res) => {
+    assert.equal(req.headers["x-api-key"], undefined); assert.equal(req.headers.authorization, undefined);
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/api/tags") { res.end(JSON.stringify({ models: installed ? [{ name: model }] : [] })); return; }
+    assert.equal(req.url, "/api/chat");
+    let body = ""; req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => { ollamaRequest = JSON.parse(body); res.end(JSON.stringify({ message: { content: "Generated result" }, total_duration: 2_500_000_000 })); });
+  });
+  servers.push(server);
+  const ollamaBaseUrl = await listen(server);
+  const selected = { ...previous, provider: "ollama", baseUrl: "", ollamaBaseUrl, ollamaModel: model, temperature: 0, maxGeneratedTokens: 512, removeApiKey: true };
+  try {
+    assert.equal((await settings(selected)).status, 200);
+    const loaded = (await json("/medgemma/settings")).data.settings;
+    assert.equal(loaded.provider, "ollama"); assert.equal(loaded.baseUrl, previous.baseUrl); assert.equal(loaded.apiKeyConfigured, true);
+    assert.deepEqual(loaded.instructions, previous.instructions);
+    assert.deepEqual((await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value.apiKeySecret, stored.apiKeySecret);
+    assert.deepEqual((await json("/medgemma/test-connection", admin, "POST")).data, { status: "connected", model });
+    for (const task of MEDGEMMA_TASKS) {
+      const result = await json("/medgemma/generate", doctor, "POST", { task, text: "Original synthetic text" });
+      assert.equal(result.status, 200); assert.deepEqual(result.data, { text: "Generated result", processing_seconds: 2.5 });
+      assert.deepEqual(ollamaRequest, { model, stream: false, messages: [{ role: "user", content: `Task: ${task}\nInstructions:\n${previous.instructions[task]}\n\nOriginal text:\nOriginal synthetic text` }], options: { temperature: 0, num_predict: 512 } });
+    }
+    // Existing administrator overrides remain clinical-profile and role gated.
+    const override = { task: "cleanup_dictation", text: "source", instructionsOverride: "Only correct punctuation." };
+    assert.equal((await json("/medgemma/generate", doctor, "POST", override)).status, 403);
+    await pool.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active) values($1,'Ollama admin test','consultant',true)", [users[0]]);
+    try {
+      assert.equal((await json("/medgemma/generate", admin, "POST", override)).status, 200);
+      assert.match(JSON.stringify(ollamaRequest), /Only correct punctuation/);
+      assert.deepEqual((await json("/medgemma/settings")).data.settings.instructions, previous.instructions);
+    } finally { await pool.query("delete from doctor_portal.doctor_profiles where user_id=$1", [users[0]]); }
+    installed = false;
+    const missing = (await json("/medgemma/health", doctor)).data;
+    assert.equal(missing.status, "unavailable"); assert.equal(missing.model, model); assert.match(missing.message, /not installed/);
+    installed = true;
+    // An encrypted standalone key can remain stored even if platform encryption
+    // is unavailable: Ollama must neither decrypt it nor require a replacement.
+    delete process.env.RISPRO_SECRET_ENCRYPTION_KEY;
+    assert.equal((await settings({ ...selected, removeApiKey: false, apiKey: "ignored-standalone-key" })).status, 200);
+    assert.deepEqual((await json("/medgemma/health", doctor)).data, { status: "connected", model });
+    assert.equal((await json("/medgemma/generate", doctor, "POST", { task: "cleanup_dictation", text: "source" })).status, 200);
+    assert.equal((await settings(previous)).status, 503);
+  } finally {
+    process.env.RISPRO_SECRET_ENCRYPTION_KEY = encryptionKey;
+    assert.equal((await settings(previous)).status, 200);
+  }
+  assert.deepEqual((await pool.query("select setting_value from system_settings where category='medgemma'")).rows[0].setting_value.apiKeySecret, stored.apiKeySecret);
+  assert.equal((await json("/medgemma/health", doctor)).data.model, "google/medgemma-1");
+});
+
+test("Ollama works without standalone configuration or encryption, while retaining validation and authorization", async () => {
+  const previous = (await json("/medgemma/settings")).data.settings;
+  const encryptionKey = process.env.RISPRO_SECRET_ENCRYPTION_KEY;
+  try {
+    await settings({ ...connection, enabled: false, baseUrl: "", removeApiKey: true });
+    delete process.env.RISPRO_SECRET_ENCRYPTION_KEY;
+    const ollamaBaseUrl = `http://127.0.0.1:${(servers[2].address() as { port: number }).port}`;
+    const selected = { ...connection, baseUrl: "", provider: "ollama", ollamaBaseUrl, ollamaModel: "medgemma1.5:4b" };
+    assert.equal((await settings(selected)).status, 200);
+    assert.deepEqual((await json("/medgemma/health", doctor)).data, { status: "connected", model: selected.ollamaModel });
+    assert.equal((await json("/medgemma/generate", doctor, "POST", { task: "cleanup_dictation", text: "source" })).status, 200);
+    for (const change of [{ provider: "unknown" }, { ollamaBaseUrl: "ftp://host" }, { ollamaBaseUrl: "http://host/api" }, { ollamaBaseUrl: "http://user:pass@host" }, { ollamaBaseUrl: "" }, { ollamaBaseUrl: 123 }, { ollamaModel: "" }, { ollamaModel: "name with spaces" }, { ollamaModel: "x".repeat(201) }, { allowInsecureHttp: false }]) assert.equal((await settings({ ...selected, ...change })).status, 400);
+    for (const cookie of [doctor, supervisor, receptionist]) assert.equal((await json("/medgemma/test-connection", cookie, "POST")).status, 403);
+    assert.equal((await settings({ ...selected, enabled: false, ollamaBaseUrl: "" })).status, 200);
+    assert.equal((await json("/medgemma/health", doctor)).data.status, "not_configured");
+  } finally {
+    process.env.RISPRO_SECRET_ENCRYPTION_KEY = encryptionKey;
+    await settings({ ...previous, apiKey: "new-key" });
   }
 });
 test("disable/not configured, key removal, failed auth and platform encryption failure are explicit; MedASR is unchanged", async () => {

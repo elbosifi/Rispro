@@ -16,6 +16,23 @@ const taskResults: Record<string, string> = {
 };
 test.beforeAll(async () => {
   mock = http.createServer((req, res) => {
+    if (req.url === "/api/tags" || req.url === "/api/chat") {
+      expect(req.headers["x-api-key"]).toBeUndefined(); expect(req.headers.authorization).toBeUndefined();
+      res.setHeader("Content-Type", "application/json");
+      if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "medgemma1.5:4b" }] })); return; }
+      let body = ""; req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", () => {
+        const input = JSON.parse(body);
+        expect(input.model).toBe("medgemma1.5:4b"); expect(input.stream).toBe(false);
+        expect(input.options).toEqual({ temperature: 0.2, num_predict: 1024 });
+        const prompt = input.messages[0].content as string;
+        const task = /^Task: (\w+)\n/.exec(prompt)![1];
+        expect(Object.keys(taskResults)).toContain(task); expect(prompt).toContain("\nInstructions:\n"); expect(prompt).toContain("\n\nOriginal text:\n");
+        lastRequest = input;
+        res.end(JSON.stringify({ message: { content: taskResults[task] }, total_duration: 2_500_000_000 }));
+      });
+      return;
+    }
     if (req.headers["x-api-key"] !== "synthetic-medgemma-key") { res.writeHead(401); res.end(); return; }
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/health") { res.end(JSON.stringify({ status: "ready", model: "google/medgemma-1.5-4b-it" })); return; }
@@ -181,4 +198,51 @@ test("MedASR transfers text only and does not invoke a disabled MedGemma service
   await page.screenshot({ path: testInfo.outputPath("transferred-text.png"), fullPage: true });
   await page.reload();
   await expect(page.getByLabel("Original Text Input")).toHaveValue("");
+});
+
+test("administrator switches to Ollama and back while the unchanged Doctor Workspace runs all tasks", async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
+  await signInWithSession(page, "e2e_super_admin");
+  expect((await page.request.post("http://127.0.0.1:3100/api/auth/re-auth", { data: { password: E2E_PASSWORD } })).ok()).toBeTruthy();
+  await page.goto("/settings?section=medgemma");
+  await page.getByLabel("Provider").selectOption("ollama");
+  await expect(page.getByLabel("API Key", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Model Name", { exact: true })).toHaveValue("medgemma1.5:4b");
+  await page.getByLabel("Ollama Server URL", { exact: true }).fill(baseUrl);
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await expect(page.getByText("Settings saved. Changes are active immediately.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Provider")).toHaveValue("ollama");
+  await expect(page.getByLabel("Ollama Server URL", { exact: true })).toHaveValue(baseUrl);
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  await expect(page.getByText("Model: medgemma1.5:4b", { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("ollama-settings-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("ollama-settings-mobile.png"), fullPage: true });
+
+  await signInWithSession(page, "e2e_doctor");
+  await page.goto("/doctor/medgemma-test");
+  await expect(page.getByText("Connection Status: Connected")).toBeVisible();
+  const text = "Synthetic source for Ollama";
+  await page.getByLabel("Original Text Input", { exact: true }).fill(text);
+  for (const task of Object.keys(taskResults)) {
+    await page.getByLabel("Processing Task").selectOption(task);
+    await page.getByRole("button", { name: "Process Text", exact: true }).click();
+    await expect(page.getByLabel(task === "review_radiology_report" ? "Potential Issues" : "MedGemma Result", { exact: true })).toHaveValue(taskResults[task]);
+    expect(lastRequest).toMatchObject({ model: "medgemma1.5:4b", messages: [{ role: "user", content: expect.stringContaining(`Task: ${task}\nInstructions:\n`) }] });
+    await expect(page.getByLabel("Original Text", { exact: true })).toHaveValue(text);
+    await expect(page.getByText("Processing time: 2.5 seconds")).toBeVisible();
+  }
+  await signInWithSession(page, "e2e_super_admin");
+  expect((await page.request.post("http://127.0.0.1:3100/api/auth/re-auth", { data: { password: E2E_PASSWORD } })).ok()).toBeTruthy();
+  await page.goto("/settings?section=medgemma");
+  await page.getByLabel("Provider").selectOption("standalone");
+  await expect(page.getByLabel("MedGemma Server URL")).toHaveValue(baseUrl);
+  await expect(page.getByText("API key: Configured")).toBeVisible();
+  await page.getByRole("button", { name: "Save Settings" }).click();
+  await expect(page.getByText("Settings saved. Changes are active immediately.")).toBeVisible();
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  await expect(page.getByText("Connection Status: Connected")).toBeVisible();
+  await expect(page.getByText("Model: google/medgemma-1.5-4b-it")).toBeVisible();
 });

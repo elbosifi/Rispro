@@ -1,6 +1,6 @@
 # MedGemma HTTP integration
 
-RISpro connects to an independently hosted service. These endpoints are the proposed RISpro-to-service contract, **not native Google model endpoints**. Implement the standalone LXC or other host to match this contract; no model installation is included in RISpro.
+RISpro defaults to an independently hosted standalone service, including the existing LXC deployment. Its endpoints below are the proposed RISpro-to-service contract, **not native Google model endpoints**. Ollama is an optional alternative provider; no model installation is included in RISpro.
 
 Configure **Settings → Integrations → MedGemma** as a super administrator. Saving and testing require recent administrator re-authentication. Set the server URL, optional API key and timeout, then enable and save. Changes apply on the next request without a restart.
 
@@ -11,6 +11,17 @@ Configuration uses the existing PostgreSQL `system_settings` table (`medgemma` /
 **AI Instructions** contains four editable presets. Select a preset to edit it; edits remain when switching presets. **Restore Default** fills the selected field from the backend default. **Save Settings** persists all preset edits, restores and generation controls together. These actions use the same super-administrator authorization and recent re-authentication as connection settings. Changes apply to the next generation request.
 
 Generation controls are `temperature` (default **0.1**, allowed **0–1**) and `maxGeneratedTokens` (default **2048**, integer **128–8192**). They are proposed parameters for the standalone service, not a claim about an existing native MedGemma API. Existing saved connections receive these defaults and all default instructions without a migration. Older Settings clients that omit the new fields retain their saved values.
+
+## Optional Ollama provider (including macOS)
+
+1. Install or import the desired model in Ollama. Use its exact installed name/tag; RISpro starts with `medgemma1.5:4b` but does not download or create that model.
+2. Make Ollama reachable from the **RISpro backend**. For the macOS application, set `launchctl setenv OLLAMA_HOST "0.0.0.0:11434"` and restart Ollama, as described in the [Ollama server configuration guide](https://docs.ollama.com/faq#setting-environment-variables-on-mac).
+3. In the existing MedGemma Settings, select **Ollama**, enter **Ollama Server URL** (for example `http://192.168.1.50:11434`) and **Model Name**. The URL uses the same origin validation and HTTP acknowledgement as standalone. Enable, save and test the connection.
+4. Continue using the existing Doctor Workspace MedGemma console and four tasks. Temperature, maximum tokens, timeout, saved instruction presets and authorized per-test overrides are shared.
+
+The backend checks [`GET /api/tags`](https://docs.ollama.com/api/tags) for the configured model. Generation uses [`POST /api/chat`](https://docs.ollama.com/api/chat) with `stream: false`, one user message separating task/instructions/source, and `options.temperature` / `options.num_predict`. It returns `message.content` in RISpro's existing `text` result and converts `total_duration` from nanoseconds to seconds, using measured elapsed time if unavailable.
+
+Provider, `ollamaBaseUrl` and `ollamaModel` live in the same settings JSON; records without a provider select standalone automatically. Switching to Ollama retains the standalone URL and encrypted API key. Ollama receives neither that key nor an authorization header, and requires no credential encryption. Switching back restores the existing standalone connection and its encryption requirements. No standalone service changes, browser-to-Ollama requests or new RISpro endpoints are involved.
 
 ## Standalone service contract
 
