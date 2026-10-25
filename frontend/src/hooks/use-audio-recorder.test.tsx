@@ -45,6 +45,21 @@ it("reports permission errors and unsupported browsers", async () => {
   vi.stubGlobal("MediaRecorder", undefined);
   await act(() => result.current.start()); expect(result.current.error).toBe("unsupported");
 });
+it.each(["permissionsPolicy", "featurePolicy"])("distinguishes a restrictive document %s from browser permission errors", async (property) => {
+  const allowsFeature = vi.fn(() => false);
+  Object.defineProperty(document, property, { configurable: true, value: { allowsFeature } });
+  try {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Blocked", "NotAllowedError"));
+    const { result, unmount } = renderHook(useAudioRecorder);
+    await act(() => result.current.start());
+    expect(result.current.error).toBe("policy"); expect(result.current.phase).toBe("idle");
+    expect(allowsFeature).toHaveBeenCalledWith("microphone");
+    allowsFeature.mockReturnValue(true);
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
+    await act(() => result.current.start()); expect(result.current.error).toBe("permission");
+    unmount();
+  } finally { Reflect.deleteProperty(document, property); }
+});
 it("releases microphone on recording errors and unmount", async () => {
   const { result, unmount } = renderHook(useAudioRecorder);
   await act(() => result.current.start());
@@ -78,6 +93,10 @@ it("cancels a pending microphone request on early release without starting a rec
   await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
   expect(instances).toHaveLength(previousInstances); expect(stopTrack).toHaveBeenCalled(); expect(result.current.recording).toBeNull();
   expect(result.current.notice).toContain("cancelled before");
+  await act(() => result.current.start());
+  expect(result.current.phase).toBe("recording");
+  act(() => result.current.stop());
+  expect(result.current.phase).toBe("idle"); expect(result.current.recording?.size).toBeGreaterThan(0);
 });
 it.each(["NotFoundError", "OverconstrainedError", "NotReadableError"])("falls back from an unavailable selected microphone (%s) to the workstation default", async (name) => {
   vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Unavailable", name));

@@ -5,6 +5,17 @@ import { formatShortcut, loadDictationPreferences } from "@/lib/dictation-prefer
 
 beforeEach(() => { localStorage.clear(); vi.spyOn(window, "scrollTo").mockImplementation(() => {}); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it("offers the static Windows microphone setup download and a selectable installation command", () => {
+  render(<DictationControlsPage />);
+  const download = screen.getByRole("link", { name: "Download Windows Setup Script" });
+  expect(download.getAttribute("href")).toBe("/downloads/Repair-RISpro-Microphone-Windows.ps1");
+  expect(download.getAttribute("download")).toBe("Repair-RISpro-Microphone-Windows.ps1");
+  const command = screen.getByRole("textbox", { name: "PowerShell command (select to copy)" }) as HTMLInputElement;
+  expect(command.readOnly).toBe(true);
+  expect(command.value).toBe('powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\Repair-RISpro-Microphone-Windows.ps1"');
+  fireEvent.focus(command);
+  expect(command.selectionEnd! - command.selectionStart!).toBe(command.value.length);
+});
 it("captures physical Right Shift, a modified function key, and persists mode and enabled settings", () => {
   const view = render(<DictationControlsPage />);
   fireEvent.click(screen.getByRole("button", { name: "Capture Shortcut" }));

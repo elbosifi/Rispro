@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export const RECORDING_MIME_TYPES = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus", "audio/wav"];
 const MAX_BYTES = 15 * 1024 * 1024;
+type MicrophonePolicy = { allowsFeature: (feature: string) => boolean };
 export function useAudioRecorder(deviceId?: string) {
   const [phase, setPhase] = useState<"idle" | "requesting" | "recording" | "stopping">("idle");
   const [recording, setRecording] = useState<Blob | null>(null);
   const [duration, setDuration] = useState(0);
-  const [error, setError] = useState<"permission" | "unsupported" | "recording" | "empty" | "oversized" | null>(null);
+  const [error, setError] = useState<"permission" | "policy" | "unsupported" | "recording" | "empty" | "oversized" | null>(null);
   const [notice, setNotice] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -85,7 +86,11 @@ export function useAudioRecorder(deviceId?: string) {
     } catch (e) {
       if (current !== generation.current) return;
       release(); active.current = false; setPhase("idle");
-      setError(e instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(e.name) ? "permission" : "recording");
+      const policyDocument = document as Document & { permissionsPolicy?: MicrophonePolicy; featurePolicy?: MicrophonePolicy };
+      const policy = policyDocument.permissionsPolicy ?? policyDocument.featurePolicy;
+      setError(e instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(e.name)
+        ? policy?.allowsFeature("microphone") === false ? "policy" : "permission"
+        : "recording");
     }
   }, [deviceId, release, stop]);
   const clear = useCallback(() => { setRecording(null); setDuration(0); setError(null); }, []);

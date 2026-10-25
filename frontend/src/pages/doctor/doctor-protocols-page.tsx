@@ -2158,7 +2158,11 @@ function ProtocolAssignmentModal({
   const dictationButton = (field: ProtocolDictationField) => {
     const recording = dictation.target?.field === field && (dictation.phase === "requesting" || dictation.phase === "recording");
     const label = `${recording ? "Stop dictation in" : "Dictate"} ${PROTOCOL_DICTATION_FIELDS[field].toLowerCase()}`;
-    return <Button type="button" variant="ghost" size="sm" className="absolute end-0 -top-1" style={{ minHeight: 24, height: 24, width: 24, padding: 0, ...(recording ? { color: "var(--state-error-text)", backgroundColor: "var(--state-error-bg)" } : {}) }} disabled={saving || (dictation.busy && !recording)} aria-label={label} title={label} aria-pressed={recording} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (recording) dictation.stop(); else startFieldDictation(field); }}><Mic size={14} className={recording ? "animate-pulse" : ""} aria-hidden="true" /></Button>;
+    return <Button type="button" variant="ghost" size="sm" className="absolute end-0 -top-1" style={{ minHeight: 24, height: 24, width: 24, padding: 0, ...(recording ? { color: "var(--state-error-text)", backgroundColor: "var(--state-error-bg)" } : {}) }} disabled={saving || (dictation.busy && !recording)} aria-label={label} title={label} aria-pressed={recording}
+      onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); startFieldDictation(field); }}
+      onPointerUp={dictation.stop} onLostPointerCapture={dictation.stop} onPointerCancel={dictation.cancel}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => { if (event.detail !== 0) return; if (recording) dictation.stop(); else startFieldDictation(field); }}><Mic size={14} className={recording ? "animate-pulse" : ""} aria-hidden="true" /></Button>;
   };
   const protocolMode = protocolModeOverride ?? (modeTouched ? "free-text" : activeProtocols.length > 0 ? "saved" : "free-text");
   const [protocolSearch, setProtocolSearch] = useState("");

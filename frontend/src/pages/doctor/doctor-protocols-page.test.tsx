@@ -275,6 +275,40 @@ describe("Doctor protocoling request documents", () => {
       expect(mockCreateAssignment).not.toHaveBeenCalled();
     }
 
+    it("holds the microphone icon and transcribes on release without restarting on click", async () => {
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
+      const button = screen.getByRole("button", { name: "Dictate free-text protocol" });
+      fireEvent.pointerDown(button, { button: 0, pointerId: 1 });
+      await screen.findByText(/Recording.* 0 \/ 60/);
+      expect(transcribeDictation).not.toHaveBeenCalled();
+      fireEvent.pointerUp(button, { button: 0, pointerId: 1 });
+      fireEvent.click(button, { detail: 1 });
+      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+      expect(transcribeDictation).toHaveBeenCalledTimes(1); expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+    it("recovers from releasing the microphone icon while first-time permission is pending", async () => {
+      let grant!: (value: MediaStream) => void;
+      vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((resolve) => { grant = resolve; }));
+      await openAssignment();
+      const button = screen.getByRole("button", { name: "Dictate free-text protocol" });
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
+      fireEvent.pointerDown(button, { button: 0, pointerId: 1 });
+      await screen.findByText(/Waiting for microphone permission/);
+      fireEvent.pointerUp(button, { button: 0, pointerId: 1 });
+      fireEvent.click(button, { detail: 1 });
+      await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
+      expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled();
+      expect(screen.getByText(/Recording cancelled before/)).toBeTruthy();
+      expect(button).toHaveProperty("disabled", false);
+      fireEvent.pointerDown(button, { button: 0, pointerId: 2 });
+      await screen.findByText(/Recording.* 0 \/ 60/);
+      fireEvent.pointerUp(button, { button: 0, pointerId: 2 });
+      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
+      expect(transcribeDictation).toHaveBeenCalledTimes(1); expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
+
     it.each([
       ["free-text protocol", "Free-text protocol"],
       ["patient-specific instructions", "Protocol instructions"],
@@ -394,7 +428,7 @@ describe("Doctor protocoling request documents", () => {
     it("shows microphone permission failures in place", async () => {
       vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
       await openAssignment(); fireEvent.click(screen.getByRole("button", { name: "Dictate free-text protocol" }));
-      expect((await screen.findByRole("alert")).textContent).toContain("Microphone access was denied");
+      expect((await screen.findByRole("alert")).textContent).toContain("Microphone access is unavailable");
       expect(screen.getAllByRole("dialog")).toHaveLength(1);
       expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
     });

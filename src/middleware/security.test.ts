@@ -4,6 +4,16 @@ import { env } from "../config/env.js";
 import { securityHeaders } from "./security.js";
 
 describe("securityHeaders", () => {
+  it("allows same-origin microphone capture while keeping camera and geolocation disabled", () => {
+    const headers: Record<string, string> = {};
+    securityHeaders({} as any, {
+      setHeader(name: string, value: string) { headers[name] = value; },
+    } as any, () => {});
+
+    assert.equal(headers["Permissions-Policy"], "camera=(), microphone=(self), geolocation=()");
+    assert.equal(headers["Permissions-Policy"].includes("microphone=()"), false);
+  });
+
   it("allows blob PDF previews in same-page frames", () => {
     const headers: Record<string, string> = {};
     securityHeaders({} as any, {
