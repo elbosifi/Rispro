@@ -9,6 +9,7 @@ import {
   HTMLAttributes,
 } from "react";
 import { X } from "lucide-react";
+import { useDictation } from "@/providers/dictation-context";
 
 interface DialogContextType {
   open: boolean;
@@ -162,6 +163,7 @@ interface DialogContentProps extends HTMLAttributes<HTMLDivElement> {
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
   ({ children, maxWidth = "400px", scrollable = true, className = "", ...props }, ref) => {
     const { onClose } = useDialog();
+    const dictation = useDictation();
     const contentRef = useRef<HTMLDivElement>(null);
     const stackEntryRef = useRef<DialogStackEntry | null>(null);
 
@@ -226,7 +228,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           return;
         }
 
-        if (event.key !== "Tab") return;
+        if (event.key !== "Tab" || (event.target instanceof Element && event.target.closest("[data-dictation-controls]"))) return;
         const focusable = getFocusableElements(content);
         if (focusable.length === 0) {
           event.preventDefault();
@@ -264,6 +266,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
       style={{
         position: "fixed",
         inset: 0,
+        top: dictation ? "3.5rem" : 0,
         zIndex: 50,
         display: "flex",
         alignItems: "center",
@@ -298,7 +301,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           backgroundColor: "var(--background)",
           border: "1px solid var(--border)",
           boxShadow: "var(--shadow-floating)",
-          maxHeight: "calc(100vh - 32px)",
+          maxHeight: dictation ? "calc(100dvh - 88px)" : "calc(100vh - 32px)",
           overflow: scrollable ? "auto" : "hidden",
           overscrollBehavior: "contain",
         }}

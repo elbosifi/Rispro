@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { isStandaloneModifier, matchesShortcut, type DictationPreferences } from "@/lib/dictation-preferences";
 
-export function useProtocolDictationShortcuts(options: {
+export function useDictationShortcuts(options: {
   enabled: boolean; preferences: DictationPreferences; isActive: () => boolean;
   start: () => void; stop: () => void; toggle: () => void;
+  cancel?: () => void; isRecording?: () => boolean;
 }) {
   const latest = useRef(options);
   useLayoutEffect(() => { latest.current = options; }, [options]);
@@ -15,6 +16,10 @@ export function useProtocolDictationShortcuts(options: {
     const stop = () => { cancelPending(); pressed.clear(); holdCode = null; latest.current.stop(); };
     const down = (event: KeyboardEvent) => {
       const current = latest.current;
+      if (current.enabled && event.key === "Escape" && current.isRecording?.()) {
+        cancelPending(); pressed.clear(); holdCode = null;
+        event.preventDefault(); event.stopImmediatePropagation(); current.cancel?.(); return;
+      }
       if (!current.enabled || !document.hasFocus() || document.visibilityState === "hidden" || !current.isActive() || event.defaultPrevented || event.isComposing) return;
       const { preferences } = current;
       const separate = preferences.speechMikeEnabled && preferences.speechMikeMode === "separate";

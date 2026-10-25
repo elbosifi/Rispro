@@ -1,3 +1,4 @@
+import { DictationProvider } from "./dictation-provider";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
@@ -298,7 +299,7 @@ function ActionPinIdleLockOverlay({
 }
 
 export function ActionPinIdleLock({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const location = useLocation();
   const [lockedSession, setLockedSession] = useState<{ baseUpdatedAt: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -352,7 +353,7 @@ export function ActionPinIdleLock({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {children}
+      <DictationProvider enabled={Boolean(user && !isLoading && !user.mustChangePassword && !idleLockActive)} sessionId={user?.id}>{children}</DictationProvider>
       {idleLockActive && user ? (
         <ActionPinIdleLockOverlay
           hasPin={Boolean(status?.hasPin)}

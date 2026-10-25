@@ -753,9 +753,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Shared form fields JSX (rendered in both create and edit)
   // ============================================================
   const formFields = (
-    <form id="patient-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} noValidate className="space-y-5">
+    <form data-dictation-context={`patient:${patientId ?? "new"}`} id="patient-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} noValidate className="space-y-5">
       {/* Identity */}
-      <div className="space-y-4">
+      <div className="space-y-4" data-dictation="off">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className={sectionTitleClass}>{language === "ar" ? "الهوية" : "Identity"}</h3>
           {form.category ? (

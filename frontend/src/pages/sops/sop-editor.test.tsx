@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { captureDictationTarget } from "@/lib/dictation-target";
 import { SopReadOnlyDocument, SopStructuredEditor } from "./sop-editor";
 import { localizeSopSectionTitle } from "./sop-section-utils";
 import { createEmptySopDocument } from "./sop-document";
@@ -9,6 +12,7 @@ import { LanguageProvider } from "@/providers/language-provider-component";
 const oneSection = [{ key: "purpose", title: "Purpose", required: true }];
 
 describe("SOP structured editor", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => document.body });
@@ -48,5 +52,20 @@ describe("SOP structured editor", () => {
     render(<LanguageProvider><SopReadOnlyDocument value={value} /></LanguageProvider>);
     expect(screen.queryByRole("toolbar", { name: "SOP formatting toolbar" })).toBeNull();
     expect(document.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("dictates with editor transactions, preserves literal text and supports Undo", async () => {
+    function ControlledEditor() {
+      const [value, setValue] = useState(() => createEmptySopDocument(oneSection));
+      return <SopStructuredEditor value={value} editable onChange={setValue} />;
+    }
+    render(<LanguageProvider><ControlledEditor /></LanguageProvider>);
+    const element = document.querySelector(".ProseMirror") as HTMLElement;
+    const target = captureDictationTarget(element)!;
+    act(() => { expect(target.insert("No <contrast>.\nNormal." )).toBe(true); });
+    expect(element.textContent).toContain("No <contrast>.");
+    expect(element.querySelector("contrast")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(element.textContent).toBe("");
   });
 });

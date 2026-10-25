@@ -125,12 +125,21 @@ test("settings survive a fresh Express application and target changes apply with
   assert.equal((await json("/settings", adminCookie, "PUT", connection)).status, 200);
   assert.equal((await json("/health", doctorCookie)).data.model, "google/medasr-1");
 });
-test("only an active clinical doctor can transcribe and original multipart audio reaches MedASR", async () => {
-  for (const cookie of ["", adminCookie, supervisorCookie, receptionCookie]) assert.equal((await upload(cookie)).status, cookie ? 403 : 401);
-  const result = await upload(doctorCookie); assert.equal(result.status, 200); assert.deepEqual(result.data, { text: "Normal chest radiograph.", processing_seconds: 1.2 });
+test("all authenticated workspaces can transcribe, including staff without a clinical profile", async () => {
+  assert.equal((await upload("")).status, 401);
+  assert.equal((await json("/health", "")).status, 401);
+  for (const cookie of [doctorCookie, adminCookie, supervisorCookie, receptionCookie]) {
+    assert.equal((await json("/health", cookie)).status, 200);
+    const result = await upload(cookie);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.data, { text: "Normal chest radiograph.", processing_seconds: 1.2 });
+  }
   await pool.query("update doctor_portal.doctor_profiles set active=false where user_id=$1", [users[1]]);
-  assert.equal((await upload(doctorCookie)).status, 403);
+  assert.equal((await upload(doctorCookie)).status, 200);
   await pool.query("update doctor_portal.doctor_profiles set active=true where user_id=$1", [users[1]]);
+  await pool.query("update users set is_active=false where id=$1", [users[3]]);
+  assert.equal((await upload(receptionCookie)).status, 401);
+  await pool.query("update users set is_active=true where id=$1", [users[3]]);
 });
 test("rejects invalid and oversized audio, missing files, and target override fields", async () => {
   assert.equal((await upload(doctorCookie, "text/plain")).status, 415);

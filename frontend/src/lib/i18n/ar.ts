@@ -1,4 +1,12 @@
 export const ar = {
+  "dictation.controlsTitle": "إعدادات الإملاء",
+  "dictation.globalStart": "بدء الإملاء",
+  "dictation.globalStop": "إيقاف الإملاء",
+  "dictation.globalProcessing": "جارٍ تحويل الإملاء إلى نص",
+  "dictation.selectField": "اختر حقل نص قابلًا للتحرير قبل الإملاء.",
+  "dictation.noSpeech": "لم يتم التعرف على كلام. حاول التسجيل مجددًا.",
+  "dictation.insertFailed": "تعذر إدراج النص. اختر حقلًا قابلًا للتحرير وسجّل مجددًا.",
+
   "common.clearSearch": "مسح البحث",
   "settings.section.mobile_widget": "الوصول إلى أداة الهاتف",
   "mobileWidget.description": "أعداد تشغيلية للقراءة فقط على هاتفك. لا تتضمن أي تفاصيل عن المرضى.",

@@ -3,8 +3,6 @@ import Busboy from "busboy";
 import { requireAuth, requireAnyRole, requireRecentSupervisorReauth } from "../../middleware/auth.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { HttpError } from "../../utils/http-error.js";
-import { env } from "../../config/env.js";
-import { getDoctorMe } from "../doctor-portal/profile-service.js";
 import { getMedicalDictationSettings, saveMedicalDictationSettings } from "./medical-dictation-settings-service.js";
 import { medicalDictationHealth, transcribeMedicalDictation } from "./medical-dictation-service.js";
 import { MAX_AUDIO_BYTES, validateAudio, type DictationAudio } from "./medasr-client.js";
@@ -45,10 +43,7 @@ const admin = requireAnyRole(["super_admin"]);
 medicalDictationRouter.get("/settings", admin, asyncRoute(async (_req, res) => res.json({ settings: await getMedicalDictationSettings() })));
 medicalDictationRouter.put("/settings", admin, requireRecentSupervisorReauth, asyncRoute(async (req, res) => res.json({ settings: await saveMedicalDictationSettings(req.body, req.user!.sub) })));
 medicalDictationRouter.post("/test-connection", admin, requireRecentSupervisorReauth, asyncRoute(async (_req, res) => res.json(await medicalDictationHealth())));
-medicalDictationRouter.use(asyncRoute(async (req, _res, next) => {
-  if (!env.doctorPortalEnabled || !(await getDoctorMe(req.user!.sub, req.user!.role)).canAccessClinicalDoctorPortal) throw new HttpError(403, "Active clinical Doctor Workspace access is required.");
-  next();
-}));
+// Authentication above permits dictation in every RISpro workspace; server settings remain super-admin only.
 medicalDictationRouter.get("/health", asyncRoute(async (_req, res) => res.json(await medicalDictationHealth())));
 medicalDictationRouter.post("/transcribe", asyncRoute(async (req, res) => {
   const controller = new AbortController();

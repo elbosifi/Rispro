@@ -38,7 +38,7 @@ export function DictationTestPage() {
     catch { setError(t("dictation.copyError")); }
   };
   const recordingBusy = recorder.phase !== "idle";
-  return <div className="mx-auto max-w-4xl space-y-4">
+  return <div className="mx-auto max-w-4xl space-y-4" data-dictation="off">
     <div><h1 className="text-2xl font-semibold text-foreground">{t("dictation.consoleTitle")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("dictation.testOnly")}</p></div>
     <Card className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><p role="status">{t("dictation.connectionStatus")}: {checking ? t("dictation.loading") : health ? t(`dictation.status.${health.status}`) : t("dictation.status.error")}</p><Button size="sm" variant="secondary" disabled={checking || processing} onClick={() => void check()}>{t("dictation.refresh")}</Button></div>

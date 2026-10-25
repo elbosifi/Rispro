@@ -11,7 +11,8 @@ import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPatientUrl } from "@/lib/radiant";
 import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
 import { transcribeDictation } from "@/lib/medical-dictation-api";
-import { DEFAULT_DICTATION_PREFERENCES, saveDictationPreferences } from "@/lib/dictation-preferences";
+import { DictationProvider } from "@/providers/dictation-provider";
+import { DictationControl } from "@/components/layout/dictation-control";
 
 vi.mock("@/lib/medical-dictation-api", () => ({ transcribeDictation: vi.fn() }));
 
@@ -225,297 +226,94 @@ describe("Doctor protocoling request documents", () => {
     expect((await screen.findByTestId("protocoling-request-documents")).getAttribute("data-appointment-id")).toBe("42");
   });
 
-  describe("protocol dictation", () => {
+  describe("global protocol dictation", () => {
     const stopTrack = vi.fn();
     const cleaned = "Axial T1.\n\nNo contrast.";
     let mediaDevicesDescriptor: PropertyDescriptor | undefined;
     beforeEach(() => {
       localStorage.clear();
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
-      mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
       vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+      mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
       stopTrack.mockClear();
       class Recorder {
         static isTypeSupported() { return true; }
-        state = "inactive";
-        mimeType = "audio/webm";
+        state = "inactive"; mimeType = "audio/webm";
         ondataavailable: ((event: { data: Blob }) => void) | null = null;
         onstop: (() => void) | null = null;
-        onerror: (() => void) | null = null;
         start() { this.state = "recording"; }
         stop() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["synthetic audio"]) }); this.onstop?.(); }
       }
       vi.stubGlobal("MediaRecorder", Recorder);
       Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] })) } });
+      Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn((_command, _ui, text: string) => {
+        const field = document.activeElement as HTMLTextAreaElement;
+        const value = field.value.slice(0, field.selectionStart) + text + field.value.slice(field.selectionEnd);
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, value);
+        field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+        return true;
+      }) });
       vi.mocked(transcribeDictation).mockReset();
       vi.mocked(transcribeDictation).mockResolvedValue({ text: "Um axial T1 period new paragraph no contrast period</s>", processing_seconds: 1 });
       vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([]);
     });
     afterEach(() => {
-      cleanup(); vi.mocked(document.hasFocus).mockRestore(); vi.unstubAllGlobals(); vi.mocked(window.scrollTo).mockRestore();
+      cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+      Reflect.deleteProperty(document, "execCommand");
       if (mediaDevicesDescriptor) Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
       else Reflect.deleteProperty(navigator, "mediaDevices");
     });
     async function openAssignment() {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-      const view = render(<QueryClientProvider client={client}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+      render(<QueryClientProvider client={client}><DictationProvider enabled sessionId={3}><DictationControl /><DoctorProtocolsPage me={me} /></DictationProvider></QueryClientProvider>);
       await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
-      return { ...view, client };
     }
-    async function startRecording(label = "free-text protocol") {
-      fireEvent.click(screen.getByRole("button", { name: `Dictate ${label}` }));
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      expect(screen.getAllByRole("dialog")).toHaveLength(1);
-      expect(screen.queryByRole("textbox", { name: "Basic Cleaned Text" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Insert Text" })).toBeNull();
+    async function start(field: HTMLElement) {
+      act(() => field.focus());
+      fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Stop dictation" }).getAttribute("aria-pressed")).toBe("true"));
     }
-    async function stopAndInsert(field: HTMLElement, expected = cleaned) {
-      fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
-      await waitFor(() => expect(field).toHaveProperty("value", expected));
+    it.each(["Free-text protocol", "Protocol instructions", "Contrast/preparation instructions"])("uses the single global control for %s and leaves saving manual", async (label) => {
+      await openAssignment();
+      if (label !== "Free-text protocol") await userEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
+      const field = screen.getByRole("textbox", { name: label });
+      expect(screen.queryByRole("button", { name: /^Dictate / })).toBeNull();
+      expect(screen.queryByLabelText("Dictation status")).toBeNull();
+      await start(field);
+      expect(within(screen.getByRole("dialog", { name: "Assign protocol" })).getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+      fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
       expect(mockCreateAssignment).not.toHaveBeenCalled();
-    }
-
-    it("holds the microphone icon and transcribes on release without restarting on click", async () => {
-      await openAssignment();
-      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      const button = screen.getByRole("button", { name: "Dictate free-text protocol" });
-      fireEvent.pointerDown(button, { button: 0, pointerId: 1 });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      expect(transcribeDictation).not.toHaveBeenCalled();
-      fireEvent.pointerUp(button, { button: 0, pointerId: 1 });
-      fireEvent.click(button, { detail: 1 });
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
-      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
-      expect(transcribeDictation).toHaveBeenCalledTimes(1); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("recovers from releasing the microphone icon while first-time permission is pending", async () => {
-      let grant!: (value: MediaStream) => void;
-      vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((resolve) => { grant = resolve; }));
-      await openAssignment();
-      const button = screen.getByRole("button", { name: "Dictate free-text protocol" });
-      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      fireEvent.pointerDown(button, { button: 0, pointerId: 1 });
-      await screen.findByText(/Waiting for microphone permission/);
-      fireEvent.pointerUp(button, { button: 0, pointerId: 1 });
-      fireEvent.click(button, { detail: 1 });
-      await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
-      expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled();
-      expect(screen.getByText(/Recording cancelled before/)).toBeTruthy();
-      expect(button).toHaveProperty("disabled", false);
-      fireEvent.pointerDown(button, { button: 0, pointerId: 2 });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      fireEvent.pointerUp(button, { button: 0, pointerId: 2 });
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
-      expect(transcribeDictation).toHaveBeenCalledTimes(1); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      ["free-text protocol", "Free-text protocol"],
-      ["patient-specific instructions", "Protocol instructions"],
-      ["contrast/preparation instructions", "Contrast/preparation instructions"],
-    ])("dictates directly into the existing %s field without another editor or automatic save", async (buttonLabel, fieldLabel) => {
-      if (buttonLabel !== "free-text protocol") vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([libraryProtocol]);
-      const { client } = await openAssignment();
-      if (buttonLabel !== "free-text protocol") await userEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
-      const field = screen.getByRole("textbox", { name: fieldLabel });
-      const editors = screen.getAllByRole("textbox").length;
-      await startRecording(buttonLabel); await stopAndInsert(field);
-      expect(screen.getAllByRole("textbox")).toHaveLength(editors);
-      fireEvent.change(field, { target: { value: cleaned + " Edited in place." } });
-      expect(field).toHaveProperty("value", cleaned + " Edited in place.");
-      expect(mockUpdateProtocolExamType).not.toHaveBeenCalled();
-      expect(screen.getByRole("radio", { name: buttonLabel === "free-text protocol" ? "Free-text protocol" : "Saved protocol" }).getAttribute("aria-checked")).toBe("true");
-      if (buttonLabel === "free-text protocol") {
-        act(() => client.setQueryData(["doctor", "protocol-library", "protocols"], [libraryProtocol]));
-        expect(screen.getByRole("radio", { name: "Free-text protocol" }).getAttribute("aria-checked")).toBe("true");
+      if (label === "Free-text protocol") {
+        await userEvent.click(within(screen.getByRole("dialog", { name: "Assign protocol" })).getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: cleaned })));
       }
-      await userEvent.click(screen.getByRole("button", { name: "Close" }));
-      expect(screen.getByRole("heading", { name: "Discard unsaved changes?" })).toBeTruthy();
       expect(stopTrack).toHaveBeenCalled();
     });
-    it.each([
-      ["Before after", 7, 7, "Before Axial T1.\n\nNo contrast. after", 31],
-      ["Before OLD after", 7, 10, "Before Axial T1.\n\nNo contrast. after", 30],
-    ])("inserts at the captured cursor/selection in %j", async (original, start, end, expected, caret) => {
+    it("preserves existing Protocoling content and replaces only the original selection", async () => {
       await openAssignment();
       const field = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
-      fireEvent.change(field, { target: { value: original } }); field.focus(); field.setSelectionRange(Number(start), Number(end)); fireEvent.select(field);
-      await startRecording(); await stopAndInsert(field, String(expected));
-      await waitFor(() => expect(field.selectionStart).toBe(caret));
-    });
-    it("appends when no cursor was captured and keeps the existing explicit Save shortcut", async () => {
-      await openAssignment();
-      const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      fireEvent.change(field, { target: { value: "Existing." } });
-      await startRecording();
-      await userEvent.keyboard("{Control>}s{/Control}{Control>}{Enter}{/Control}{Alt>}{ArrowRight}{/Alt}");
-      expect(mockCreateAssignment).not.toHaveBeenCalled();
-      await stopAndInsert(field, "Existing. " + cleaned);
-      await userEvent.keyboard("{Control>}s{/Control}");
-      await waitFor(() => expect(mockCreateAssignment).toHaveBeenCalledWith(42, expect.objectContaining({ freeTextProtocol: "Existing. " + cleaned })));
-    });
-    it("holds physical Right Shift, ignores repeat, and inserts directly on release", async () => {
-      await openAssignment();
-      const field = screen.getByRole("textbox", { name: "Free-text protocol" }); field.focus();
-      fireEvent.keyDown(field, { code: "ShiftRight", key: "Shift", shiftKey: true });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      fireEvent.keyDown(window, { code: "ShiftRight", key: "Shift", shiftKey: true, repeat: true });
-      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
-      fireEvent.keyUp(window, { code: "ShiftRight", key: "Shift" });
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
-      expect(transcribeDictation).toHaveBeenCalledTimes(1); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("toggles F9 and accepts simultaneous SpeechMike commands without overlapping sessions", async () => {
-      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, keyboardMode: "toggle", keyboardShortcut: { code: "F9", ctrl: false, alt: false, shift: false, meta: false }, speechMikeEnabled: true });
-      await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" }); field.focus();
-      fireEvent.keyDown(window, { code: "F9", key: "F9" }); fireEvent.keyUp(window, { code: "F9" });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      fireEvent.keyDown(window, { code: "F13", key: "F13" });
-      fireEvent.keyDown(window, { code: "F9", key: "F9" }); fireEvent.keyUp(window, { code: "F9" });
-      fireEvent.keyDown(window, { code: "F14", key: "F14" });
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
-      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1); expect(transcribeDictation).toHaveBeenCalledTimes(1);
-    });
-    it("requires a selected existing field for keyboard events and supports repeated SpeechMike sessions", async () => {
-      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, keyboardEnabled: false, speechMikeEnabled: true });
-      await openAssignment(); fireEvent.keyDown(window, { code: "F13", key: "F13" });
-      expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
-      expect(screen.getByText("Select a Protocoling text field before dictating.")).toBeTruthy();
-      await userEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
-      const field = screen.getByRole("textbox", { name: "Protocol instructions" }); field.focus();
-      for (let i = 1; i <= 2; i++) {
-        fireEvent.keyDown(window, { code: "F13", key: "F13" }); await screen.findByText(/Recording.* 0 \/ 60/);
-        fireEvent.keyDown(window, { code: "F14", key: "F14" });
-        await waitFor(() => expect(field).toHaveProperty("value", Array(i).fill(cleaned).join(" ")));
-      }
-      expect(transcribeDictation).toHaveBeenCalledTimes(2); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("can stop a mouse recording through SpeechMike", async () => {
-      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, speechMikeEnabled: true });
-      await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      await startRecording(); fireEvent.keyDown(window, { code: "F14", key: "F14" });
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned));
-    });
-    it.each(["hold", "toggle"] as const)("inserts SpeechMike Numpad + %s dictation at the cursor and keeps keyboard hold working", async (mode) => {
-      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, speechMikeEnabled: true, speechMikeMode: mode });
-      await openAssignment();
-      const field = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
-      fireEvent.change(field, { target: { value: "Before OLD after" } });
-      field.focus(); field.setSelectionRange(7, 10); fireEvent.select(field);
-      fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      fireEvent.keyDown(window, { code: "NumpadAdd", key: "+", repeat: true });
-      fireEvent.keyUp(window, { code: "NumpadAdd", key: "+" });
-      if (mode === "toggle") {
-        expect(transcribeDictation).not.toHaveBeenCalled();
-        fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
-        fireEvent.keyUp(window, { code: "NumpadAdd", key: "+" });
-      }
-      await waitFor(() => expect(field.value).toBe("Before " + cleaned + " after"));
-      expect(transcribeDictation).toHaveBeenCalledTimes(1);
-      field.focus();
-      fireEvent.keyDown(window, { code: "ShiftRight", key: "Shift", shiftKey: true });
-      await screen.findByText(/Recording.* 0 \/ 60/);
-      fireEvent.keyUp(window, { code: "ShiftRight", key: "Shift" });
-      await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(2));
+      fireEvent.change(field, { target: { value: "Before replace after" } });
+      act(() => { field.focus(); field.setSelectionRange(7, 14); });
+      await start(field); fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+      await waitFor(() => expect(field.value).toBe(`Before ${cleaned} after`));
       expect(mockCreateAssignment).not.toHaveBeenCalled();
     });
-    it("releases a microphone granted after early key release without inserting or transcribing", async () => {
-      let grant!: (value: MediaStream) => void;
-      vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((resolve) => { grant = resolve; }));
-      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, keyboardShortcut: { code: "F9", ctrl: false, alt: false, shift: false, meta: false } });
-      await openAssignment(); screen.getByRole("textbox", { name: "Free-text protocol" }).focus();
-      fireEvent.keyDown(window, { code: "F9", key: "F9" });
-      await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
-      fireEvent.keyUp(window, { code: "F9", key: "F9" });
-      await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
-      expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled();
-      expect(screen.getByText(/Recording cancelled before/)).toBeTruthy();
-    });
-    it("stops on browser focus loss and inserts into the original field", async () => {
-      await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      await startRecording(); fireEvent.blur(window);
-      await waitFor(() => expect(field).toHaveProperty("value", cleaned)); expect(stopTrack).toHaveBeenCalled();
-    });
-    it("keeps field text on failure and retries without duplicate requests", async () => {
-      vi.mocked(transcribeDictation).mockRejectedValueOnce(new Error("MedASR is unavailable."));
-      await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      fireEvent.change(field, { target: { value: "Keep this." } });
-      await startRecording(); fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
-      expect((await screen.findByRole("alert")).textContent).toContain("MedASR is unavailable.");
-      expect(field).toHaveProperty("value", "Keep this.");
-      const retry = screen.getByRole("button", { name: "Retry dictation" });
-      fireEvent.click(retry); fireEvent.click(retry);
-      await waitFor(() => expect(field).toHaveProperty("value", "Keep this. " + cleaned));
-      expect(transcribeDictation).toHaveBeenCalledTimes(2);
-    });
-    it("shows microphone permission failures in place", async () => {
-      vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
-      await openAssignment(); fireEvent.click(screen.getByRole("button", { name: "Dictate free-text protocol" }));
-      expect((await screen.findByRole("alert")).textContent).toContain("Microphone access is unavailable");
-      expect(screen.getAllByRole("dialog")).toHaveLength(1);
-      expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
-    });
-    it.each(["Cancel", "Escape", "appointment close"])("discards audio on %s without changing or saving field contents", async (action) => {
-      const view = await openAssignment(); await startRecording(); stopTrack.mockClear();
-      if (action === "appointment close") view.unmount();
-      else {
-        if (action === "Escape") fireEvent.keyDown(window, { key: "Escape" });
-        else fireEvent.click(screen.getByRole("button", { name: "Cancel dictation" }));
-        expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", "");
-        expect(screen.getByRole("dialog", { name: "Assign protocol" })).toBeTruthy();
-      }
-      expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled(); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("discards a pending transcription on appointment navigation", async () => {
-      let resolve!: (result: { text: string; processing_seconds: number }) => void;
-      vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
-      const next = { ...appointment, appointmentId: 43 };
-      mockFetchAppointmentDetail.mockImplementation(async (id: number) => ({ appointment: id === 43 ? next : appointment, assignmentDetail: null }));
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-      const workspace = (id: number) => <QueryClientProvider client={client}><ProtocolingAppointmentWorkspace appointmentId={id} canAssign onClose={vi.fn()} /></QueryClientProvider>;
-      const view = render(workspace(42)); await screen.findByRole("textbox", { name: "Free-text protocol" });
-      await startRecording(); fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
-      await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
-      view.rerender(<MemoryRouter>{workspace(43)}</MemoryRouter>);
-      await waitFor(() => expect(screen.getByTestId("protocoling-request-documents").getAttribute("data-appointment-id")).toBe("43"));
-      await act(async () => resolve({ text: "Wrong patient period", processing_seconds: 1 }));
-      expect(screen.getByRole("textbox", { name: "Free-text protocol" })).toHaveProperty("value", ""); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("cancels a pending transcription and preserves edits typed in the existing field", async () => {
+    it("discards delayed transcription after an edit instead of appending it to changed clinical text", async () => {
       let resolve!: (result: { text: string; processing_seconds: number }) => void;
       vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
       await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      await startRecording(); fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
+      await start(field); fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
       await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
-      fireEvent.change(field, { target: { value: "Typed while processing." } });
-      fireEvent.click(screen.getByRole("button", { name: "Cancel dictation" }));
-      await act(async () => resolve({ text: "Cancelled dictation period", processing_seconds: 1 }));
+      fireEvent.input(field, { target: { value: "Typed while processing." } });
+      await act(async () => resolve({ text: "no contrast period", processing_seconds: 1 }));
       expect(field).toHaveProperty("value", "Typed while processing."); expect(mockCreateAssignment).not.toHaveBeenCalled();
     });
-    it("preserves text typed during recognition and appends when the captured range is no longer valid", async () => {
-      let resolve!: (result: { text: string; processing_seconds: number }) => void;
-      vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    it("Escape cancels global recording without closing the Protocoling workspace", async () => {
       await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      await startRecording(); fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
-      await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
-      fireEvent.change(field, { target: { value: "Typed while processing." } });
-      await act(async () => resolve({ text: "no contrast period", processing_seconds: 1 }));
-      expect(field).toHaveProperty("value", "Typed while processing. No contrast."); expect(mockCreateAssignment).not.toHaveBeenCalled();
-    });
-    it("inserts into the original field without stealing focus from another field", async () => {
-      let resolve!: (result: { text: string; processing_seconds: number }) => void;
-      vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
-      await openAssignment(); const field = screen.getByRole("textbox", { name: "Free-text protocol" });
-      await userEvent.click(screen.getByRole("button", { name: "Additional instructions" }));
-      await startRecording(); fireEvent.click(screen.getByRole("button", { name: /^Stop dictation$/ }));
-      await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
-      const notes = screen.getByRole("textbox", { name: "Protocol instructions" }); notes.focus();
-      fireEvent.change(notes, { target: { value: "Continue typing here." } });
-      await act(async () => resolve({ text: "no contrast period", processing_seconds: 1 }));
-      expect(field).toHaveProperty("value", "No contrast.");
-      await act(async () => new Promise<void>((done) => requestAnimationFrame(() => done())));
-      expect(document.activeElement).toBe(notes); expect(notes).toHaveProperty("value", "Continue typing here.");
+      await start(field); fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+      expect(field.isConnected).toBe(true); expect(stopTrack).toHaveBeenCalled();
+      expect(transcribeDictation).not.toHaveBeenCalled();
     });
   });
 

@@ -74,6 +74,9 @@ export async function api<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
   const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
   const { skipActionPinRetry, actionPinRetried, ...fetchOptions } = options;
 
@@ -128,5 +131,6 @@ export async function api<T>(
     throw error;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abort);
   }
 }

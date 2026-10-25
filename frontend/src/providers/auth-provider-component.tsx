@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user: user ?? null,
-        isLoading: isLoading || isTransitioning || changePasswordMutation.isPending,
+        isLoading: isLoading || isTransitioning || changePasswordMutation.isPending || logoutMutation.isPending,
         login,
         loginWithPasskey,
         logout,

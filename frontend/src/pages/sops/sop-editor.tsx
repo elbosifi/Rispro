@@ -1,3 +1,4 @@
+import { registerDictationEditor } from "@/lib/dictation-target";
 import { useEffect, useMemo } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { useLanguage } from "@/providers/language-provider";
@@ -90,6 +91,10 @@ function SectionEditor({ section, editable, onChange }: { section: SopSection; e
     const current = JSON.stringify(editor.getJSON());
     if (current !== JSON.stringify(section.content)) editor.commands.setContent(section.content, { emitUpdate: false });
   }, [editor, editable, section.content]);
+
+  useEffect(() => {
+    if (editor) return registerDictationEditor(editor);
+  }, [editor]);
 
   if (!editor) return <div className="min-h-24 animate-pulse bg-muted/20" />;
   return <div className="overflow-hidden rounded-xl border border-border bg-card">

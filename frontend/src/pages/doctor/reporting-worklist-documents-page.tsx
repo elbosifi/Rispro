@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { fetchReportingBoardMobileCase } from "@/lib/api/doctor-portal-reporting";
 import { useAuth } from "@/providers/auth-provider";
+import { DictationControl } from "@/components/layout/dictation-control";
 
 export function ReportingWorklistDocumentsPage() {
   const { token = "", caseId = "" } = useParams<{ token: string; caseId: string }>();
@@ -23,7 +24,8 @@ export function ReportingWorklistDocumentsPage() {
   return (
     <main lang="en" dir="ltr" className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+        <header className="sticky top-0 z-[60] flex flex-wrap items-center justify-between gap-3 bg-background">
+          <DictationControl />
           <div>
             <h1 className="text-xl font-bold">Request &amp; clinical documents</h1>
             <p className="mt-1 text-sm text-slate-600">Read-only documents for this Personal Reporting Desk case.</p>

@@ -381,7 +381,7 @@ function ReportingBoardNotificationsButton() {
         aria-label="Notifications"
       >
         <Bell size={14} />
-        Notifications
+        <span className="hidden sm:inline">Notifications</span>
         {unreadCount > 0 && (
           <span className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{unreadCount}</span>
         )}

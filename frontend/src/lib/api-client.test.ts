@@ -26,4 +26,17 @@ describe("api", () => {
       expect.objectContaining({ cache: "no-store" })
     );
   });
+
+  it("propagates dictation cancellation to the request signal and removes the listener afterwards", async () => {
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    vi.mocked(fetch).mockImplementationOnce(async (_url, options) => {
+      expect(options?.signal?.aborted).toBe(false);
+      controller.abort();
+      expect(options?.signal?.aborted).toBe(true);
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    await api("/medical-dictation/transcribe", { method: "POST", signal: controller.signal });
+    expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
 });

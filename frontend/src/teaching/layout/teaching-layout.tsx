@@ -1,3 +1,4 @@
+import { DictationControl } from "@/components/layout/dictation-control";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BookOpenText, ClipboardList, FileUp, GraduationCap, History, LogOut, NotebookTabs, Scan } from "lucide-react";
 import { Button } from "@/components/shared";
@@ -22,7 +23,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }}>
-      <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4 sm:px-6" style={{ borderColor: "var(--border)" }}>
+      <header className="sticky top-0 z-[60] bg-background flex min-h-16 items-center justify-between gap-4 border-b px-4 sm:px-6" style={{ borderColor: "var(--border)" }}>
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground" aria-hidden="true">
             <GraduationCap size={22} />
@@ -33,6 +34,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
+          <DictationControl />
           <span className="hidden max-w-48 truncate text-sm text-muted-foreground sm:block">{identity?.displayName}</span>
           <Button variant="ghost" size="sm" onClick={signOut} aria-label="Sign out of Teaching">
             <LogOut size={16} aria-hidden="true" />

@@ -814,9 +814,10 @@ export function AppointmentManageModal({
         scrollable={false}
         role="dialog"
         aria-modal="true"
+        data-dictation-context={`appointment:${normalizedAppointmentId ?? "none"}`}
         aria-label={t("registrations.manage")}
         dir={isRtl ? "rtl" : "ltr"}
-        className={`flex min-h-0 flex-col overflow-hidden !p-0 ${documentReviewExpanded ? "!m-2 !h-[calc(100dvh-16px)] !max-h-[calc(100dvh-16px)] !rounded-lg" : "!m-2 h-[calc(100dvh-16px)] !max-h-[calc(100dvh-16px)] !rounded-xl md:!mx-4 md:h-[94dvh] md:!max-h-[94dvh] md:!rounded-2xl"}`}
+        className={`flex min-h-0 flex-col overflow-hidden !p-0 ${documentReviewExpanded ? "!m-2 !h-full !max-h-full !rounded-lg" : "!m-2 h-full !max-h-full !rounded-xl md:!mx-4 md:h-[94dvh] md:!max-h-full md:!rounded-2xl"}`}
       >
         <DialogHeader closeLabel={t("toast.close")} className="sticky top-0 z-30 !mb-0 !items-start shrink-0 border-b border-border bg-background px-2.5 py-2 md:px-5 md:py-3">
           {appointment ? <div data-testid="compact-document-appointment-header" className="grid min-w-0 gap-2 md:gap-3 lg:grid-cols-[minmax(220px,1.1fr)_minmax(240px,1fr)_minmax(280px,1.4fr)_auto] lg:items-center">

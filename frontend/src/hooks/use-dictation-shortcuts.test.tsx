@@ -1,13 +1,13 @@
 import { act, cleanup, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DEFAULT_DICTATION_PREFERENCES } from "@/lib/dictation-preferences";
-import { useProtocolDictationShortcuts } from "./use-protocol-dictation-shortcuts";
+import { useDictationShortcuts } from "./use-dictation-shortcuts";
 
 beforeEach(() => { vi.useFakeTimers(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function mount(overrides: Partial<typeof DEFAULT_DICTATION_PREFERENCES> = {}) {
   const options = { enabled: true, preferences: { ...DEFAULT_DICTATION_PREFERENCES, ...overrides }, isActive: vi.fn(() => true), start: vi.fn(), stop: vi.fn(), toggle: vi.fn() };
-  const view = renderHook(() => useProtocolDictationShortcuts(options));
+  const view = renderHook(() => useDictationShortcuts(options));
   return { ...view, ...options };
 }
 it("starts Right Shift after 200ms, stops on release, and ignores Left Shift and repeat", () => {
@@ -47,7 +47,7 @@ it("accepts separate SpeechMike command events without requiring a held Start ke
   fireEvent.keyDown(window, { code: "F13" }); fireEvent.keyDown(window, { code: "F14" });
   expect(hook.start).toHaveBeenCalledTimes(2); expect(hook.stop).toHaveBeenCalledTimes(2);
 });
-it("ignores events outside focused Protocoling and leaves save shortcuts functional", () => {
+it("ignores events outside a focused dictation target and leaves save shortcuts functional", () => {
   const hook = mount({ keyboardShortcut: { code: "F9", ctrl: false, alt: false, shift: false, meta: false } });
   hook.isActive.mockReturnValue(false); fireEvent.keyDown(window, { code: "F9" }); expect(hook.start).not.toHaveBeenCalled();
   hook.isActive.mockReturnValue(true); vi.mocked(document.hasFocus).mockReturnValue(false); fireEvent.keyDown(window, { code: "F9" }); expect(hook.start).not.toHaveBeenCalled();

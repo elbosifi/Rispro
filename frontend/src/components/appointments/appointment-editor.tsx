@@ -185,7 +185,7 @@ function AppointmentEditorForm({
   }
 
   return (
-    <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30 p-4 space-y-4">
+    <div data-dictation-context={`appointment:${appointment.id}:${appointment.patientId}`} className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30 p-4 space-y-4">
       <div>
         <div className="flex items-center gap-2">
           <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{t(language, "appointmentEditor.title")}</h4>

@@ -1,4 +1,12 @@
 export const en = {
+  "dictation.controlsTitle": "Dictation Controls",
+  "dictation.globalStart": "Start dictation",
+  "dictation.globalStop": "Stop dictation",
+  "dictation.globalProcessing": "Transcribing dictation",
+  "dictation.selectField": "Select an editable text field before dictating.",
+  "dictation.noSpeech": "No speech was recognized. Try recording again.",
+  "dictation.insertFailed": "Text could not be inserted. Select an editable field and record again.",
+
   "common.clearSearch": "Clear search",
   "settings.section.mobile_widget": "Mobile Widget Access",
   "mobileWidget.description": "Read-only operational counts for your iPhone. Patient details are never included.",

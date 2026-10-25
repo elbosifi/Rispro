@@ -1,3 +1,4 @@
+import { DictationControl } from "./dictation-control";
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -616,9 +617,9 @@ export function TopBar({
   onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard") => void;
 }) {
   return (
-    <header className="sticky top-0 z-50 border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
-      <div className="flex min-h-[3.5rem] items-center gap-3 px-4 lg:px-6">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header className="sticky top-0 z-[60] border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>
+      <div className="flex min-h-[3.5rem] items-center gap-1 px-2 lg:gap-3 lg:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-1 lg:gap-3">
           <button type="button" className="inline-flex h-10 min-w-10 items-center justify-center rounded-xl border border-transparent px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 lg:hidden" onClick={onMobileNavToggle} aria-label={t(language, "shell.toggleNav")} title={t(language, "shell.toggleNav")}><Menu className="h-5 w-5" /></button>
           <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-xs font-bold text-white sm:flex">R</div>
           <div className="min-w-0">
@@ -628,11 +629,12 @@ export function TopBar({
           {pageAction ? <div className="shrink-0">{pageAction}</div> : null}
         </div>
 
-        <div className="flex min-w-0 flex-1 justify-center">
+        <div className="flex shrink-0 justify-center lg:min-w-0 lg:flex-1">
           <GlobalSearch language={language} isRtl={isRtl} canSearchPatients={canSearchPatients} canSearchRegistrations={canSearchRegistrations} onPatientSelect={onPatientSearchSelect} onRegistrationSelect={onRegistrationSearchSelect} />
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <DictationControl />
           <GlobalPrintStatusPill />
           {extraActions}
           {!pageAction ? <HistoryMenu language={language} onUndo={onUndo} onRedo={onRedo} /> : null}

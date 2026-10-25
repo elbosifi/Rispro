@@ -76,6 +76,8 @@ export function loadDictationPreferences(): DictationPreferences {
     return preferences;
   } catch { return defaults; }
 }
+export const DICTATION_PREFERENCES_CHANGED = "rispro:dictation-preferences-changed";
 export function saveDictationPreferences(preferences: DictationPreferences): void {
   localStorage.setItem(DICTATION_PREFERENCES_KEY, JSON.stringify(preferences));
+  window.dispatchEvent(new Event(DICTATION_PREFERENCES_CHANGED));
 }

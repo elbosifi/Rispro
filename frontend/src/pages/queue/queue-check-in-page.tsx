@@ -1,3 +1,4 @@
+import { DictationControl } from "@/components/layout/dictation-control";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -338,7 +339,7 @@ export default function QueueCheckInPage() {
         />
       ) : null}
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 p-4 sm:p-6 lg:p-8">
-        <header className="rounded-[1.75rem] border border-border/70 bg-white/85 px-4 py-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-5">
+        <header className="sticky top-0 z-[60] rounded-[1.75rem] border border-border/70 bg-white/85 px-4 py-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-5">
           <div className={`flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
             <div className={`flex items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
@@ -366,6 +367,7 @@ export default function QueueCheckInPage() {
             </div>
 
             <div className={`flex flex-wrap items-center gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <DictationControl />
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
                   <Clock3 size={14} />
