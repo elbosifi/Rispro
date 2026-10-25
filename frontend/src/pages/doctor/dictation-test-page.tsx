@@ -27,9 +27,13 @@ export function DictationTestPage() {
   }, [t]);
   useEffect(() => { void check(); }, [check]);
   const transcribe = async () => {
-    if (!recorder.recording) return;
+    if (!recorder.recording || recorder.error) return;
     setProcessing(true); setError(""); setCopied(null);
-    try { const result = await transcribeDictation(recorder.recording); setText(result.text); setProcessingSeconds(result.processing_seconds); }
+    try {
+      const result = await transcribeDictation(recorder.recording);
+      if (!cleanupMedicalDictation(result.text).trim()) { setError(t("dictation.noSpeech")); return; }
+      setText(result.text); setProcessingSeconds(result.processing_seconds);
+    }
     catch (e) { setError(e instanceof Error ? e.message : t("dictation.actionError")); }
     finally { setProcessing(false); }
   };
@@ -54,7 +58,7 @@ export function DictationTestPage() {
       <div className="flex flex-wrap gap-2">
         <Button disabled={recordingBusy || processing || health?.status !== "connected"} onClick={() => void recorder.start()}>{t("dictation.start")}</Button>
         <Button variant="secondary" disabled={recorder.phase !== "recording"} onClick={recorder.stop}>{t("dictation.stop")}</Button>
-        <Button disabled={!recorder.recording || recordingBusy || processing || health?.status !== "connected"} onClick={() => void transcribe()}>{processing ? t("dictation.processing") : t("dictation.transcribe")}</Button>
+        <Button disabled={!recorder.recording || Boolean(recorder.error) || recordingBusy || processing || health?.status !== "connected"} onClick={() => void transcribe()}>{processing ? t("dictation.processing") : t("dictation.transcribe")}</Button>
         <Button variant="secondary" disabled={recordingBusy || processing || !recorder.recording} onClick={recorder.clear}>{t("dictation.clearRecording")}</Button>
       </div>
       {recorder.error && <ErrorState message={t(`dictation.recorderError.${recorder.error}`)} />}

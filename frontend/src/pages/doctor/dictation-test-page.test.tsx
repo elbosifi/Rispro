@@ -13,10 +13,18 @@ beforeEach(() => {
   clearMedGemmaTestText();
   vi.mocked(api.getDictationHealth).mockResolvedValue({ status: "connected", model: "google/medasr", credentialsValidated: false });
   vi.mocked(api.transcribeDictation).mockResolvedValue({ text: "Normal chest radiograph.", processing_seconds: 2.8 });
-  vi.mocked(useAudioRecorder).mockReturnValue({ phase: "idle", recording: new Blob(["audio"]), duration: 3, error: null, notice: "", start: vi.fn(), stop: vi.fn(), clear: vi.fn(), cancel: vi.fn() });
+  vi.mocked(useAudioRecorder).mockReturnValue({ phase: "idle", recording: new Blob(["audio"]), duration: 3, error: null, notice: "", level: 0, meterAvailable: false, start: vi.fn(), stop: vi.fn(), clear: vi.fn(), cancel: vi.fn() });
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 function mount() { render(<MemoryRouter><EnglishLanguageScope><DictationTestPage /></EnglishLanguageScope></MemoryRouter>); }
+it("reports a token-only result as no speech and never offers it for transfer", async () => {
+  vi.mocked(api.transcribeDictation).mockResolvedValue({ text: " </s></s> ", processing_seconds: 1 });
+  mount(); await screen.findByText("Model: google/medasr");
+  fireEvent.click(screen.getByRole("button", { name: "Transcribe" }));
+  expect(await screen.findByText("No speech was recognized. Try recording again.")).toBeTruthy();
+  expect(screen.getByLabelText("Transcription")).toHaveProperty("value", "");
+  expect(screen.getByRole("button", { name: "Send to MedGemma" })).toHaveProperty("disabled", true);
+});
 it("transcribes, displays processing time and permits editing, copying and clearing text", async () => {
   mount(); await screen.findByText("Model: google/medasr");
   fireEvent.click(screen.getByRole("button", { name: "Transcribe" }));

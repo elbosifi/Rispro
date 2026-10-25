@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Card, Checkbox, ErrorState, Input } from "@/components/shared";
+import { useAudioRecorder } from "@/hooks/use-audio-recorder";
+import { useLanguage } from "@/providers/language-provider";
 import { DEFAULT_DICTATION_PREFERENCES, formatShortcut, hasConflictingDictationShortcuts, isStandaloneModifier, loadDictationPreferences, saveDictationPreferences, shortcutError, shortcutFromEvent, type DictationBinding, type DictationPreferences, type DictationShortcut, type SpeechMikeMode } from "@/lib/dictation-preferences";
 
-export function DictationControlsPage() {
+export function DictationControlsPage({ compact = false }: { compact?: boolean }) {
   const [preferences, setPreferences] = useState(loadDictationPreferences);
+  const { t } = useLanguage();
+  const recorder = useAudioRecorder(preferences.deviceId);
+  const audio = useRef<HTMLAudioElement>(null);
+  const [playbackUrl, setPlaybackUrl] = useState("");
+  const [playbackError, setPlaybackError] = useState("");
+  const [permission, setPermission] = useState<string>("Not requested / unknown");
+  const testBusy = recorder.phase !== "idle";
   const [capturing, setCapturing] = useState<DictationBinding | null>(null);
   const [error, setError] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -80,11 +89,77 @@ export function DictationControlsPage() {
       setDeviceNotice("If names are hidden, allow microphone access during a recording, then refresh this list.");
     } catch (e) { setDeviceNotice(e instanceof Error ? e.message : "Could not list microphones."); }
   };
+  useEffect(() => {
+    void refreshDevices();
+    const devices = navigator.mediaDevices;
+    const refresh = () => { void refreshDevices(); };
+    devices?.addEventListener?.("devicechange", refresh);
+    let disposed = false;
+    let status: PermissionStatus | undefined;
+    void navigator.permissions?.query({ name: "microphone" as PermissionName }).then((result) => {
+      if (disposed) return;
+      status = result;
+      const update = () => setPermission(result.state === "prompt" ? "Permission required" : result.state === "granted" ? "Allowed" : "Blocked");
+      status.onchange = update; update();
+    }).catch(() => { /* Safari may not support the microphone permission query. */ });
+    return () => { disposed = true; if (status) status.onchange = null; devices?.removeEventListener?.("devicechange", refresh); };
+  }, []);
+  useEffect(() => {
+    if (recorder.phase === "recording") { setPermission("Allowed"); void refreshDevices(); }
+    if (recorder.error === "permission" || recorder.error === "policy") setPermission("Blocked");
+  }, [recorder.phase, recorder.error]);
+  useEffect(() => {
+    if (!recorder.recording) { setPlaybackUrl(""); return; }
+    const url = URL.createObjectURL(recorder.recording);
+    setPlaybackUrl(url);
+    return () => { URL.revokeObjectURL(url); };
+  }, [recorder.recording]);
   const captureButton = (binding: DictationBinding, label: string) => <Button type="button" variant="secondary" disabled={capturing !== null || detecting} onClick={() => { setError(""); setCapturing(binding); }}>{label}</Button>;
   return <div className="mx-auto max-w-3xl space-y-4" dir="ltr" data-dictation-controls>
-    <div><h1 className="text-2xl font-semibold">Dictation Controls</h1><p className="text-sm text-muted-foreground">Preferences save automatically for this workstation/browser. Shortcuts work in the focused text field across authenticated RISpro workspaces. The top-bar microphone is always available.</p></div>
+    <div><h1 className={`${compact ? "text-base" : "text-2xl"} font-semibold`}>Dictation Controls</h1>{!compact && <p className="text-sm text-muted-foreground">Preferences save automatically for this workstation/browser. Shortcuts work in the focused text field across authenticated RISpro workspaces. The top-bar microphone is always available.</p>}</div>
     {capturing && <Card className="space-y-2"><p role="status">Press the key or key combination you want to use.</p><p className="text-sm">For a Shift key alone, press and release it. Escape cancels capture.</p><Button type="button" variant="secondary" onClick={() => setCapturing(null)}>Cancel capture</Button></Card>}
     {error && <ErrorState role="alert" message={error} />}
+    <Card className={compact ? "space-y-2 !p-3" : "space-y-3"}><h2 className="text-lg font-semibold">Microphone Test</h2>
+      <label className="block text-sm font-semibold">Recording input<select className="input-premium mt-1 w-full" value={preferences.deviceId} disabled={testBusy} onChange={(event) => { recorder.clear(); setPlaybackError(""); save({ ...preferences, deviceId: event.target.value }); }}><option value="">Workstation default microphone</option>{preferences.deviceId && !devices.some((device) => device.deviceId === preferences.deviceId) && <option value={preferences.deviceId}>Saved microphone (refresh to check availability)</option>}{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label>
+      <p className="text-sm" role="status">Microphone permission: {window.isSecureContext === false ? "Unavailable on this HTTP origin — browser setup required" : !navigator.mediaDevices?.getUserMedia ? "Unavailable in this browser" : permission}</p>
+      <label className="block text-sm">Live audio level<meter className="mt-1 block w-full" min={0} max={1} value={recorder.level} aria-label="Live audio level" /></label>
+      <p className="text-xs text-muted-foreground">{recorder.phase === "requesting" ? "Allow microphone access in the browser prompt." : recorder.phase === "recording" ? `Recording test (${recorder.duration} / 60 s). ${recorder.meterAvailable ? "Speak to move the level indicator." : "Waiting for the audio level meter; stop and play back to check the microphone."}` : "Record, stop, then play back. Test audio stays in this browser; it is never uploaded."}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" className={compact ? "!px-2 !text-xs" : undefined} disabled={testBusy || capturing !== null || detecting} onClick={() => { audio.current?.pause(); setPlaybackError(""); void recorder.start(); }}>Record Test</Button>
+        <Button type="button" size="sm" variant="secondary" className={compact ? "!px-2 !text-xs" : undefined} disabled={!testBusy || recorder.phase === "stopping"} onClick={recorder.stop}>Stop Test</Button>
+        <Button type="button" size="sm" variant="secondary" className={compact ? "!px-2 !text-xs" : undefined} disabled={!playbackUrl || testBusy} onClick={() => {
+          if (!audio.current) return;
+          audio.current.currentTime = 0;
+          void audio.current.play().catch(() => setPlaybackError("Could not play this recording. Record another test and try again."));
+        }}>Play Recording</Button>
+      </div>
+      {playbackUrl && <audio ref={audio} src={playbackUrl} controls className="w-full" aria-label="Microphone test recording" onError={() => setPlaybackError("Could not play this recording. Record another test and try again.")} />}
+      {recorder.error && <ErrorState role="alert" message={t(`dictation.recorderError.${recorder.error}`)} />}
+      {recorder.notice && <p role="status" className="text-sm">{recorder.notice}</p>}
+      {playbackError && <ErrorState role="alert" message={playbackError} />}
+      <Button type="button" variant="secondary" onClick={() => void refreshDevices()}>Refresh microphones</Button>
+      <p className="text-sm text-muted-foreground">Choose the built-in microphone or SpeechMike USB microphone. If the selected input is unavailable, recording uses the workstation default and displays a notice.</p>
+      {deviceNotice && <p role="status" className="text-sm">{deviceNotice}</p>}
+      <section className="space-y-3 border-t border-border pt-3" aria-labelledby="windows-microphone-setup">
+        <h3 id="windows-microphone-setup" className="font-semibold">Windows Microphone Setup</h3>
+        <p className="text-sm text-muted-foreground">Enable browser microphone access when using RISpro through the hospital's local IP address.</p>
+        <a href="/downloads/Repair-RISpro-Microphone-Windows.ps1" download="Repair-RISpro-Microphone-Windows.ps1" className="btn-primary inline-flex items-center justify-center px-3 py-2 text-sm">Download Windows Setup Script</a>
+        <ol className="list-decimal space-y-1 pl-5 text-sm">
+          <li>Download the script.</li>
+          <li>Run Windows PowerShell as Administrator.</li>
+          <li>Execute the downloaded script.</li>
+          <li>Restart Chrome/Edge or restart Windows.</li>
+          <li>Check edge://policy for OverrideSecurityRestrictionsOnInsecureOrigin, or chrome://policy for UnsafelyTreatInsecureOriginAsSecure. The RISpro origin must show status OK.</li>
+          <li>Reopen RISpro and allow microphone access.</li>
+        </ol>
+        <label className="block text-sm">PowerShell command (select to copy)
+          <Input className="mt-1 w-full font-mono text-xs" readOnly value={'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\Repair-RISpro-Microphone-Windows.ps1"'} onFocus={(event) => event.currentTarget.select()} />
+        </label>
+        <p className="text-xs text-muted-foreground">Run this command from the folder containing the downloaded file.</p>
+        <p className="text-xs text-muted-foreground">Windows only. Configured for http://192.9.101.252:3000. Intended for trusted hospital LAN workstations. HTTP traffic remains unencrypted.</p>
+        <p className="text-xs text-muted-foreground">If access is blocked, allow Microphone in the browser's RISpro site permissions and Windows Settings → Privacy &amp; security → Microphone (including desktop apps). If your organization manages permissions, contact its administrator. Safari does not use this Windows policy; normal Safari on macOS/iPhone blocks microphone capture on this plain HTTP address.</p>
+      </section>
+    </Card>
     <Card className="space-y-3">
       <h2 className="text-lg font-semibold">Keyboard Dictation</h2>
       <label className="flex items-center gap-2"><Checkbox checked={preferences.keyboardEnabled} disabled={capturing !== null} onCheckedChange={(keyboardEnabled) => save({ ...preferences, keyboardEnabled })} />Enable keyboard dictation</label>
@@ -109,28 +184,6 @@ export function DictationControlsPage() {
       {detectionMessage && <p role="status" className="text-sm">{detectionMessage}</p>}
       <p className="text-sm text-muted-foreground">If nothing is captured, configure keyboard mapping in Philips SpeechControl. RISpro sees keyboard events and cannot distinguish a SpeechMike from a keyboard sending the same shortcut. Detection does not change your bindings.</p>
     </Card>
-    <Card className="space-y-3"><h2 className="text-lg font-semibold">Microphone</h2>
-      <label className="block text-sm font-semibold">Recording input<select className="input-premium mt-1 w-full" value={preferences.deviceId} onChange={(event) => save({ ...preferences, deviceId: event.target.value })}><option value="">Workstation default microphone</option>{preferences.deviceId && !devices.some((device) => device.deviceId === preferences.deviceId) && <option value={preferences.deviceId}>Saved microphone (refresh to check availability)</option>}{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label>
-      <Button type="button" variant="secondary" onClick={() => void refreshDevices()}>Refresh microphones</Button>
-      <p className="text-sm text-muted-foreground">Choose the built-in microphone or SpeechMike USB microphone. If the selected input is unavailable, recording uses the workstation default and displays a notice.</p>
-      {deviceNotice && <p role="status" className="text-sm">{deviceNotice}</p>}
-      <section className="space-y-3 border-t border-border pt-3" aria-labelledby="windows-microphone-setup">
-        <h3 id="windows-microphone-setup" className="font-semibold">Windows Microphone Setup</h3>
-        <p className="text-sm text-muted-foreground">Enable browser microphone access when using RISpro through the hospital's local IP address.</p>
-        <a href="/downloads/Repair-RISpro-Microphone-Windows.ps1" download="Repair-RISpro-Microphone-Windows.ps1" className="btn-primary inline-flex items-center justify-center px-3 py-2 text-sm">Download Windows Setup Script</a>
-        <ol className="list-decimal space-y-1 pl-5 text-sm">
-          <li>Download the script.</li>
-          <li>Run Windows PowerShell as Administrator.</li>
-          <li>Execute the downloaded script.</li>
-          <li>Restart Chrome/Edge or restart Windows.</li>
-          <li>Reopen RISpro and allow microphone access.</li>
-        </ol>
-        <label className="block text-sm">PowerShell command (select to copy)
-          <Input className="mt-1 w-full font-mono text-xs" readOnly value={'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\Repair-RISpro-Microphone-Windows.ps1"'} onFocus={(event) => event.currentTarget.select()} />
-        </label>
-        <p className="text-xs text-muted-foreground">Run this command from the folder containing the downloaded file.</p>
-        <p className="text-xs text-muted-foreground">Windows only. Configured for http://192.9.101.252:3000. Intended for trusted hospital LAN workstations. HTTP traffic remains unencrypted.</p>
-      </section>
-    </Card>
+
   </div>;
 }

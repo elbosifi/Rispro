@@ -12,9 +12,41 @@ async function recording(page: Page) {
 }
 
 async function shortcut(page: Page, code: string, repeat = false) {
-  await page.evaluate(({ code, repeat }) => window.dispatchEvent(new KeyboardEvent("keydown", { code, key: code, repeat, bubbles: true, cancelable: true })), { code, repeat });
-  if (!repeat) await page.evaluate((code) => window.dispatchEvent(new KeyboardEvent("keyup", { code, key: code, bubbles: true, cancelable: true })), code);
+  // Real keyboard events originate below window so document capture (binding setup)
+  // and window capture (global dictation) both receive them.
+  await page.evaluate(({ code, repeat }) => document.dispatchEvent(new KeyboardEvent("keydown", { code, key: code, repeat, bubbles: true, cancelable: true })), { code, repeat });
+  if (!repeat) await page.evaluate((code) => document.dispatchEvent(new KeyboardEvent("keyup", { code, key: code, bubbles: true, cancelable: true })), code);
 }
+
+test("top-bar microphone diagnostics record and play local audio at desktop/mobile widths without transcription", async ({ page }, testInfo) => {
+  await signInWithSession(page, "e2e_doctor");
+  let uploads = 0;
+  page.on("request", (request) => { if (request.url().includes("/medical-dictation/transcribe")) uploads++; });
+  await page.goto("/doctor/my-work");
+  await page.getByRole("button", { name: "Dictation Controls", exact: true }).click();
+  const settings = page.locator("[data-dictation-controls]");
+  await expect(settings.getByRole("heading", { name: "Microphone Test" })).toBeVisible();
+  await settings.getByRole("button", { name: "Record Test", exact: true }).click();
+  await expect(settings.getByText("Microphone permission: Allowed")).toBeVisible();
+  await expect.poll(() => settings.getByRole("meter", { name: "Live audio level" }).getAttribute("value")).not.toBe("0");
+  await settings.getByRole("button", { name: "Stop Test", exact: true }).click();
+  const play = settings.getByRole("button", { name: "Play Recording", exact: true });
+  await expect(play).toBeEnabled();
+  const audio = settings.getByLabel("Microphone test recording");
+  await expect(audio).toHaveAttribute("src", /^blob:/);
+  await play.click();
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime)).toBeGreaterThan(0);
+  await page.screenshot({ path: testInfo.outputPath("microphone-test-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settings.getByRole("heading", { name: "Microphone Test" }).scrollIntoViewIfNeeded();
+  await expect(play).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const bounds = await page.getByRole("menu").boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: testInfo.outputPath("microphone-test-mobile.png"), fullPage: true });
+  await page.getByRole("button", { name: "Dictation Controls", exact: true }).click();
+  expect(uploads).toBe(0);
+});
 
 test("global microphone preserves Protocoling, cursor/undo, keyboard and SpeechMike modes at desktop/mobile widths", async ({ page }, testInfo) => {
   test.setTimeout(120_000);

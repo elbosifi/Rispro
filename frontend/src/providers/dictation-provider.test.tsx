@@ -7,8 +7,10 @@ import { DictationProvider } from "./dictation-provider";
 import { DictationControl } from "@/components/layout/dictation-control";
 import { DEFAULT_DICTATION_PREFERENCES, saveDictationPreferences } from "@/lib/dictation-preferences";
 import { transcribeDictation } from "@/lib/medical-dictation-api";
+import { pushToast } from "@/lib/toast";
 
 vi.mock("@/lib/medical-dictation-api", () => ({ transcribeDictation: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
 const stopTrack = vi.fn();
 let mediaDevices: PropertyDescriptor | undefined;
 beforeEach(() => {
@@ -142,4 +144,76 @@ it("keeps delayed dictation when an unrelated record panel refreshes or closes",
   expect(signal.aborted).toBe(false);
   await act(async () => resolve({ text: "normal period", processing_seconds: 1 }));
   expect(screen.getByRole("textbox", { name: "Clinical notes" })).toHaveProperty("value", "Normal. Before selected after");
+});
+
+it("keeps recording through harmless rerenders, background clicks, and unrelated cross-tab storage changes", async () => {
+  const view = mount(); await start();
+  view.update();
+  fireEvent.pointerDown(document.body);
+  fireEvent(window, new StorageEvent("storage", { key: "rispro-theme", newValue: "dark", storageArea: localStorage }));
+  expect(screen.getByRole("button", { name: "Stop dictation" })).toBeTruthy();
+  expect(stopTrack).not.toHaveBeenCalled();
+  fireEvent.keyUp(window, { code: "F9" });
+  await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole("textbox", { name: "Clinical notes" })).toHaveProperty("value", "No contrast. Before selected after");
+});
+it("cancels when focus moves to a different text field", async () => {
+  mount(); await start();
+  act(() => screen.getByRole("textbox", { name: "Indication" }).focus());
+  fireEvent.keyUp(window, { code: "F9" });
+  expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled();
+});
+it("does not cancel a pending top-bar start when the browser permission prompt blurs the window", async () => {
+  let grant!: (media: MediaStream) => void;
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((done) => { grant = done; }));
+  mount(); act(() => screen.getByRole("textbox", { name: "Indication" }).focus());
+  fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
+  fireEvent.blur(window);
+  await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
+  expect(stopTrack).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+  await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
+});
+it.each([" </s> ", "</s></s>", ""])("reports empty recognition without inserting model tokens (%s)", async (text) => {
+  vi.mocked(transcribeDictation).mockResolvedValueOnce({ text, processing_seconds: 1 });
+  mount(); await start(); fireEvent.keyUp(window, { code: "F9" });
+  await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ message: "No speech was recognized. Try recording again." })));
+  expect(screen.getByRole("textbox", { name: "Clinical notes" })).toHaveProperty("value", "Before selected after");
+});
+it("reports request failures without leaking arbitrary error contents", async () => {
+  vi.mocked(transcribeDictation).mockRejectedValueOnce(new Error("private upstream details"));
+  mount(); await start(); fireEvent.keyUp(window, { code: "F9" });
+  await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ message: "Transcription request failed. Check the connection and MedASR availability, then try again." })));
+  expect(JSON.stringify(vi.mocked(pushToast).mock.calls)).not.toContain("private upstream details");
+});
+it("reports failed text insertion", async () => {
+  vi.mocked(document.execCommand).mockReturnValueOnce(false);
+  mount(); await start(); fireEvent.keyUp(window, { code: "F9" });
+  await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ message: "Text could not be inserted. Select an editable field and record again." })));
+});
+it("reports permission denial and clears the red indicator", async () => {
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
+  mount(); act(() => screen.getByRole("textbox", { name: "Indication" }).focus());
+  fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
+  await screen.findByRole("button", { name: "Start dictation" });
+  expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ type: "error", message: expect.stringContaining("permissions") }));
+  expect(transcribeDictation).not.toHaveBeenCalled();
+});
+it("reports measured silence without sending a transcription request", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("AudioContext", class {
+    state = "running";
+    close = vi.fn(async () => {}); resume = vi.fn(async () => {});
+    createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }));
+    createAnalyser = vi.fn(() => ({ fftSize: 2048, getFloatTimeDomainData: (data: Float32Array) => data.fill(0) }));
+  });
+  try {
+    mount(); act(() => screen.getByRole("textbox", { name: "Indication" }).focus());
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start dictation" })));
+    act(() => vi.advanceTimersByTime(400));
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+    expect(transcribeDictation).not.toHaveBeenCalled();
+    expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("No meaningful audio") }));
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeTruthy();
+  } finally { vi.useRealTimers(); }
 });

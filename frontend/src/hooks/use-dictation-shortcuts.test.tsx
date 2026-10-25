@@ -90,3 +90,11 @@ it.each(["hold", "toggle"] as const)("stops SpeechMike %s on focus loss and hidd
   fireEvent.keyDown(window, { code: "NumpadAdd" });
   expect(mode === "hold" ? hook.start : hook.toggle).toHaveBeenCalledTimes(2);
 });
+it("ignores permission-prompt blur while requesting but still stops Hold-to-Talk on release", () => {
+  const options = { enabled: true, preferences: DEFAULT_DICTATION_PREFERENCES, isActive: () => true,
+    start: vi.fn(), stop: vi.fn(), toggle: vi.fn(), isRequesting: () => true };
+  renderHook(() => useDictationShortcuts(options));
+  fireEvent.keyDown(window, { code: "ShiftRight", shiftKey: true }); act(() => vi.advanceTimersByTime(200));
+  fireEvent.blur(window); expect(options.stop).not.toHaveBeenCalled();
+  fireEvent.keyUp(window, { code: "ShiftRight" }); expect(options.stop).toHaveBeenCalledTimes(1);
+});

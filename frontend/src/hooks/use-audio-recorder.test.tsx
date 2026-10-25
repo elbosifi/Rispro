@@ -11,7 +11,7 @@ class FakeRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  constructor() { instances.push(this); }
+  constructor(_stream: MediaStream, options: MediaRecorderOptions) { this.mimeType = options.mimeType!; instances.push(this); }
   start() { this.state = "recording"; }
   stop() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["test audio"]) }); this.onstop?.(); }
 }
@@ -19,6 +19,7 @@ beforeEach(() => {
   vi.stubGlobal("MediaRecorder", FakeRecorder);
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: stopTrack }] })) } });
   stopTrack.mockClear();
+  FakeRecorder.isTypeSupported.mockImplementation((type) => type === "audio/mp4");
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it("detects Safari-compatible MP4 and releases microphone on stop", async () => {
@@ -106,4 +107,67 @@ it.each(["NotFoundError", "OverconstrainedError", "NotReadableError"])("falls ba
   expect(navigator.mediaDevices.getUserMedia).toHaveBeenNthCalledWith(2, { audio: true });
   expect(result.current.phase).toBe("recording"); expect(result.current.notice).toContain("default microphone");
   unmount(); expect(stopTrack).toHaveBeenCalled();
+});
+
+it.each(["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/wav"])("records with the browser-supported format %s", async (type) => {
+  FakeRecorder.isTypeSupported.mockImplementation((candidate) => candidate === type);
+  const { result, unmount } = renderHook(useAudioRecorder);
+  await act(() => result.current.start());
+  act(() => result.current.stop());
+  expect(result.current.recording?.type).toBe(type);
+  unmount();
+});
+it("distinguishes a blocked HTTP origin without requesting permission", async () => {
+  vi.stubGlobal("isSecureContext", false);
+  const { result } = renderHook(useAudioRecorder);
+  await act(() => result.current.start());
+  expect(result.current.error).toBe("insecure");
+  expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+});
+it.each(["NotFoundError", "NotReadableError", "AbortError"])("reports unavailable default hardware (%s)", async (name) => {
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Unavailable", name));
+  const { result } = renderHook(useAudioRecorder);
+  await act(() => result.current.start()); expect(result.current.error).toBe("unavailable");
+});
+it("does not fall back or retry when the selected microphone permission is denied", async () => {
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
+  const { result } = renderHook(() => useAudioRecorder("usb"));
+  await act(() => result.current.start()); expect(result.current.error).toBe("permission");
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+});
+it.each([0, 0.05])("meters the recorded stream, detects silence conservatively, and releases Web Audio (rms %s)", async (sample) => {
+  vi.useFakeTimers();
+  const close = vi.fn(async () => {});
+  const connect = vi.fn();
+  vi.stubGlobal("AudioContext", class {
+    state = "running";
+    close = close;
+    resume = vi.fn(async () => {});
+    createMediaStreamSource = vi.fn(() => ({ connect }));
+    createAnalyser = vi.fn(() => ({ fftSize: 2048, getFloatTimeDomainData: (data: Float32Array) => data.fill(sample) }));
+  });
+  const { result, unmount } = renderHook(useAudioRecorder);
+  await act(() => result.current.start());
+  act(() => vi.advanceTimersByTime(500));
+  expect(result.current.meterAvailable).toBe(true);
+  expect(result.current.level).toBeCloseTo(sample * 5);
+  act(() => result.current.stop());
+  expect(result.current.error).toBe(sample ? null : "silent");
+  expect(result.current.recording?.size).toBeGreaterThan(0); // Still available for local playback.
+  expect(result.current.level).toBe(0); expect(close).toHaveBeenCalledTimes(1);
+  unmount();
+});
+it("does not treat a suspended meter as silence", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("AudioContext", class {
+    state = "suspended";
+    close = vi.fn(async () => {}); resume = vi.fn(async () => {});
+    createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }));
+    createAnalyser = vi.fn(() => ({ fftSize: 2048, getFloatTimeDomainData: vi.fn() }));
+  });
+  const { result, unmount } = renderHook(useAudioRecorder);
+  await act(() => result.current.start()); act(() => vi.advanceTimersByTime(500));
+  act(() => result.current.stop());
+  expect(result.current.error).toBeNull(); expect(result.current.meterAvailable).toBe(false);
+  expect(result.current.recording?.size).toBeGreaterThan(0); unmount();
 });

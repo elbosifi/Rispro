@@ -5,6 +5,7 @@ export function useDictationShortcuts(options: {
   enabled: boolean; preferences: DictationPreferences; isActive: () => boolean;
   start: () => void; stop: () => void; toggle: () => void;
   cancel?: () => void; isRecording?: () => boolean;
+  isRequesting?: () => boolean;
 }) {
   const latest = useRef(options);
   useLayoutEffect(() => { latest.current = options; }, [options]);
@@ -62,8 +63,11 @@ export function useDictationShortcuts(options: {
       if (holdCode === event.code) { holdCode = null; latest.current.stop(); }
     };
     const visibility = () => { if (document.visibilityState === "hidden") stop(); };
+    // Browser permission prompts can blur the window while getUserMedia is pending.
+    // Key release still cancels Hold-to-Talk; actual recording still stops on focus loss.
+    const blur = () => { if (!latest.current.isRequesting?.()) stop(); };
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true);
-    window.addEventListener("blur", stop); document.addEventListener("visibilitychange", visibility);
-    return () => { cancelPending(); window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", stop); document.removeEventListener("visibilitychange", visibility); };
+    window.addEventListener("blur", blur); document.addEventListener("visibilitychange", visibility);
+    return () => { cancelPending(); window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", blur); document.removeEventListener("visibilitychange", visibility); };
   }, []);
 }

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useLocation } from "react-router-dom";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useDictationShortcuts } from "@/hooks/use-dictation-shortcuts";
-import { DICTATION_PREFERENCES_CHANGED, loadDictationPreferences } from "@/lib/dictation-preferences";
+import { DICTATION_PREFERENCES_CHANGED, DICTATION_PREFERENCES_KEY, loadDictationPreferences } from "@/lib/dictation-preferences";
 import { captureDictationTarget, type DictationTarget } from "@/lib/dictation-target";
 import { transcribeDictation } from "@/lib/medical-dictation-api";
 import { cleanupMedicalDictation } from "@/lib/medical-dictation-cleanup";
@@ -52,8 +52,9 @@ export function DictationProvider({ children, enabled, sessionId }: { children: 
   useEffect(() => () => { generation.current++; request.current?.abort(); }, []);
   useEffect(() => {
     const refresh = () => { latest.current.cancel(); setPreferences(loadDictationPreferences()); };
-    window.addEventListener(DICTATION_PREFERENCES_CHANGED, refresh); window.addEventListener("storage", refresh);
-    return () => { window.removeEventListener(DICTATION_PREFERENCES_CHANGED, refresh); window.removeEventListener("storage", refresh); };
+    const storage = (event: StorageEvent) => { if (event.storageArea === localStorage && (event.key === null || event.key === DICTATION_PREFERENCES_KEY)) refresh(); };
+    window.addEventListener(DICTATION_PREFERENCES_CHANGED, refresh); window.addEventListener("storage", storage);
+    return () => { window.removeEventListener(DICTATION_PREFERENCES_CHANGED, refresh); window.removeEventListener("storage", storage); };
   }, []);
   useEffect(() => {
     const remember = () => {
@@ -61,56 +62,68 @@ export function DictationProvider({ children, enabled, sessionId }: { children: 
       remembered.current = captureDictationTarget(document.activeElement);
     };
     const focus = () => {
-      if (running.current && document.activeElement !== destination.current?.element && !controls(document.activeElement)) latest.current.cancel();
+      if (running.current && document.activeElement !== destination.current?.element && !controls(document.activeElement)
+        && document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')) latest.current.cancel();
       remember();
     };
     const edit = (event: Event) => {
-      if (running.current && destination.current?.element.contains(event.target as Node)) latest.current.cancel();
+      if (running.current && destination.current?.element.contains(event.target as Node)) {
+        // Invalidate immediately, but let React's onChange consume the input before
+        // rendering recorder cancellation. Otherwise a controlled field can restore
+        // its old value during the native capture phase and discard the manual edit.
+        const current = ++generation.current;
+        request.current?.abort(); destination.current = null; running.current = false;
+        // A microtask may run between native event listeners; use the next task.
+        setTimeout(() => { if (generation.current === current) latest.current.cancel(); }, 0);
+      }
       remember();
-    };
-    const pointer = (event: PointerEvent) => {
-      const target = event.target as Element;
-      if (running.current && !controls(target) && !destination.current?.element.contains(target)) latest.current.cancel();
     };
     const invalid = () => { if (running.current && !destination.current?.valid()) latest.current.cancel(); };
     const observer = new MutationObserver(invalid);
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "readonly", "hidden", "inert", "aria-hidden", "data-dictation-context", "contenteditable", "data-dictation"] });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["disabled", "readonly", "hidden", "inert", "aria-hidden", "aria-disabled", "data-dictation-context", "contenteditable", "data-dictation"] });
     document.addEventListener("focusin", focus); document.addEventListener("selectionchange", remember); document.addEventListener("select", remember, true);
-    document.addEventListener("input", edit, true); document.addEventListener("pointerdown", pointer, true);
+    document.addEventListener("input", edit, true);
     return () => {
       observer.disconnect(); document.removeEventListener("focusin", focus); document.removeEventListener("selectionchange", remember); document.removeEventListener("select", remember, true);
-      document.removeEventListener("input", edit, true); document.removeEventListener("pointerdown", pointer, true);
+      document.removeEventListener("input", edit, true);
     };
   }, []);
   useDictationShortcuts({ enabled, preferences,
-    isActive: () => !settingsOpen() && (running.current || Boolean(captureDictationTarget(document.activeElement))), start, stop, toggle, cancel, isRecording: () => running.current });
+    isActive: () => !settingsOpen() && (running.current || Boolean(captureDictationTarget(document.activeElement))), start, stop, toggle, cancel,
+    isRecording: () => running.current, isRequesting: () => recorder.phase === "requesting" });
   useEffect(() => {
     if (recorder.error || (recorder.phase === "idle" && recorder.notice && !recorder.recording)) {
       running.current = false; destination.current = null; setBusy(false);
     }
+  }, [recorder.error, recorder.notice, recorder.phase, recorder.recording]);
+  useEffect(() => {
     if (recorder.error) pushToast({ type: "error", title: t("dictation.controlsTitle"), message: t(`dictation.recorderError.${recorder.error}`) });
+  }, [recorder.error, t]);
+  useEffect(() => {
     if (recorder.notice) pushToast({ type: "info", title: t("dictation.controlsTitle"), message: recorder.notice });
-  }, [recorder.error, recorder.notice, recorder.phase, recorder.recording, t]);
+  }, [recorder.notice, t]);
   useEffect(() => {
     const audio = recorder.recording;
     const target = destination.current;
-    if (!audio || !target || attempted.current === audio) return;
+    if (!audio || !target || recorder.error || attempted.current === audio) return;
     attempted.current = audio;
     const current = generation.current;
     const controller = new AbortController(); request.current = controller; setProcessing(true);
     void (async () => {
+      let failure = t("dictation.transcriptionFailed");
       try {
         if (!target.valid()) { cancel(); return; }
         const result = await transcribeDictation(audio, controller.signal);
         if (current !== generation.current) return;
         const text = cleanupMedicalDictation(result.text);
-        if (!text.trim()) throw new Error(t("dictation.noSpeech"));
+        if (!text.trim()) { failure = t("dictation.noSpeech"); throw new Error(); }
         if (!target.valid()) { cancel(); return; }
         // End the session before emitting input; our own insertion must not cancel itself.
         running.current = false;
-        if (!target.insert(text)) throw new Error(t("dictation.insertFailed"));
-      } catch (error) {
-        if (current === generation.current) pushToast({ type: "error", title: t("dictation.controlsTitle"), message: error instanceof Error ? error.message : t("dictation.actionError") });
+        failure = t("dictation.insertFailed");
+        if (!target.insert(text)) throw new Error();
+      } catch {
+        if (current === generation.current) pushToast({ type: "error", title: t("dictation.controlsTitle"), message: failure });
       } finally {
         if (current === generation.current) cancel();
       }

@@ -27,7 +27,7 @@ function ActiveDictationControl({ dictation }: { dictation: NonNullable<ReturnTy
     </Button>
     <AnchoredMenu open={open} onOpenChange={setOpen} width={width} dir={isArabic ? "rtl" : "ltr"}
       trigger={<Button type="button" variant="ghost" className="!h-9 !min-h-9 !w-6 !px-0" aria-label={t("dictation.controlsTitle")} title={t("dictation.controlsTitle")} onClick={dictation.cancel}><ChevronDown className="h-3 w-3" aria-hidden="true" /></Button>}>
-      <div className="p-2" data-dictation-toolbar><DictationControlsPage /></div>
+      <div className="p-2" data-dictation-toolbar><DictationControlsPage compact /></div>
     </AnchoredMenu>
     <span className="sr-only" role="status">{label}</span>
   </div>;
