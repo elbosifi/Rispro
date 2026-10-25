@@ -123,6 +123,17 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     if (!testData) throw new Error("Test setup failed");
   }
 
+  async function reactivationActor(role: "super_admin" | "receptionist") {
+    const result = await pool.query<{ id: number }>(
+      `insert into users (username, full_name, password_hash, role, is_active)
+       values ($1, 'Reactivation actor', 'test-password-hash', $2, true) returning id`,
+      [`${TEST_PREFIX.toLowerCase()}reactivation_${randomUUID().slice(0, 8)}`, role]
+    );
+    const id = Number(result.rows[0]!.id);
+    const cookie = createTestAuthCookie(id, role);
+    return { id, cookie, reauthCookie: role === "super_admin" ? `${cookie}; ${createTestSupervisorReauthCookie(id, role)}` : cookie };
+  }
+
   const fetchWithCookie = (cookie: string, path: string, opts: Record<string, unknown> = {}) => {
     const { body: origBody, ...rest } = opts as Record<string, unknown> & { body?: unknown };
     if (path.includes("/api/v2/appointments")) {
@@ -1014,8 +1025,46 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(sourceSecondTry.status, 201);
   });
 
-  it("discontinue releases special quota exactly once and safely rejects super-admin reactivation", async () => {
+  it("reopens approved overbooking without another booking, quota consumption, or approval", async () => {
     guard();
+    const approver = await reactivationActor("super_admin");
+    const date = uniqueDate();
+    await setModalityCapacity(1);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(0);
+    assert.equal((await createBooking({ patientId: await createPatient(), bookingDate: date, caseCategory: "non_oncology" })).status, 201);
+    const created = await fetchWithCookie(approver.reauthCookie, "/api/v2/appointments", {
+      method: "POST", body: {
+        patientId: await createPatient(), modalityId: testData.modalityId, examTypeId: testData.examTypeId,
+        bookingDate: date, caseCategory: "non_oncology", capacityResolutionMode: "total_capacity_override",
+        override: { authorizationMode: "current_user_reauth", reason: "Authorized overbooking", overrideType: "total_capacity_override" },
+      },
+    });
+    assert.equal(created.status, 201);
+    const bookingId = Number((created.data as { booking: { id: number } }).booking.id);
+    const approval = await pool.query("select * from appointments_v2.override_audit_events where booking_id = $1 order by id", [bookingId]);
+    assert.ok(approval.rows.length > 0);
+    assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST", body: { status: "discontinued", reason: "Scanner interrupted" },
+    })).status, 200);
+    const reopen = () => fetch(`/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, {
+      method: "POST", body: { reason: "Resume authorized overbooking" },
+    });
+    assert.equal((await reopen()).status, 200);
+    assert.equal((await reopen()).status, 409);
+    assert.deepEqual((await pool.query("select * from appointments_v2.override_audit_events where booking_id = $1 order by id", [bookingId])).rows, approval.rows);
+    const counts = await pool.query(
+      `select count(*)::int as total, count(*) filter (where status not in ('cancelled', 'discontinued', 'voided'))::int as active
+       from appointments_v2.bookings where modality_id = $1 and booking_date = $2`, [testData.modalityId, date]
+    );
+    assert.deepEqual(counts.rows[0], { total: 2, active: 2 });
+    assert.equal((await pool.query("select id from appointments_v2.special_quota_consumptions where booking_id = $1", [bookingId])).rowCount, 0);
+  });
+
+  it("restores the original special quota once through both reactivation APIs, even after capacity is reused", async () => {
+    guard();
+    const superAdmin = await reactivationActor("super_admin");
+    const receptionist = await reactivationActor("receptionist");
     const date = uniqueDate();
     await setModalityCapacity(2);
     await setCategoryLimits(null, null);
@@ -1030,6 +1079,17 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     });
     assert.equal(created.status, 201);
     const bookingId = Number(((created.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+    const readAuthorization = () => pool.query(
+      `select id, patient_id, modality_id, exam_type_id, booking_date, ('V2-' || lpad(id::text, 6, '0')) as accession_number,
+              policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code,
+              special_reason_note, created_at, created_by_user_id
+       from appointments_v2.bookings where id = $1`, [bookingId]
+    );
+    const originalAuthorization = (await readAuthorization()).rows;
+    const readConsumption = () => pool.query(
+      `select * from appointments_v2.special_quota_consumptions where booking_id = $1 order by id`, [bookingId]
+    );
+    const originalConsumption = (await readConsumption()).rows;
 
     const discontinued = await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
       method: "POST",
@@ -1071,11 +1131,39 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(Number(lifecycle.rows[0]?.totalConsumptionCount), 1);
     assert.equal(lifecycle.rows[0]?.releaseReason, "discontinued");
 
-    const reactivate = await fetchWithCookie(superAdminReauthCookie, `/api/v2/read/appointments/${bookingId}/status`, {
+    const replacement = await createBooking({
+      patientId: await createPatient(), bookingDate: date, caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra", specialReasonCode: "urgent_oncology",
+    });
+    assert.equal(replacement.status, 201);
+
+    const denied = await fetchWithCookie(receptionist.cookie, `/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, {
+      method: "POST", body: { reason: "Unauthorized attempt" },
+    });
+    assert.equal(denied.status, 403);
+    assert.ok((await readConsumption()).rows[0]?.released_at);
+
+    // Manual reactivation restores quota before checking the target queue requirements.
+    // A later validation failure must roll the restoration and its audit back together.
+    const patientId = Number(originalAuthorization[0]?.patient_id);
+    const originalPhone = await pool.query("select phone_1 from patients where id = $1", [patientId]);
+    await pool.query("update patients set phone_1 = null where id = $1", [patientId]);
+    try {
+      const invalid = await fetchWithCookie(superAdmin.cookie, `/api/v2/read/appointments/${bookingId}/status`, {
+        method: "POST", body: { status: "waiting", reason: "Resume before patient details corrected" },
+      });
+      assert.equal(invalid.status, 422);
+      assert.ok((await readConsumption()).rows[0]?.released_at);
+      assert.equal((await pool.query("select id from audit_log where entity_type = 'appointment_v2_booking' and entity_id = $1 and action_type = 'special_quota_reactivated'", [bookingId])).rowCount, 0);
+    } finally {
+      await pool.query("update patients set phone_1 = $2 where id = $1", [patientId, originalPhone.rows[0]?.phone_1]);
+    }
+
+    const reactivate = await fetchWithCookie(superAdmin.cookie, `/api/v2/read/appointments/${bookingId}/status`, {
       method: "POST",
       body: { status: "scheduled", reason: "Correcting discontinued status" },
     });
-    assert.equal(reactivate.status, 409);
+    assert.equal(reactivate.status, 200);
 
     const afterReactivationAttempt = await pool.query<{
       status: string;
@@ -1089,16 +1177,61 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
         group by booking.id`,
       [bookingId]
     );
-    assert.equal(afterReactivationAttempt.rows[0]?.status, "discontinued");
-    assert.equal(Number(afterReactivationAttempt.rows[0]?.activeConsumptionCount), 0);
+    assert.equal(afterReactivationAttempt.rows[0]?.status, "scheduled");
+    assert.equal(Number(afterReactivationAttempt.rows[0]?.activeConsumptionCount), 1);
+    assert.deepEqual((await readAuthorization()).rows, originalAuthorization);
+    const restoredConsumption = (await readConsumption()).rows;
+    assert.equal(restoredConsumption.length, 1);
+    assert.deepEqual({ ...restoredConsumption[0], updated_at: null }, { ...originalConsumption[0], updated_at: null });
 
-    const replacement = await createBooking({
-      patientId: await createPatient(),
-      bookingDate: date,
-      caseCategory: "non_oncology",
-      capacityResolutionMode: "special_quota_extra",
-      specialReasonCode: "urgent_oncology",
+    assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST", body: { status: "discontinued", reason: "Interrupted again" },
+    })).status, 200);
+    // Migration 161 used this release reason for historical discontinued bookings.
+    await pool.query("update appointments_v2.special_quota_consumptions set release_reason = 'legacy_backfill_discontinued' where booking_id = $1", [bookingId]);
+    const reopen = () => fetch(`/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, {
+      method: "POST", body: { reason: "Continue the authorized examination" },
     });
-    assert.equal(replacement.status, 201);
+    const requests = await Promise.all([reopen(), reopen()]);
+    assert.deepEqual(requests.map((response) => response.status).sort(), [200, 409]);
+    assert.deepEqual((await readAuthorization()).rows, originalAuthorization);
+    assert.equal((await readConsumption()).rows.length, 1);
+    assert.equal((await readConsumption()).rows[0]?.released_at, null);
+    const counts = await pool.query(
+      `select count(*)::int as total, count(*) filter (where released_at is null)::int as active
+       from appointments_v2.special_quota_consumptions where quota_logical_key = $1 and booking_date = $2`,
+      [QUOTA_LOGICAL_KEY, date]
+    );
+    assert.deepEqual(counts.rows[0], { total: 2, active: 2 });
+    const audit = await pool.query(
+      `select old_values, new_values, changed_by_user_id, created_at from audit_log
+       where entity_type = 'appointment_v2_booking' and entity_id = $1 and action_type = 'special_quota_reactivated' order by id`, [bookingId]
+    );
+    assert.equal(audit.rows.length, 2);
+    for (const row of audit.rows) {
+      assert.ok(["discontinued", "legacy_backfill_discontinued"].includes(row.old_values.releaseReason));
+      assert.ok(row.old_values.releasedAt);
+      assert.equal(Number(row.new_values.consumptionId), Number(originalConsumption[0]?.id));
+      assert.ok([testData.userId, superAdmin.id].includes(Number(row.changed_by_user_id)));
+      assert.ok(row.created_at);
+    }
+    // Restoration records true occupancy; it does not give a later new booking a free slot.
+    const additional = await createBooking({
+      patientId: await createPatient(), bookingDate: date, caseCategory: "non_oncology",
+      capacityResolutionMode: "special_quota_extra", specialReasonCode: "urgent_oncology",
+    });
+    assert.equal(additional.status, 403, "exhausted capacity requires a new authorized override for a new booking");
+    assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST", body: { status: "discontinued", reason: "Attempt stopped again" },
+    })).status, 200);
+    assert.equal((await fetch(`/api/v2/read/appointments/${bookingId}/status`, {
+      method: "POST", body: { status: "discontinued", reason: "Repeated stop" },
+    })).status, 200);
+    const afterStop = await pool.query(
+      `select count(*)::int as total, count(*) filter (where released_at is null)::int as active
+       from appointments_v2.special_quota_consumptions where quota_logical_key = $1 and booking_date = $2`,
+      [QUOTA_LOGICAL_KEY, date]
+    );
+    assert.deepEqual(afterStop.rows[0], { total: 2, active: 1 });
   });
 });

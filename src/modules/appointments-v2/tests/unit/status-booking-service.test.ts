@@ -57,7 +57,8 @@ describe("status booking service source guards", () => {
   it("rejects discontinued reactivation when terminal side effects cannot be safely reversed", () => {
     assert.match(source, /assertDiscontinuedReactivationSafety/);
     assert.match(source, /booking\.uses_special_quota/);
-    assert.match(source, /discontinued_reactivation_special_quota_rejected/);
+    assert.match(source, /discontinued_reactivation_special_quota_history_invalid/);
+    assert.match(source, /discontinued_reactivation_final_report_rejected/);
     assert.match(source, /complementary_recall_reopened_after_uncompleted_booking/);
     assert.match(source, /discontinued_reactivation_recall_reversal_unavailable/);
     assert.match(source, /cancelled_reason in \('status_discontinued', 'booking_status_discontinued'\)/);

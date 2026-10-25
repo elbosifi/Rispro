@@ -213,9 +213,13 @@ describe("AppointmentManageModal", () => {
     expect(await screen.findByRole("img", { name: "Verified identity" })).toBeTruthy();
   });
 
-  it("offers the dedicated reopen-for-scanning action only to authorized discontinued-case roles and requires a reason", async () => {
+  it.each([
+    { label: "ordinary", metadata: {} },
+    { label: "special quota", metadata: { specialReasonCode: "urgent_oncology" } },
+    { label: "approved overbooking", metadata: { isOverbooked: true, overbookingReason: "Authorized extra examination", approvedByName: "Approving doctor" } },
+  ])("offers reactivation of $label examinations only to authorized roles and requires a reason", async ({ metadata }) => {
     mocks.userRole = "supervisor";
-    mocks.getAppointmentById.mockResolvedValue({ ...appointment, status: "discontinued" });
+    mocks.getAppointmentById.mockResolvedValue({ ...appointment, ...metadata, status: "discontinued" });
     const user = userEvent.setup();
     renderModal();
 

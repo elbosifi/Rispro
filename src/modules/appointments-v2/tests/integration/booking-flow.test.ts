@@ -141,6 +141,21 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     if (!testData) throw new Error("Test setup failed — database unreachable");
   }
 
+  const reactivationActors = new Map<string, number>();
+  async function reactivationCookie(role: string): Promise<string> {
+    let id = reactivationActors.get(role);
+    if (!id) {
+      const actor = await pool.query<{ id: number }>(
+        `insert into users (username, full_name, password_hash, role, is_active)
+         values ($1, 'Reactivation actor', 'test-password-hash', $2, true) returning id`,
+        [`${TEST_PREFIX.toLowerCase()}reactivation_${randomUUID().slice(0, 8)}`, role]
+      );
+      id = Number(actor.rows[0]!.id);
+      reactivationActors.set(role, id);
+    }
+    return createTestAuthCookie(id, role);
+  }
+
   async function createPatientForStatusTest(label: string): Promise<number> {
     const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
     const uniqueNationalId = `2${randomUUID().replace(/-/g, "").slice(0, 11)}`;
@@ -672,10 +687,10 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       guard();
       const bookingId = await createBookingForStatusTest("2039-08-14", await createPatientForStatusTest("DiscontinuedReactivation"));
       const statusPath = `/api/v2/read/appointments/${bookingId}/status`;
-      const postStatusAs = (role: "receptionist" | "supervisor" | "super_admin", status: string, reason?: string) =>
+      const postStatusAs = async (role: "receptionist" | "supervisor" | "super_admin", status: string, reason?: string) =>
         fetch(statusPath, {
           method: "POST",
-          cookie: createTestAuthCookie(testData.userId, role),
+          cookie: await reactivationCookie(role),
           body: { status, ...(reason == null ? {} : { reason }) },
         });
 
@@ -711,7 +726,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(audit.rows[0]?.old_values.status, "discontinued");
       assert.equal(audit.rows[0]?.new_values.status, "scheduled");
       assert.equal(audit.rows[0]?.new_values.reason, reason);
-      assert.equal(Number(audit.rows[0]?.changed_by_user_id), testData.userId);
+      assert.equal(Number(audit.rows[0]?.changed_by_user_id), reactivationActors.get("super_admin"));
     });
 
     it("keeps patient queue requirements and void rejection when manually reactivating", async () => {
@@ -719,7 +734,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const patientId = await createPatientForStatusTest("DiscontinuedQueueRequirements");
       const bookingId = await createBookingForStatusTest("2039-08-15", patientId);
       const statusPath = `/api/v2/read/appointments/${bookingId}/status`;
-      const superAdminCookie = createTestAuthCookie(testData.userId, "super_admin");
+      const superAdminCookie = await reactivationCookie("super_admin");
 
       await pool.query("update patients set phone_1 = null where id = $1", [patientId]);
 
@@ -765,10 +780,10 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         );
         return bookingId;
       };
-      const reopen = (bookingId: number, role: string, reason = "Patient returned for a fresh acquisition") =>
+      const reopen = async (bookingId: number, role: string, reason = "Patient returned for a fresh acquisition") =>
         fetch(`/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, {
           method: "POST",
-          cookie: createTestAuthCookie(testData.userId, role),
+          cookie: await reactivationCookie(role),
           body: { reason },
         });
 
@@ -819,7 +834,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(audit.rows[0]?.new_values.status, "waiting");
       assert.equal(audit.rows[0]?.new_values.reason, "Patient returned for a fresh acquisition");
       assert.ok(audit.rows[0]?.new_values.reopenedForScanningAt);
-      assert.equal(Number(audit.rows[0]?.changed_by_user_id), testData.userId);
+      assert.equal(Number(audit.rows[0]?.changed_by_user_id), reactivationActors.get("modality_staff"));
 
       const quotaBookingId = await createDiscontinuedBooking();
       await pool.query("update appointments_v2.bookings set uses_special_quota = true where id = $1", [quotaBookingId]);
@@ -827,6 +842,68 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const quotaState = await pool.query<{ status: string; reopened_for_scanning_at: Date | null }>("select status, reopened_for_scanning_at from appointments_v2.bookings where id = $1", [quotaBookingId]);
       assert.equal(quotaState.rows[0]?.status, "discontinued");
       assert.equal(quotaState.rows[0]?.reopened_for_scanning_at, null);
+    });
+
+    it("protects completed bookings and final reports, including fresh SonicDICOM finality", async (t) => {
+      guard();
+      const bookingId = await createBookingForStatusTest("2039-08-21", await createPatientForStatusTest("FinalReopen"));
+      const reopen = async (manual = false) => fetch(`/api/v2/read/appointments/${bookingId}/${manual ? "status" : "reopen-for-scanning"}`, {
+        method: "POST", cookie: await reactivationCookie("super_admin"),
+        body: manual ? { status: "waiting", reason: "Attempted final reactivation" } : { reason: "Attempted final reactivation" },
+      });
+      await pool.query("update appointments_v2.bookings set status = 'completed' where id = $1", [bookingId]);
+      assert.equal((await reopen()).status, 409);
+      await pool.query("update appointments_v2.bookings set status = 'discontinued' where id = $1", [bookingId]);
+      await pool.query(
+        `insert into doctor_portal.reporting_board_manual_final_overrides (appointment_id, reason, created_by_user_id)
+         values ($1, 'Final report recorded', $2)`, [bookingId, testData.userId]
+      );
+      assert.equal((await reopen()).status, 409);
+      assert.equal((await reopen(true)).status, 409);
+      await pool.query("update doctor_portal.reporting_board_manual_final_overrides set cleared_at = now() where appointment_id = $1", [bookingId]);
+      await pool.query(
+        `insert into doctor_portal.reporting_board_sonicdicom_cache (appointment_id, report_status)
+         values ($1, 'final') on conflict (appointment_id) do update set report_status = 'final'`, [bookingId]
+      );
+      assert.equal((await reopen()).status, 409);
+      assert.equal((await reopen(true)).status, 409);
+      assert.equal((await readWorkflowTimestamps(bookingId)).status, "discontinued");
+
+      const previousConfig = await pool.query("select setting_value from system_settings where category = 'sonicdicom_reports' and setting_key = 'config'");
+      let sqlUnavailable = false;
+      const sqlMock = t.mock.module("mssql", { defaultExport: {
+        Int: () => "int", NVarChar: () => "nvarchar",
+        ConnectionPool: class {
+          async connect() { if (sqlUnavailable) throw new Error("Synthetic report service outage"); return this; }
+          async close() {}
+          request() {
+            return {
+              input() { return this; },
+              async query() { return { recordset: [{
+                AccessionNumber: `V2-${String(bookingId).padStart(6, "0")}`, FoundStudy: 1, FoundReport: 1,
+                Id: "synthetic-final-document", Status: 6, UpdatedAt: new Date().toISOString(),
+              }] }; },
+            };
+          }
+        },
+      } });
+      try {
+        await pool.query("update appointments_v2.bookings set requires_report = true where id = $1", [bookingId]);
+        await pool.query("update doctor_portal.reporting_board_sonicdicom_cache set report_status = 'draft' where appointment_id = $1", [bookingId]);
+        await pool.query(
+          `update system_settings set setting_value = $1::jsonb where category = 'sonicdicom_reports' and setting_key = 'config'`,
+          [JSON.stringify({ value: { sonicDicomReportsEnabled: true, sonicDicomReadinessMode: "sql_server", sonicDicomSqlEnabled: true, sonicDicomSqlServer: "synthetic-sql", sonicDicomSqlUsername: "synthetic-user" } })]
+        );
+        assert.equal((await reopen()).status, 409, "a fresh external final must override a stale draft cache");
+        assert.equal((await reopen(true)).status, 409);
+        sqlUnavailable = true;
+        assert.equal((await reopen()).status, 503, "unverified finality must fail closed");
+        assert.equal((await reopen(true)).status, 503);
+        assert.equal((await readWorkflowTimestamps(bookingId)).status, "discontinued");
+      } finally {
+        sqlMock.restore();
+        await pool.query("update system_settings set setting_value = $1::jsonb where category = 'sonicdicom_reports' and setting_key = 'config'", [JSON.stringify(previousConfig.rows[0]?.setting_value)]);
+      }
     });
 
     it("rejects reactivation when discontinuation left recall or reporting state without a canonical reversal", async () => {

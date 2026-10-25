@@ -378,6 +378,40 @@ describe("mpps-service integration", () => {
     assert.deepEqual(oldEvent.rows[0], { performed_step_status: "DISCONTINUED", mpps_instance_uid: oldMppsUid });
   });
 
+  it("reopens an MPPS-discontinued special-quota examination and accepts a fresh MPPS completion", async () => {
+    const bookingId = await createBooking();
+    const logicalKey = randomUUID();
+    const quota = await pool.query<{ id: number }>(
+      `insert into appointments_v2.special_quota_rules (logical_key, policy_version_id, modality_id, daily_extra_slots, is_active)
+       values ($1, $2, $3, 1, true) returning id`, [logicalKey, testData.policyVersionId, testData.modalityId]
+    );
+    await pool.query("update appointments_v2.bookings set uses_special_quota = true, capacity_resolution_mode = 'special_quota_extra', special_reason_code = 'urgent_oncology' where id = $1", [bookingId]);
+    const consumption = await pool.query(
+      `insert into appointments_v2.special_quota_consumptions
+         (booking_id, quota_rule_id, quota_logical_key, policy_version_id, booking_date, exam_type_id, consumed_by_user_id)
+       values ($1, $2, $3, $4, current_date, $5, $6) returning id, consumed_at, consumed_by_user_id`,
+      [bookingId, quota.rows[0]!.id, logicalKey, testData.policyVersionId, testData.examTypeId, testData.userId]
+    );
+    const oldUid = `1.2.826.${bookingId}.special-interrupted`;
+    assert.equal((await ingestMppsEvent(createPayload(bookingId, oldUid))).updatedStatus, "in-progress");
+    assert.equal((await ingestMppsEvent({ eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid: oldUid,
+      performedStepStatus: "DISCONTINUED", discontinuationReason: "Scanner interruption", rawDatasetJson: { PerformedProcedureStepStatus: "DISCONTINUED" } })).updatedStatus, "discontinued");
+    assert.ok((await pool.query("select released_at from appointments_v2.special_quota_consumptions where booking_id = $1", [bookingId])).rows[0]?.released_at);
+
+    await reopenDiscontinuedBookingForScanning(bookingId, "Resume after scanner interruption", testData.userId, "modality_staff");
+    assert.equal(await getBookingStatus(bookingId), "waiting");
+    // A late update to the old final MPPS must not change the manually reopened booking.
+    assert.notEqual((await ingestMppsEvent({ eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid: oldUid, performedStepStatus: "COMPLETED", rawDatasetJson: { PerformedProcedureStepStatus: "COMPLETED" } })).dicomStatus, 0x0000);
+    assert.equal(await getBookingStatus(bookingId), "waiting");
+    const newUid = `1.2.826.${bookingId}.special-resumed`;
+    assert.equal((await ingestMppsEvent(createPayload(bookingId, newUid))).updatedStatus, "in-progress");
+    assert.equal((await ingestMppsEvent({ eventType: "n-set", sourceAeTitle: "CT_AE", mppsInstanceUid: newUid, performedStepStatus: "COMPLETED", rawDatasetJson: { PerformedProcedureStepStatus: "COMPLETED" } })).updatedStatus, "completed");
+    const restored = await pool.query("select id, consumed_at, consumed_by_user_id, released_at from appointments_v2.special_quota_consumptions where booking_id = $1", [bookingId]);
+    assert.deepEqual(restored.rows, [{ ...consumption.rows[0], released_at: null }]);
+    const oldHistory = await pool.query("select performed_step_status from mpps_event_log where mpps_instance_uid = $1 and event_type = 'n-set'", [oldUid]);
+    assert.deepEqual(oldHistory.rows, [{ performed_step_status: "DISCONTINUED" }]);
+  });
+
   it("claims acquisition authority for MPPS starts and PACS-started bookings without overwriting manual protection", async () => {
     const mppsFirstId = await createBooking("waiting");
     await ingestMppsEvent(createPayload(mppsFirstId, `1.2.826.${mppsFirstId}.authority-first`));

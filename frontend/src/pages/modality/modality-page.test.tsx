@@ -1553,11 +1553,15 @@ describe("ModalityPage modality board", () => {
     });
   });
 
-  it("reopens discontinued rows for scanning only after a required reason", async () => {
+  it.each([
+    { label: "ordinary", metadata: {} },
+    { label: "special quota", metadata: { specialReasonCode: "urgent_oncology" } },
+    { label: "approved overbooking", metadata: { isOverbooked: true, overbookingReason: "Authorized extra examination", approvedByName: "Approving doctor" } },
+  ])("reopens $label discontinued rows for scanning only after a required reason", async ({ metadata }) => {
     authState.role = "modality_staff";
     reopenAppointmentForScanningMock.mockResolvedValue({ ok: true });
     const user = await openBoard([
-      appointment({ id: 90, accessionNumber: "ACC-DISCONTINUED", status: "discontinued", englishFullName: "Discontinued Patient" }),
+      appointment({ id: 90, accessionNumber: "ACC-DISCONTINUED", status: "discontinued", englishFullName: "Discontinued Patient", ...metadata }),
     ]);
 
     await user.click(screen.getByRole("button", { name: "Problem" }));

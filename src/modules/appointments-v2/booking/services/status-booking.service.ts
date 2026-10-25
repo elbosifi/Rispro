@@ -13,6 +13,9 @@ import {
   runBookingTerminalTransitionPostCommit,
 } from "./booking-terminal-transition.service.js";
 import { reopenComplementaryRecallForUncompletedBooking } from "../../recall/complementary-recall.service.js";
+import { acquireBucketLock, acquireSpecialQuotaBucketLocks } from "../repositories/bucket-mutex.repo.js";
+import { findLatestSpecialQuotaConsumption, restoreDiscontinuedSpecialQuotaConsumption } from "../repositories/special-quota-consumption.repo.js";
+import { checkSonicDicomReportStatusesBatch } from "../../../../services/sonicdicom-report-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const DEFAULT_AUTO_NO_SHOW_CLEANUP_DAYS = 1;
@@ -41,6 +44,10 @@ interface BookingStatusRow {
   status: BookingStatus;
   booking_date?: string;
   uses_special_quota?: boolean;
+  modality_id?: string | number;
+  case_category?: string;
+  exam_type_id?: string | number | null;
+  requires_report?: boolean;
   study_instance_uid?: string | null;
   arrived_at?: string | null;
   waiting_started_at?: string | null;
@@ -265,8 +272,34 @@ async function assertDiscontinuedReactivationSafety(
   booking: BookingStatusRow
 ): Promise<void> {
   const bookingId = Number(booking.id);
-  if (booking.uses_special_quota) {
-    throw new SchedulingError(409, "Discontinued bookings that used special quota cannot be reactivated through manual status management.", ["discontinued_reactivation_special_quota_rejected"]);
+  const finalReport = await client.query(
+    `select 1 from doctor_portal.reporting_board_manual_final_overrides
+     where appointment_id = $1 and cleared_at is null
+     union all
+     select 1 from doctor_portal.reporting_board_sonicdicom_cache
+     where appointment_id = $1 and report_status = 'final'
+     limit 1`,
+    [bookingId]
+  );
+  if (finalReport.rows.length > 0) {
+    throw new SchedulingError(409, "Examinations with a final report cannot be reactivated.", ["discontinued_reactivation_final_report_rejected"]);
+  }
+  if (booking.requires_report !== false) {
+    // Bypass the read cache: a discontinued acquisition can already have a final report.
+    const reports = await checkSonicDicomReportStatusesBatch([{
+      bookingId,
+      accessionNumber: `V2-${String(bookingId).padStart(6, "0")}`,
+      studyInstanceUid: booking.study_instance_uid ?? null,
+      requiresReport: true,
+      status: booking.status,
+    }], { audit: false });
+    const report = reports.get(bookingId);
+    if (report?.state === "final") {
+      throw new SchedulingError(409, "Examinations with a final report cannot be reactivated.", ["discontinued_reactivation_final_report_rejected"]);
+    }
+    if (!report || report.state === "unavailable") {
+      throw new SchedulingError(503, "Report finality could not be verified. Please try again.", ["discontinued_reactivation_report_finality_unavailable"]);
+    }
   }
 
   const reopenedRecall = await client.query<{ id: number }>(
@@ -308,6 +341,41 @@ async function assertDiscontinuedReactivationSafety(
   if (cancelledReportingIntent.rows[0]) {
     throw new SchedulingError(409, "Discontinued bookings with a cancelled reporting assignment intent cannot be reactivated through manual status management.", ["discontinued_reactivation_reporting_intent_reversal_unavailable"]);
   }
+}
+
+async function restoreDiscontinuedBookingCapacity(
+  client: PoolClient,
+  booking: BookingStatusRow,
+  userId: number
+): Promise<void> {
+  const bookingId = Number(booking.id);
+  if (!booking.modality_id || !booking.booking_date || !booking.case_category) {
+    throw new Error(`Booking ${bookingId} capacity identity is missing.`);
+  }
+  // Serialize with new bookings. This restores an existing authorized examination,
+  // even if its released capacity has since been reused; it is not a new booking.
+  await acquireBucketLock(client, Number(booking.modality_id), booking.booking_date, booking.case_category);
+  if (!booking.uses_special_quota) return;
+
+  const consumption = await findLatestSpecialQuotaConsumption(client, bookingId);
+  if (!consumption || consumption.bookingDate !== booking.booking_date ||
+      Number(consumption.examTypeId) !== Number(booking.exam_type_id) ||
+      (consumption.releasedAt !== null && !["discontinued", "legacy_backfill_discontinued"].includes(consumption.releaseReason ?? ""))) {
+    throw new SchedulingError(409, "The original special quota consumption cannot be safely restored.", ["discontinued_reactivation_special_quota_history_invalid"]);
+  }
+  await acquireSpecialQuotaBucketLocks(client, [{ logicalKey: consumption.quotaLogicalKey, date: consumption.bookingDate }]);
+  if (consumption.releasedAt === null) return;
+
+  await restoreDiscontinuedSpecialQuotaConsumption(client, consumption.id);
+  // Retain the previous release in the append-only audit before clearing its fields.
+  await logAuditEntry({
+    entityType: "appointment_v2_booking",
+    entityId: bookingId,
+    actionType: "special_quota_reactivated",
+    oldValues: consumption,
+    newValues: { consumptionId: consumption.id, releasedAt: null, releasedByUserId: null, releaseReason: null },
+    changedByUserId: userId,
+  }, client);
 }
 
 async function getPatientRequirementSettings(client: PoolClient): Promise<{
@@ -459,6 +527,11 @@ export async function updateBookingStatusManual(
           status,
           booking_date::text,
           uses_special_quota,
+          modality_id,
+          case_category,
+          exam_type_id,
+          requires_report,
+          study_instance_uid,
           auto_completed_by,
           auto_completed_at,
           acquisition_status_source,
@@ -485,6 +558,7 @@ export async function updateBookingStatusManual(
     }
     if (reactivatingDiscontinued) {
       await assertDiscontinuedReactivationSafety(client, booking);
+      await restoreDiscontinuedBookingCapacity(client, booking, userId);
     }
     if (booking.status === "completed" && targetStatus === "arrived" && !cleanReason) {
       throw new SchedulingError(400, "A reason is required to reopen a completed booking.", ["completed_reopen_reason_required"]);
@@ -639,6 +713,10 @@ export async function reopenDiscontinuedBookingForScanning(
           status,
           booking_date::text,
           uses_special_quota,
+          modality_id,
+          case_category,
+          exam_type_id,
+          requires_report,
           study_instance_uid,
           arrived_at,
           waiting_started_at,
@@ -666,6 +744,7 @@ export async function reopenDiscontinuedBookingForScanning(
 
     await assertPatientMeetsBookingQueueRequirements(client, Number(booking.patient_id), userRole);
     await assertDiscontinuedReactivationSafety(client, booking);
+    await restoreDiscontinuedBookingCapacity(client, booking, userId);
 
     const reopened = await client.query<{ reopened_for_scanning_at: string }>(
       `

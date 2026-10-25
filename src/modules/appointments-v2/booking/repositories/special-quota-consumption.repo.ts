@@ -50,6 +50,36 @@ export async function findActiveSpecialQuotaConsumption(
   return result.rows[0] ?? null;
 }
 
+export async function findLatestSpecialQuotaConsumption(
+  client: PoolClient,
+  bookingId: number
+): Promise<SpecialQuotaConsumptionRow | null> {
+  const result = await client.query<SpecialQuotaConsumptionRow>(
+    `select ${CONSUMPTION_COLUMNS}
+     from appointments_v2.special_quota_consumptions
+     where booking_id = $1
+     order by id desc limit 1`,
+    [bookingId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function restoreDiscontinuedSpecialQuotaConsumption(
+  client: PoolClient,
+  consumptionId: number
+): Promise<void> {
+  // Reactivate the original consumption; retain its authorization and consumed_at.
+  const result = await client.query(
+    `update appointments_v2.special_quota_consumptions
+     set released_at = null, released_by_user_id = null, release_reason = null, updated_at = now()
+     where id = $1 and release_reason in ('discontinued', 'legacy_backfill_discontinued') and released_at is not null`,
+    [consumptionId]
+  );
+  if (result.rowCount !== 1) {
+    throw new Error(`Special quota consumption ${consumptionId} could not be restored.`);
+  }
+}
+
 export async function insertSpecialQuotaConsumption(
   client: PoolClient,
   params: {
