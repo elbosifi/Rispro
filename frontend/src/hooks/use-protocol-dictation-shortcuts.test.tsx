@@ -54,3 +54,39 @@ it("ignores events outside focused Protocoling and leaves save shortcuts functio
   vi.mocked(document.hasFocus).mockReturnValue(true);
   const save = new KeyboardEvent("keydown", { code: "KeyS", key: "s", ctrlKey: true, cancelable: true }); window.dispatchEvent(save); expect(save.defaultPrevented).toBe(false);
 });
+it.each(["hold", "toggle"] as const)("supports SpeechMike Numpad + in %s mode, consuming repeats and ignoring unrelated releases", (mode) => {
+  const hook = mount({ speechMikeEnabled: true, speechMikeMode: mode });
+  fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
+  const repeat = new KeyboardEvent("keydown", { code: "NumpadAdd", key: "+", repeat: true, cancelable: true });
+  window.dispatchEvent(repeat);
+  // A duplicate down without repeat must also wait for release before toggling again.
+  fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
+  expect(repeat.defaultPrevented).toBe(true);
+  expect(mode === "hold" ? hook.start : hook.toggle).toHaveBeenCalledTimes(1);
+  fireEvent.keyUp(window, { code: "KeyA" }); expect(hook.stop).not.toHaveBeenCalled();
+  fireEvent.keyUp(window, { code: "NumpadAdd", key: "+" });
+  expect(hook.stop).toHaveBeenCalledTimes(mode === "hold" ? 1 : 0);
+  fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
+  expect(mode === "hold" ? hook.start : hook.toggle).toHaveBeenCalledTimes(2);
+});
+it("keeps keyboard Right Shift hold independent from SpeechMike toggle", () => {
+  const hook = mount({ speechMikeEnabled: true, speechMikeMode: "toggle" });
+  fireEvent.keyDown(window, { code: "NumpadAdd" }); fireEvent.keyUp(window, { code: "NumpadAdd" });
+  fireEvent.keyDown(window, { code: "NumpadAdd" }); fireEvent.keyUp(window, { code: "NumpadAdd" });
+  expect(hook.toggle).toHaveBeenCalledTimes(2); expect(hook.stop).not.toHaveBeenCalled();
+  fireEvent.keyDown(window, { code: "ShiftRight", shiftKey: true }); act(() => vi.advanceTimersByTime(200));
+  expect(hook.start).toHaveBeenCalledTimes(1);
+  fireEvent.keyUp(window, { code: "ShiftRight" }); expect(hook.stop).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(window, { code: "F13" }); fireEvent.keyDown(window, { code: "F14" });
+  expect(hook.start).toHaveBeenCalledTimes(1); expect(hook.stop).toHaveBeenCalledTimes(1);
+});
+it.each(["hold", "toggle"] as const)("stops SpeechMike %s on focus loss and hidden visibility", (mode) => {
+  const hook = mount({ keyboardEnabled: false, speechMikeEnabled: true, speechMikeMode: mode });
+  fireEvent.keyDown(window, { code: "NumpadAdd" }); fireEvent.blur(window);
+  expect(hook.stop).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(window, { code: "NumpadAdd" });
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  fireEvent(document, new Event("visibilitychange")); expect(hook.stop).toHaveBeenCalledTimes(2);
+  fireEvent.keyDown(window, { code: "NumpadAdd" });
+  expect(mode === "hold" ? hook.start : hook.toggle).toHaveBeenCalledTimes(2);
+});

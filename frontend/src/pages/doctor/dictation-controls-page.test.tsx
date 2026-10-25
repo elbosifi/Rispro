@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DictationControlsPage } from "./dictation-controls-page";
 import { formatShortcut, loadDictationPreferences } from "@/lib/dictation-preferences";
 
 beforeEach(() => { localStorage.clear(); vi.spyOn(window, "scrollTo").mockImplementation(() => {}); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 it("offers the static Windows microphone setup download and a selectable installation command", () => {
   render(<DictationControlsPage />);
   const download = screen.getByRole("link", { name: "Download Windows Setup Script" });
@@ -59,4 +59,56 @@ it("rejects reserved and duplicate shortcuts, suppresses capture events, and can
   expect(screen.queryByText("Press the key or key combination you want to use.")).toBeNull();
   expect(loadDictationPreferences().keyboardShortcut.code).toBe("ShiftRight");
   window.removeEventListener("keydown", activated);
+});
+it("captures NumpadAdd for SpeechMike Toggle and persists an independent keyboard mode", () => {
+  const view = render(<DictationControlsPage />);
+  expect(screen.getByLabelText("SpeechMike recording mode")).toHaveProperty("value", "separate");
+  fireEvent.change(screen.getByLabelText("SpeechMike recording mode"), { target: { value: "toggle" } });
+  expect(screen.queryByRole("button", { name: "Capture Start Shortcut" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Capture SpeechMike Shortcut" }));
+  fireEvent.keyDown(document, { code: "NumpadAdd", key: "+" });
+  expect(screen.getByText("Numpad +")).toBeTruthy();
+  expect(loadDictationPreferences()).toMatchObject({ speechMikeMode: "toggle", speechMikeShortcut: { code: "NumpadAdd", key: "+" }, keyboardMode: "hold", keyboardShortcut: { code: "ShiftRight" } });
+  view.unmount(); render(<DictationControlsPage />);
+  expect(screen.getByLabelText("SpeechMike recording mode")).toHaveProperty("value", "toggle");
+  fireEvent.change(screen.getByLabelText("SpeechMike recording mode"), { target: { value: "hold" } });
+  expect(screen.getByText(/immediate Keydown\/Keyup pair/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Capture SpeechMike Shortcut" }));
+  fireEvent.keyDown(document, { code: "ShiftRight", key: "Shift", shiftKey: true });
+  fireEvent.keyUp(document, { code: "ShiftRight", key: "Shift" });
+  expect(screen.getByRole("alert").textContent).toContain("already used");
+});
+it("detects keyboard event metadata without recording, storing typed text, or changing bindings", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+  const getUserMedia = vi.fn();
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+  try {
+    render(<DictationControlsPage />);
+    const preferences = loadDictationPreferences();
+    fireEvent.click(screen.getByRole("button", { name: "Detect SpeechMike Button" }));
+    fireEvent.keyDown(document, { code: "NumpadAdd", key: "+" });
+    fireEvent.keyUp(document, { code: "NumpadAdd", key: "+" });
+    const events = screen.getByRole("list", { name: "Detected keyboard events" });
+    expect(events.textContent).toContain("Keydown · code: NumpadAdd · key: + · modifiers: none");
+    expect(events.textContent).toContain("Keyup · code: NumpadAdd");
+    expect(screen.getByText("Detected: Numpad +. This shortcut can be used for dictation.")).toBeTruthy();
+    fireEvent.keyDown(document, { code: "F9", key: "F9", ctrlKey: true, shiftKey: true });
+    expect(events.textContent).toContain("modifiers: Ctrl + Shift");
+    fireEvent.keyDown(document, { code: "KeyA", key: "typed-text-must-not-be-retained" });
+    expect(events.textContent).not.toContain("KeyA");
+    expect(screen.queryByText(/typed-text-must-not-be-retained/)).toBeNull();
+    expect(getUserMedia).not.toHaveBeenCalled(); expect(loadDictationPreferences()).toEqual(preferences);
+    fireEvent.keyDown(document, { code: "Escape", key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Stop detection" })).toBeNull();
+  } finally {
+    if (descriptor) Object.defineProperty(navigator, "mediaDevices", descriptor);
+    else Reflect.deleteProperty(navigator, "mediaDevices");
+  }
+});
+it("explains missing keyboard mapping after detection times out", () => {
+  vi.useFakeTimers(); render(<DictationControlsPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Detect SpeechMike Button" }));
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(screen.getByText("No keyboard event detected. Configure the SpeechMike button as a keyboard shortcut in Philips SpeechControl.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Detect SpeechMike Button" })).toBeTruthy();
 });

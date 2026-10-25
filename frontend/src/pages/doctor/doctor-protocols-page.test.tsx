@@ -396,6 +396,30 @@ describe("Doctor protocoling request documents", () => {
       await startRecording(); fireEvent.keyDown(window, { code: "F14", key: "F14" });
       await waitFor(() => expect(field).toHaveProperty("value", cleaned));
     });
+    it.each(["hold", "toggle"] as const)("inserts SpeechMike Numpad + %s dictation at the cursor and keeps keyboard hold working", async (mode) => {
+      saveDictationPreferences({ ...DEFAULT_DICTATION_PREFERENCES, speechMikeEnabled: true, speechMikeMode: mode });
+      await openAssignment();
+      const field = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
+      fireEvent.change(field, { target: { value: "Before OLD after" } });
+      field.focus(); field.setSelectionRange(7, 10); fireEvent.select(field);
+      fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
+      await screen.findByText(/Recording.* 0 \/ 60/);
+      fireEvent.keyDown(window, { code: "NumpadAdd", key: "+", repeat: true });
+      fireEvent.keyUp(window, { code: "NumpadAdd", key: "+" });
+      if (mode === "toggle") {
+        expect(transcribeDictation).not.toHaveBeenCalled();
+        fireEvent.keyDown(window, { code: "NumpadAdd", key: "+" });
+        fireEvent.keyUp(window, { code: "NumpadAdd", key: "+" });
+      }
+      await waitFor(() => expect(field.value).toBe("Before " + cleaned + " after"));
+      expect(transcribeDictation).toHaveBeenCalledTimes(1);
+      field.focus();
+      fireEvent.keyDown(window, { code: "ShiftRight", key: "Shift", shiftKey: true });
+      await screen.findByText(/Recording.* 0 \/ 60/);
+      fireEvent.keyUp(window, { code: "ShiftRight", key: "Shift" });
+      await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(2));
+      expect(mockCreateAssignment).not.toHaveBeenCalled();
+    });
     it("releases a microphone granted after early key release without inserting or transcribing", async () => {
       let grant!: (value: MediaStream) => void;
       vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(new Promise((resolve) => { grant = resolve; }));

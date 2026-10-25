@@ -17,37 +17,39 @@ export function useProtocolDictationShortcuts(options: {
       const current = latest.current;
       if (!current.enabled || !document.hasFocus() || document.visibilityState === "hidden" || !current.isActive() || event.defaultPrevented || event.isComposing) return;
       const { preferences } = current;
-      const speechStart = preferences.speechMikeEnabled && matchesShortcut(event, preferences.speechMikeStart);
-      const speechStop = preferences.speechMikeEnabled && matchesShortcut(event, preferences.speechMikeStop);
+      const separate = preferences.speechMikeEnabled && preferences.speechMikeMode === "separate";
+      const speechStart = separate && matchesShortcut(event, preferences.speechMikeStart);
+      const speechStop = separate && matchesShortcut(event, preferences.speechMikeStop);
       if (speechStart || speechStop) {
         cancelPending();
+        event.preventDefault(); event.stopImmediatePropagation();
         if (event.repeat) return;
         // SpeechControl Start/Stop are commands, independent of key release.
-        event.preventDefault(); event.stopImmediatePropagation();
         if (speechStop) current.stop(); else current.start();
         return;
       }
+      const speech = preferences.speechMikeEnabled && preferences.speechMikeMode !== "separate" && matchesShortcut(event, preferences.speechMikeShortcut);
+      const keyboard = preferences.keyboardEnabled && matchesShortcut(event, preferences.keyboardShortcut);
+      const shortcut = speech ? preferences.speechMikeShortcut : preferences.keyboardShortcut;
+      if ((speech || keyboard) && !isStandaloneModifier(shortcut)) { event.preventDefault(); event.stopImmediatePropagation(); }
       if (event.repeat || pressed.has(event.code)) {
         pressed.add(event.code);
-        if (!matchesShortcut(event, current.preferences.keyboardShortcut)) cancelPending();
+        if (!speech && !keyboard) cancelPending();
         return;
       }
       cancelPending();
       pressed.add(event.code);
-      const keyboard = preferences.keyboardEnabled && matchesShortcut(event, preferences.keyboardShortcut);
-      if (!keyboard) return;
-      const shortcut = preferences.keyboardShortcut;
+      if (!speech && !keyboard) return;
+      const mode = speech ? preferences.speechMikeMode : preferences.keyboardMode;
       const activate = () => {
         if (!latest.current.enabled || !document.hasFocus() || !latest.current.isActive()) return;
-        if (preferences.keyboardMode === "toggle") current.toggle();
+        if (mode === "toggle") current.toggle();
         else { holdCode = event.code; current.start(); }
       };
       if (isStandaloneModifier(shortcut)) {
         // Do not consume Shift: ordinary selection/typing must keep working.
         if (pressed.size === 1) pending = setTimeout(activate, 200);
-      } else {
-        event.preventDefault(); event.stopImmediatePropagation(); activate();
-      }
+      } else activate();
     };
     const up = (event: KeyboardEvent) => {
       pressed.delete(event.code);
