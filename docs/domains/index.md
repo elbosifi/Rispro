@@ -6,6 +6,7 @@ These files are lightweight maps for future agents. They should describe only be
 | --- | --- |
 | Reporting Board | [reporting-board/README.md](reporting-board/README.md) |
 | Doctor Portal | [doctor-portal/README.md](doctor-portal/README.md) |
+| Gamma Knife | [gamma-knife/README.md](gamma-knife/README.md) |
 | DICOM Remap | [dicom-remap/README.md](dicom-remap/README.md) |
 | SonicDICOM Notes | [sonicdicom-notes/README.md](sonicdicom-notes/README.md) |
 | Appointments | [appointments/README.md](appointments/README.md) |

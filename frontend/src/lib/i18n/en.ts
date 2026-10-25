@@ -1,4 +1,6 @@
+import { gammaKnifeEn } from './gamma-knife';
 export const en = {
+  ...gammaKnifeEn,
   "dictation.controlsTitle": "Dictation Controls",
   "dictation.globalStart": "Start dictation",
   "dictation.globalStop": "Stop dictation",

@@ -50,6 +50,7 @@ import { medicalDictationRouter } from "./modules/medical-dictation/medical-dict
 import { appointmentSlipRenderRouter } from "./routes/appointment-slip-render-routes.js";
 import { incidentsRouter } from "./routes/incidents.js";
 import { sopsRouter } from "./modules/sops/routes.js";
+import { gammaKnifeRouter, gammaKnifePublicRouter } from './modules/gamma-knife/gamma-knife-routes.js';
 import { mobileWidgetRouter, mobileWidgetAdminRouter } from "./modules/mobile-widget/mobile-widget-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -177,6 +178,8 @@ export function createApp(): Application {
   app.use("/api/documents", documentsRouter);
   app.use("/api/incidents", incidentsRouter);
   app.use("/api/sops", sopsRouter);
+  app.use('/api/gamma-knife', gammaKnifeRouter);
+  app.use('/api/public/gamma-knife', gammaKnifePublicRouter);
   app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations/authoritative-orthanc", authoritativeOrthancRouter);
   app.use("/api/integrations", integrationsRouter);

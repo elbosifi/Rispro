@@ -4,10 +4,11 @@ import { AlertTriangle } from "lucide-react";
 interface ErrorStateProps extends HTMLAttributes<HTMLDivElement> {
   message?: string;
   onRetry?: () => void;
+  retryLabel?: string;
 }
 
 export const ErrorState = forwardRef<HTMLDivElement, ErrorStateProps>(
-  ({ message = "An error occurred", onRetry, className = "", ...props }, ref) => {
+  ({ message = "An error occurred", onRetry, retryLabel = "Retry", className = "", ...props }, ref) => {
     return (
       <div
         ref={ref}
@@ -21,7 +22,7 @@ export const ErrorState = forwardRef<HTMLDivElement, ErrorStateProps>(
             onClick={onRetry}
             className="btn-secondary text-xs"
           >
-            Retry
+            {retryLabel}
           </button>
         )}
       </div>

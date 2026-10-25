@@ -106,6 +106,9 @@ documentsRouter.post(
     }
     const isIdentityUpload =
       String(body.documentType ?? "").trim() === "patient_identity_document";
+    if (String(body.documentType ?? '').trim() === 'gamma_knife') {
+      throw new HttpError(403, 'Upload Gamma Knife documents through the assigned episode.');
+    }
     if (isIdentityUpload && !IDENTITY_DOCUMENT_ROLES.includes(req.user!.role)) {
       throw new HttpError(403, "Not authorized to upload patient identity documents.");
     }

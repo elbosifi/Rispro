@@ -1,0 +1,17 @@
+.gk-shell { text-align: start; }
+.gk-shell p, .gk-shell dd, .gk-shell label { overflow-wrap: anywhere; }
+.gk-shell label > input, .gk-shell label > textarea, .gk-shell label > select { margin-block-start: .375rem; }
+.gk-shell label > input[type="checkbox"] { margin-block-start: 0; flex-shrink: 0; }
+.gk-shell label { line-height: 1.65; }
+.gk-shell input, .gk-shell textarea, .gk-shell select { max-width: 100%; }
+.gk-shell textarea { min-height: 6rem; }
+.gk-shell [lang="ar"], .gk-shell:lang(ar) { line-height: 1.8; }
+.gk-shell .gk-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; border-radius: .875rem; gap: .25rem; padding: .375rem; }
+.gk-shell .gk-tabs > button { flex-shrink: 0; min-height: 2.75rem; white-space: nowrap; border-radius: .625rem; }
+.gk-shell .gk-tabs > button[aria-selected="true"] { color: var(--accent); background: var(--background); box-shadow: 0 1px 4px var(--border); }
+.gk-shell .gk-next-action { border-inline-start: 3px solid var(--accent); padding-inline-start: 1rem; }
+.gk-shell [role="alert"] { border-inline-start: 3px solid var(--accent); padding: .75rem 1rem; background: var(--background); border-radius: .5rem; }
+@media (max-width: 640px) {
+  .gk-shell .gk-tabs > button { font-size: .8rem; }
+  .gk-shell form > button { min-height: 2.75rem; }
+}

@@ -1,4 +1,6 @@
+import { gammaKnifeAr } from './gamma-knife';
 export const ar = {
+  ...gammaKnifeAr,
   "dictation.controlsTitle": "إعدادات الإملاء",
   "dictation.globalStart": "بدء الإملاء",
   "dictation.globalStop": "إيقاف الإملاء",

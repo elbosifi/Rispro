@@ -50,6 +50,8 @@ import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-v
 import IncidentsPage from "@/pages/incidents/incidents-page";
 import SopsPage from "@/pages/sops/sops-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
+import { GammaKnifeApplication, GammaKnifeLauncher } from '@/pages/gamma-knife/gamma-knife-page';
+import { GammaKnifePublicPage } from '@/pages/gamma-knife/gamma-knife-public';
 import { AppointmentCreatePage, SchedulingAdminPage } from "@/v2/appointments";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { NoShowReviewTopBarAction, TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
@@ -293,6 +295,7 @@ function AppContent() {
         extraActions={(
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
+            <GammaKnifeLauncher />
             <SchedulingOverrideApprovalCenter user={user} trigger="desktop-only" />
           </>
         )}
@@ -413,6 +416,8 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/gamma-knife/*" element={<ProtectedRoute><GammaKnifeApplication /></ProtectedRoute>} />
+      <Route path="/public/gamma-knife" element={<GammaKnifePublicPage />} />
       <Route path="/teaching/*" element={<EnglishOnlyRoute><TeachingApplication /></EnglishOnlyRoute>} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />

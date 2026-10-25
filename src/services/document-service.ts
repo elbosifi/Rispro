@@ -266,7 +266,7 @@ export async function listDocuments(
   filters: DocumentFilters = {}
 ): Promise<DocumentRow[]> {
   const params: unknown[] = [];
-  const conditions: string[] = [];
+  const conditions: string[] = ["d.document_type <> 'gamma_knife'"];
   const appointmentRefType = normalizeAppointmentRefType(filters.appointmentRefType);
 
   if (filters.patientId) {
@@ -325,7 +325,7 @@ export async function listDocuments(
   return rows as DocumentRow[];
 }
 
-export async function getDocumentById(documentId: UserId, executor: DocumentDatabaseExecutor = pool): Promise<DocumentRow> {
+export async function getDocumentById(documentId: UserId, executor: DocumentDatabaseExecutor = pool, options: { allowGammaKnife?: boolean } = {}): Promise<DocumentRow> {
   const cleanDocumentId = normalizePositiveInteger(documentId, "documentId");
   const { rows } = await executor.query(
     `
@@ -360,7 +360,7 @@ export async function getDocumentById(documentId: UserId, executor: DocumentData
 
   const document = (rows as DocumentRow[])[0];
 
-  if (!document) {
+  if (!document || (document.document_type === 'gamma_knife' && !options.allowGammaKnife)) {
     throw new HttpError(404, "Document not found.");
   }
 
@@ -1034,7 +1034,7 @@ export async function deleteDocumentsByScope(
     await selectDocumentsForScope(scope)
   ).filter(
     (document) =>
-      document.document_type !== "patient_identity_document"
+      document.document_type !== "patient_identity_document" && document.document_type !== 'gamma_knife'
   );
   const failures: Array<{ documentId: number; reason: string }> = [];
   const deletedIds: number[] = [];
@@ -1056,6 +1056,7 @@ export async function deleteDocumentsByScope(
         where id = any($1::bigint[])
           and document_type is distinct from
               'patient_identity_document'
+          and document_type <> 'gamma_knife'
       `,
       [deletedIds]
     );
