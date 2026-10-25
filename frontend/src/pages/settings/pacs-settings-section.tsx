@@ -613,10 +613,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.minimumSeriesCount")}</span>
-                    <input
+                    <Input
                       type="number"
                       min={1}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.minimumSeriesCount}
                       onChange={(event) => updateDraft({ minimumSeriesCount: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -634,33 +634,33 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.pollIntervalMinutes")}</span>
-                    <input
+                    <Input
                       type="number"
                       min={1}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.pollIntervalMinutes}
                       onChange={(event) => updateDraft({ pollIntervalMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.inactivityCompletionMinutes")}</span>
-                    <input
+                    <Input
                       type="number"
                       min={2}
                       step={1}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.inactivityCompletionMinutes}
                       onChange={(event) => updateDraft({ inactivityCompletionMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.mppsStaleFallbackMinutes")}</span>
-                    <input
+                    <Input
                       aria-label={t(language, "settings.pacs.mppsStaleFallbackMinutes")}
                       type="number"
                       min={30}
                       step={1}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.mppsStaleFallbackMinutes}
                       onChange={(event) => updateDraft({ mppsStaleFallbackMinutes: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -668,20 +668,20 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.lookbackHours")}</span>
-                    <input
+                    <Input
                       type="number"
                       min={0}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.lookbackHours}
                       onChange={(event) => updateDraft({ lookbackHours: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
                   </label>
                   <label className="space-y-1">
                     <span className="block text-xs text-stone-500">{t(language, "settings.pacs.stopAfterHours")}</span>
-                    <input
+                    <Input
                       type="number"
                       min={1}
-                      className="input-premium w-full !py-1"
+                      className="w-full !py-1"
                       value={draft.stopAfterHours}
                       onChange={(event) => updateDraft({ stopAfterHours: event.target.value === "" ? "" : Number(event.target.value) })}
                     />
@@ -728,11 +728,11 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 </div>
                 <label className="block text-xs text-stone-600 dark:text-stone-300">
                   {t(language, "settings.pacs.bookingIdToTest")}
-                  <input
+                  <Input
                     type="text"
                     inputMode="text"
                     placeholder={t(language, "settings.pacs.bookingIdToTestPlaceholder")}
-                    className="mt-1 input-premium w-full !py-1 max-w-xs"
+                    className="mt-1 w-full !py-1 max-w-xs"
                     value={autoTestBookingIds[setting.modality_id] || ""}
                     onChange={(event) => setAutoTestBookingIds((current) => ({
                       ...current,
