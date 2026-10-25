@@ -11,7 +11,6 @@ import {
   Settings,
   Users,
   QrCode,
-  Mic,
   X,
 } from "lucide-react";
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
@@ -35,7 +34,6 @@ import { DoctorCasesPage } from "./doctor-cases-page";
 import { MedGemmaTestPage } from "./medgemma-test-page";
 import { DictationTestPage } from "./dictation-test-page";
 import { DictationControlsPage } from "./dictation-controls-page";
-import { Button } from "@/components/shared";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
 import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
@@ -561,7 +559,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
           </>
         )}
-        accountMenuActions={<><WorkstationPrintingButton />{(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) && <Button type="button" variant="ghost" className="flex w-full items-center justify-start gap-2" onClick={() => navigate("/doctor/dictation-controls")}><Mic className="h-4 w-4" />Dictation Controls</Button>}<PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
+        accountMenuActions={<><WorkstationPrintingButton /><PasskeySettingsButton /><ActionPinSettingsButton variant="drawer" /></>}
         canAccessSettings={canAccessSettings}
         onSettings={() => navigate("/settings")}
         onUndo={() => navigate(-1)}

@@ -158,12 +158,14 @@ interface DialogContentProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   maxWidth?: string;
   scrollable?: boolean;
+  reserveDictationToolbar?: boolean;
 }
 
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ children, maxWidth = "400px", scrollable = true, className = "", ...props }, ref) => {
+  ({ children, maxWidth = "400px", scrollable = true, reserveDictationToolbar = false, className = "", ...props }, ref) => {
     const { onClose } = useDialog();
     const dictation = useDictation();
+    const toolbarInset = reserveDictationToolbar && Boolean(dictation);
     const contentRef = useRef<HTMLDivElement>(null);
     const stackEntryRef = useRef<DialogStackEntry | null>(null);
 
@@ -228,7 +230,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           return;
         }
 
-        if (event.key !== "Tab" || (event.target instanceof Element && event.target.closest("[data-dictation-controls]"))) return;
+        if (event.key !== "Tab" || (event.target instanceof Element && event.target.closest("[data-dictation-toolbar]"))) return;
         const focusable = getFocusableElements(content);
         if (focusable.length === 0) {
           event.preventDefault();
@@ -266,7 +268,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
       style={{
         position: "fixed",
         inset: 0,
-        top: dictation ? "3.5rem" : 0,
+        top: toolbarInset ? "3.5rem" : 0,
         zIndex: 50,
         display: "flex",
         alignItems: "center",
@@ -301,7 +303,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           backgroundColor: "var(--background)",
           border: "1px solid var(--border)",
           boxShadow: "var(--shadow-floating)",
-          maxHeight: dictation ? "calc(100dvh - 88px)" : "calc(100vh - 32px)",
+          maxHeight: toolbarInset ? "calc(100dvh - 88px)" : "calc(100vh - 32px)",
           overflow: scrollable ? "auto" : "hidden",
           overscrollBehavior: "contain",
         }}

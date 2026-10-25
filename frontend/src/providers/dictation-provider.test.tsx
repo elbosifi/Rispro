@@ -128,3 +128,18 @@ it("releases pending microphone access when locked and ignores its late permissi
   await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream));
   expect(stopTrack).toHaveBeenCalled(); expect(transcribeDictation).not.toHaveBeenCalled();
 });
+it("keeps delayed dictation when an unrelated record panel refreshes or closes", async () => {
+  let resolve!: (result: { text: string; processing_seconds: number }) => void;
+  vi.mocked(transcribeDictation).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+  const unrelated = document.createElement("aside");
+  unrelated.setAttribute("data-dictation-context", "patient:other"); document.body.append(unrelated);
+  mount(); await start(); fireEvent.keyUp(window, { code: "F9" });
+  await waitFor(() => expect(transcribeDictation).toHaveBeenCalledTimes(1));
+  const signal = vi.mocked(transcribeDictation).mock.calls[0][1]!;
+  await act(async () => { unrelated.setAttribute("data-dictation-context", "patient:refreshed"); });
+  expect(signal.aborted).toBe(false);
+  await act(async () => { unrelated.remove(); });
+  expect(signal.aborted).toBe(false);
+  await act(async () => resolve({ text: "normal period", processing_seconds: 1 }));
+  expect(screen.getByRole("textbox", { name: "Clinical notes" })).toHaveProperty("value", "Normal. Before selected after");
+});

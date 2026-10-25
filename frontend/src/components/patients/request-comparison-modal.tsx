@@ -66,6 +66,7 @@ export function RequestComparisonModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="request-comparison-title"
+      data-dictation-context={`comparison-request:${patientId}:${selectedBookingId ?? "none"}`}
       onClick={(event) => event.stopPropagation()}
     >
       <section className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl">

@@ -3075,7 +3075,7 @@ export function DoctorReportingBoardPage({ me }: { me: DoctorMe }) {
       />}
       {reportingHoldTarget && (
         <Dialog open onClose={() => !reportingHoldMutation.isPending && setReportingHoldTarget(null)}>
-          <DialogContent maxWidth="520px">
+          <DialogContent maxWidth="520px" data-dictation-context={`reporting-hold:${reportingHoldTarget.appointmentId}:${reportingHoldTarget.patientId}`}>
             <DialogHeader>
               <DialogTitle>{reportingHoldMode === "place" ? "Place on reporting hold" : "Resume reporting?"}</DialogTitle>
               <DialogDescription>

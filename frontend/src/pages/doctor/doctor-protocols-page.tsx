@@ -1552,9 +1552,10 @@ function EmbeddedProtocolingWorkspaceState({ loading, error, onRetry, onClose }:
       <DialogContent
         maxWidth="672px"
         scrollable={false}
+        reserveDictationToolbar
         aria-label="Protocoling workspace"
         data-testid="protocoling-appointment-workspace-shell"
-        className="doctor-protocols-page !m-0 !h-[94vh] !max-h-[94vh] !w-[96vw] max-w-2xl min-w-0 !overflow-hidden !p-0"
+        className="doctor-protocols-page !m-0 !h-[94vh] !max-h-[calc(100%_-_32px)] !w-[96vw] max-w-2xl min-w-0 !overflow-hidden !p-0"
       >
         <header className="flex shrink-0 items-center justify-between border-b px-3 py-2.5 sm:px-4" style={{ borderColor: "var(--border)" }}>
           <h2 className="text-lg font-bold text-foreground">Protocoling workspace</h2>
@@ -2420,7 +2421,7 @@ function ProtocolAssignmentModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/45 p-2 sm:p-4" onClick={() => { if (!saving) requestClose(); }} style={dictation ? { top: "3.5rem" } : undefined} role="presentation" data-testid="protocol-assignment-modal-backdrop">
       <section
         data-dictation-context={`protocol:${appointment.appointmentId}:${appointment.patientId}`}
-        style={dictation ? { maxHeight: "calc(100dvh - 72px)" } : undefined}
+        style={dictation ? { maxHeight: "calc(100% - 16px)" } : undefined}
         className="relative flex h-[94vh] w-[96vw] max-w-[1800px] min-w-0 flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
         role="dialog"
         aria-modal="true"

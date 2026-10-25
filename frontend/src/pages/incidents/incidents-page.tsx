@@ -136,7 +136,7 @@ export default function IncidentsPage() {
       })}
     </section>
 
-    <Dialog open={formOpen} onClose={closeCreate}><DialogContent maxWidth="760px" className="compact-controls"><DialogHeader closeLabel={label("close")}><DialogTitle>{label("new")}</DialogTitle><DialogDescription>{label("createDescription")}</DialogDescription></DialogHeader>
+    <Dialog open={formOpen} onClose={closeCreate}><DialogContent maxWidth="760px" className="compact-controls" data-dictation-context={`incident-patient:${selectedPatient?.id ?? "none"}`}><DialogHeader closeLabel={label("close")}><DialogTitle>{label("new")}</DialogTitle><DialogDescription>{label("createDescription")}</DialogDescription></DialogHeader>
       <form key={formKey} className="space-y-4" onSubmit={(event) => {
         event.preventDefault(); const data = new FormData(event.currentTarget); const localValue = String(data.get("occurredAt") ?? "").trim(); const occurredAt = new Date(localValue);
         if (!localValue || Number.isNaN(occurredAt.getTime())) { setOccurredError(label("occurredAtInvalid")); return; }

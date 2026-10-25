@@ -30,7 +30,7 @@ export function RequestIrReferralModal({ patient, onClose, onCreated }: { patien
 
   return (
     <Dialog open onClose={onClose}>
-      <DialogContent maxWidth="576px" className="!p-0" aria-labelledby="request-ir-title">
+      <DialogContent maxWidth="576px" className="!p-0" aria-labelledby="request-ir-title" data-dictation-context={`ir-referral:${patient.id}`}>
         <DialogHeader className="border-b p-4 !mb-0" closeLabel={t(language, "irReferral.closeCreate")}>
           <DialogTitle id="request-ir-title" className="!text-lg !font-semibold">{t(language, "irReferral.createTitle")}</DialogTitle>
         </DialogHeader>

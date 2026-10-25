@@ -897,7 +897,7 @@ export function CreateAppointmentTab({
       </div>
 
       {/* Main Grid Layout */}
-      <div data-testid="appointment-create-grid" className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
+      <div data-testid="appointment-create-grid" data-dictation-context={`booking-patient:${form.patientId ?? "none"}`} className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
         <div data-testid="appointment-form-region" className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <Card className="h-fit" style={{ padding: "var(--panel-padding)", boxShadow: "var(--shadow-sm)" }}>

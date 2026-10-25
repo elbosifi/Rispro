@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { Dialog, DialogContent } from "./Dialog";
+import { DictationContext } from "@/providers/dictation-context";
 
 afterEach(() => {
   cleanup();
@@ -13,6 +14,16 @@ afterEach(() => {
 beforeEach(() => {
   Object.defineProperty(window, "scrollX", { configurable: true, value: 18 });
   Object.defineProperty(window, "scrollY", { configurable: true, value: 240 });
+});
+
+it.each([false, true])("reserves top-bar space only for an opted-in dictation window (%s)", (reserveDictationToolbar) => {
+  vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+  render(<DictationContext.Provider value={{ busy: false, recording: false, processing: false, toggle: vi.fn(), cancel: vi.fn() }}>
+    <Dialog open onClose={vi.fn()}><DialogContent reserveDictationToolbar={reserveDictationToolbar} aria-label="Window">Content</DialogContent></Dialog>
+  </DictationContext.Provider>);
+  const backdrop = screen.getByRole("dialog", { name: "Window" });
+  expect(backdrop.style.top).toBe(reserveDictationToolbar ? "3.5rem" : "0px");
+  expect((backdrop.lastElementChild as HTMLElement).style.maxHeight).toBe(reserveDictationToolbar ? "calc(100dvh - 88px)" : "calc(100vh - 32px)");
 });
 
 describe("Dialog body scroll lock", () => {

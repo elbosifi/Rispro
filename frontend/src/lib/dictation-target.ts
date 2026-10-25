@@ -38,8 +38,19 @@ export function captureDictationTarget(active: Element | null): DictationTarget 
   if (!(active instanceof HTMLElement)) return null;
   const element = active.closest<HTMLElement>('input, textarea, [contenteditable="true"]');
   if (!element || !allowed(element)) return null;
-  const scopes = Array.from(document.querySelectorAll('[data-dictation-context]')).map((scope) => [scope, scope.getAttribute("data-dictation-context")] as const);
-  const sameScope = () => scopes.every(([scope, value]) => scope.isConnected && scope.getAttribute("data-dictation-context") === value);
+  const route = window.location.href;
+  const contexts = () => {
+    const scopes: HTMLElement[] = [];
+    for (let scope = element.closest<HTMLElement>('[data-dictation-context]'); scope; scope = scope.parentElement?.closest<HTMLElement>('[data-dictation-context]') ?? null) scopes.push(scope);
+    return scopes;
+  };
+  // Only the target's ancestry owns its record identity. Sibling panels can refresh independently.
+  const scopes = contexts().map((scope) => [scope, scope.getAttribute("data-dictation-context")] as const);
+  const sameScope = () => {
+    const current = contexts();
+    return window.location.href === route && current.length === scopes.length
+      && scopes.every(([scope, value], index) => current[index] === scope && scope.getAttribute("data-dictation-context") === value);
+  };
   const valid = () => allowed(element) && sameScope();
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     const field: NativeField = element;
