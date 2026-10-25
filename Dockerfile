@@ -19,6 +19,8 @@ RUN npm ci
 RUN npm run verify:qz-patch
 
 COPY frontend/ .
+# The Gamma Knife frontend shares this dependency-free contract with the backend.
+COPY src/modules/gamma-knife/gamma-knife-types.ts /app/src/modules/gamma-knife/gamma-knife-types.ts
 RUN npm run build && npm run verify:qz-bundle
 
 # ---------------------------------------------------------------------------

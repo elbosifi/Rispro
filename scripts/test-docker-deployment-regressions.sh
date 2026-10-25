@@ -88,6 +88,10 @@ done
 pass 'production, production-orthanc, and restore-validation share the stable runtime base'
 
 grep -q 'RUN npm run build && npm run verify:qz-bundle' Dockerfile || fail 'Frontend builder does not run the production build'
+frontend_builder="$(sed -n '/^FROM node:22-bookworm-slim AS frontend-builder$/,/^FROM debian:bookworm-slim AS dcmtk-builder$/p' Dockerfile)"
+printf '%s\n' "${frontend_builder}" | grep -Fxq 'COPY src/modules/gamma-knife/gamma-knife-types.ts /app/src/modules/gamma-knife/gamma-knife-types.ts' \
+  || fail 'Frontend builder is missing the shared Gamma Knife contract'
+pass 'Frontend builder includes the shared Gamma Knife contract'
 production_frontend_copy_count="$(grep -c 'COPY --from=frontend-builder /app/dist-frontend ./dist-frontend/' Dockerfile)"
 test "${production_frontend_copy_count}" -eq 2 || fail 'Production runtime targets do not both copy frontend-builder output'
 pass 'Production and production-orthanc receive the Docker-built frontend bundle'
