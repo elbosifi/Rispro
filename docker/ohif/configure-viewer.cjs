@@ -207,7 +207,147 @@ function configureLoading(root) {
   fs.writeFileSync(path.join(root, 'extensions/default/src/RisproLoading.tsx'), loadingSource);
 }
 
+const ctPresets = [
+  { id: 'ct-abdomen', description: 'Abdomen', window: '400', level: '60' },
+  { id: 'ct-angio', description: 'CT Angio', window: '600', level: '300' },
+  { id: 'ct-bone', description: 'Bone', window: '1500', level: '300' },
+  { id: 'ct-brain', description: 'Brain', window: '80', level: '40' },
+  { id: 'ct-chest', description: 'Chest', window: '400', level: '40' },
+  { id: 'ct-lung', description: 'Lung', window: '1500', level: '-400' },
+  { id: 'ct-liver', description: 'Liver', window: '150', level: '90' },
+];
+
+// Cornerstone has already decoded/sign-extended these samples. Never reinterpret
+// their storage bits or apply rescale twice. Only the displayed frame is visited.
+function fullDynamicRange(image, instance) {
+  if (!image || image.color || image.numberOfComponents > 1) return;
+  const pixels = image.getPixelData();
+  const scaling = image.preScale?.scalingParameters;
+  const slope = Number(scaling?.rescaleSlope ?? instance.RescaleSlope ?? image.slope ?? 1);
+  const intercept = Number(scaling?.rescaleIntercept ?? instance.RescaleIntercept ?? image.intercept ?? 0);
+  const scaled = image.preScale?.scaled === true;
+  const padding = instance.PixelPaddingValue;
+  const paddingEnd = instance.PixelPaddingRangeLimit ?? padding;
+  const p1 = Number(padding) * (scaled ? slope : 1) + (scaled ? intercept : 0);
+  const p2 = Number(paddingEnd) * (scaled ? slope : 1) + (scaled ? intercept : 0);
+  let lower = Infinity;
+  let upper = -Infinity;
+  for (let i = 0; i < pixels.length; i++) {
+    const value = pixels[i];
+    if (!Number.isFinite(value) || (padding != null && value >= Math.min(p1, p2) && value <= Math.max(p1, p2))) continue;
+    const intensity = scaled ? value : value * slope + intercept;
+    lower = Math.min(lower, intensity);
+    upper = Math.max(upper, intensity);
+  }
+  if (Number.isFinite(lower) && Number.isFinite(upper)) return { lower, upper };
+}
+
+function isWindowingInput(element) {
+  return !!element?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]');
+}
+
+function configureUsability(root) {
+  const replace = (file, anchor, replacement) => {
+    const filename = path.join(root, file);
+    const source = fs.readFileSync(filename, 'utf8').replaceAll('\r\n', '\n');
+    if (source.split(anchor).length !== 2) throw Error('Pinned OHIF usability anchor changed: ' + file);
+    fs.writeFileSync(filename, source.replace(anchor, replacement));
+  };
+  const groups = 'modes/basic/src/initToolGroups.ts';
+  // Scope replacements to these two functions: SR and volume3d stay upstream.
+  for (const [name, next] of [['initDefaultToolGroup', 'initSRToolGroup'], ['initMPRToolGroup', 'initVolume3DToolGroup']]) {
+    const filename = path.join(root, groups);
+    const source = fs.readFileSync(filename, 'utf8').replaceAll('\r\n', '\n');
+    const start = source.indexOf('function ' + name + '(');
+    const end = source.indexOf('function ' + next + '(', start);
+    if (start < 0 || end < 0) throw Error('Pinned OHIF diagnostic tool groups changed');
+    const section = source.slice(start, end);
+    const active = `toolName: toolNames.WindowLevel,
+        bindings: [{ mouseButton: Enums.MouseBindings.Primary }],
+      },
+      {
+        toolName: toolNames.Pan,
+        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],`;
+    const wheel = 'bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],';
+    const passive = '    passive: [\n';
+    for (const anchor of [active, wheel, passive, '      { toolName: toolNames.StackScroll },\n']) {
+      if (section.split(anchor).length !== 2) throw Error('Pinned OHIF diagnostic bindings changed: ' + name);
+    }
+    const updated = section.replace(active, 'toolName: toolNames.WindowLevel,\n        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],')
+      .replace(wheel, 'bindings: [{ mouseButton: Enums.MouseBindings.Primary }, { mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],')
+      .replace('      { toolName: toolNames.StackScroll },\n', '')
+      .replace(passive, passive + '      { toolName: toolNames.Pan },\n');
+    replace(groups, section, updated);
+  }
+  const hotkeys = 'platform/core/src/defaults/hotkeyBindings.ts';
+  const oldKeys = [
+    ['ct-soft-tissue', 0], ['ct-lung', 1], ['ct-bone', 2], ['ct-brain', 3],
+  ].map(([id, index]) => `  {
+    commandName: 'setWindowLevelPreset',
+    commandOptions: { presetName: '${id}', presetIndex: ${index} },
+    label: 'W/L Preset ${index + 1}',
+    keys: ['${index + 1}'],
+  },`).join('\n');
+  const bindings = [
+    { mode: 'original', label: 'Original DICOM window' },
+    { mode: 'dynamic', label: 'Full Dynamic' },
+    ...ctPresets.map((p, presetIndex) => ({ mode: 'preset', presetName: p.id, presetIndex, label: p.description })),
+  ].map(({ label, ...commandOptions }, index) => ({
+    commandName: 'risproWindowing', commandOptions, label, keys: [String(index)],
+  }));
+  replace(hotkeys, oldKeys, bindings.map(b => '  ' + JSON.stringify(b) + ',').join('\n'));
+  const presets = 'extensions/cornerstone/src/components/WindowLevelActionMenu/defaultWindowLevelPresets.ts';
+  const presetSource = fs.readFileSync(path.join(root, presets), 'utf8').replaceAll('\r\n', '\n');
+  const oldCT = presetSource.match(/  CT: \[\n[\s\S]*?\n  \],/g);
+  if (oldCT?.length !== 1 || !oldCT[0].includes("window: '2500', level: '480'")) throw Error('Pinned OHIF CT presets changed');
+  replace(presets, oldCT[0], '  CT: ' + JSON.stringify(ctPresets, null, 2) + ',');
+  const commands = 'extensions/cornerstone/src/commandsModule.ts';
+  replace(commands, '  getEnabledElement,', '  metaData,\n  getEnabledElement,');
+  replace(commands, 'const { add, intersect, subtract, copy }', fullDynamicRange.toString() + '\n' + isWindowingInput.toString() + '\n\nconst { add, intersect, subtract, copy }');
+  replace(commands, '    setWindowLevelPreset: ({ presetName, presetIndex }) => {', `    risproWindowing: ({ mode, presetName, presetIndex }) => {
+      if (isWindowingInput(document.activeElement)) return;
+      const viewportId = viewportGridService.getActiveViewportId();
+      const group = toolGroupService.getToolGroupForViewport(viewportId);
+      if (!['default', 'mpr'].includes(group?.id)) return;
+      const viewport = cornerstoneViewportService.getCornerstoneViewport(viewportId);
+      const imageId = viewport?.getCurrentImageId?.();
+      const instance = imageId ? metaData.get('instance', imageId) : undefined;
+      const modality = instance?.Modality ?? viewport?.getImageData?.()?.metadata?.Modality;
+      if (!['CT', 'MR'].includes(modality)) return;
+      const image = viewport instanceof StackViewport ? viewport.getCornerstoneImage() : undefined;
+      if (image?.color || image?.numberOfComponents > 1 ||
+          (instance?.PhotometricInterpretation && !instance.PhotometricInterpretation.startsWith('MONOCHROME'))) return;
+      if (mode === 'preset') {
+        if (modality === 'CT') {
+          viewport.setProperties({ VOILUTFunction: CoreEnums.VOILUTFunctionType.LINEAR });
+          actions.setWindowLevelPreset({ presetName, presetIndex });
+        }
+        return;
+      }
+      // A reconstructed plane has no decoded stack image: do not scan a volume.
+      if (!image || image.imageId !== imageId) return;
+      if (mode === 'dynamic') {
+        const range = fullDynamicRange(image, instance || {});
+        if (!range) return;
+        viewport.setProperties({ VOILUTFunction: CoreEnums.VOILUTFunctionType.LINEAR });
+        actions.setViewportWindowLevel({ viewportId, ...csUtils.windowLevel.toWindowLevel(range.lower, range.upper) });
+      } else if (mode === 'original') {
+        const voi = metaData.get('voiLutModule', imageId);
+        const windowWidth = Number(voi?.windowWidth?.[0] ?? image.windowWidth);
+        const windowCenter = Number(voi?.windowCenter?.[0] ?? image.windowCenter);
+        const VOILUTFunction = voi?.voiLUTFunction || image.voiLUTFunction || CoreEnums.VOILUTFunctionType.LINEAR;
+        if (!Number.isFinite(windowWidth) || windowWidth <= 0 || !Number.isFinite(windowCenter)) return;
+        viewport.setProperties({ VOILUTFunction,
+          voiRange: csUtils.windowLevel.toLowHighRange(windowWidth, windowCenter, VOILUTFunction) });
+        viewport.render();
+      }
+    },
+    setWindowLevelPreset: ({ presetName, presetIndex }) => {`);
+  replace(commands, '    setWindowLevelPreset: {\n      commandFn:', '    risproWindowing: { commandFn: actions.risproWindowing },\n    setWindowLevelPreset: {\n      commandFn:');
+}
+
 function configureViewer(root) {
+  configureUsability(root);
   configureLoading(root);
   const webpack = path.join(root, '.webpack/webpack.base.js');
   const webpackSource = fs.readFileSync(webpack, 'utf8');
@@ -239,5 +379,5 @@ function configureViewer(root) {
   fs.writeFileSync(hp, source.replace(anchor, anchor + '\n' + diagnosticSeriesRules.map(rule => JSON.stringify(rule) + ',').join('\n')));
 }
 
-module.exports = { configureViewer, configureLoading, trackCachedFrames, isDiagnosticReady, getStudiesForPatientByMRN, diagnosticSeriesRules };
+module.exports = { configureViewer, configureUsability, fullDynamicRange, isWindowingInput, ctPresets, configureLoading, trackCachedFrames, isDiagnosticReady, getStudiesForPatientByMRN, diagnosticSeriesRules };
 if (require.main === module) configureViewer(process.cwd());

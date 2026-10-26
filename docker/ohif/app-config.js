@@ -11,6 +11,14 @@ window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
   showLoadingIndicator: true,
+  whiteLabeling: {
+    createLogoComponentFn: React => React.createElement('div', {
+      style: { display: 'flex', alignItems: 'center', gap: '6px', height: '32px' },
+    }, React.createElement('img', {
+      src: '/ohif/assets/nccb-logo.png', alt: 'NCCB',
+      style: { height: '28px', maxWidth: '64px', objectFit: 'contain' },
+    }), React.createElement('span', { style: { fontSize: '12px', color: 'white' } }, 'NCCB')),
+  },
   // Leave bandwidth available for visible images on slower connections.
   maxNumRequests: {
     interaction: 4,

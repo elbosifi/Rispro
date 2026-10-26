@@ -23,6 +23,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
   && bun add --config=/tmp/bunfig.toml ajv@8.12.0
 
 COPY docker/ohif/app-config.js platform/app/public/config/rispro.js
+COPY frontend/public/assets/nccb-logo.png platform/app/public/assets/nccb-logo.png
 COPY docker/ohif/rispro-reporting extensions/rispro-reporting
 COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
 COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
