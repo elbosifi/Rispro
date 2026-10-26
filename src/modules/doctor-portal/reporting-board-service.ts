@@ -722,7 +722,7 @@ export async function refreshReportingBoardSonicDicomStatuses(actor: Actor, inpu
 }> {
   const { cases } = await getReportingBoardCases(actor, input);
   const visiblePrimaryAppointmentIds = cases
-    .filter((row) => row.caseType === "appointment" && row.appointmentStatus === "completed" && row.requiresReport && !row.manualFinalOverrideId)
+    .filter((row) => row.caseType === "appointment" && row.reportStatusSource !== "rispro" && row.appointmentStatus === "completed" && row.requiresReport && !row.manualFinalOverrideId)
     .map((row) => row.appointmentId);
   const primaryCandidates = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds(visiblePrimaryAppointmentIds);
 
@@ -787,6 +787,7 @@ export async function refreshReportingBoardCaseSonicDicomStatus(actor: Actor, ap
     throw new HttpError(409, "Only completed Reporting Board appointments that require reports can be refreshed.");
   }
   if (row.manualFinalOverrideId) throw new HttpError(409, "This Reporting Board case has an active manual final override.");
+  if (row.reportStatusSource === "rispro") throw new HttpError(409, "Native report status is managed by RISpro reporting.");
 
   const candidates = await selectReportingBoardSonicDicomCacheCandidatesByAppointmentIds([appointmentId]);
   const candidate = candidates[0];

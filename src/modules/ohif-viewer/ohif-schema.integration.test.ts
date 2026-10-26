@@ -9,6 +9,17 @@ const { pool } = await import("../../db/pool.js");
 after(async () => { await pool.end(); });
 
 describe("OHIF schema integration", () => {
+  it("keeps native reporting opt-in with unique appointment ownership and protected history/image tables",async()=>{
+    const column=(await pool.query("select column_default from information_schema.columns where table_schema='public' and table_name='ohif_viewer_settings' and column_name='native_reporting_enabled'")).rows[0];
+    assert.match(column.column_default,/false/);
+    for(const name of ["native_reports","native_report_versions","native_report_key_images"]){
+      assert.equal((await pool.query("select to_regclass($1) is not null present",[name])).rows[0].present,true);
+    }
+    const unique=(await pool.query("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='native_reports'::regclass and contype='u'")).rows;
+    assert.ok(unique.some(row=>row.definition==="UNIQUE (appointment_id)"));
+    const triggers=(await pool.query("select tgname from pg_trigger where tgrelid in ('native_reports'::regclass,'native_report_versions'::regclass,'native_report_key_images'::regclass) and not tgisinternal")).rows;
+    assert.equal(triggers.length,3);
+  });
   it("has all normalized OHIF tables, a singleton settings row, and the hardening migration", async () => {
     const tables = await pool.query<{ table_name: string }>(
       `select table_name from information_schema.tables

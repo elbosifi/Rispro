@@ -2,6 +2,27 @@ import QRCode from "qrcode";
 
 export const SERVER_PRINT_FONT_FAMILY = "Noto Naskh Arabic";
 
+export function buildNativeReportHtml(report: {
+  appointmentId: number; status: string; identity: { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string };
+  sections: Record<string,string>; author: string; finalizer: string | null; finalizedAt: Date | null;
+  keyImages: { id: string; caption: string; provenance: Record<string,unknown> }[];
+  addenda: { text?: string; author?: string; signedAt?: string }[];
+}): string {
+  const e = escapeHtml;
+  const labels: Record<string,string> = { clinicalHistory:"Clinical history",comparison:"Comparison",technique:"Technique",findings:"Findings",impression:"Impression" };
+  return `<!doctype html><html><head><meta charset="utf-8"><title>RISpro report</title><style>
+    @page{size:A4;margin:18mm}body{font:12pt "${SERVER_PRINT_FONT_FAMILY}",Arial,sans-serif;color:#111;background:white;max-width:180mm;margin:24px auto}
+    h1{font-size:18pt}h2{font-size:14pt;break-after:avoid}p{white-space:pre-wrap;overflow-wrap:anywhere}figure{margin:16px 0;break-inside:avoid}img{max-width:100%;max-height:210mm;object-fit:contain}
+    header{border-bottom:1px solid #555}figcaption{white-space:pre-wrap}.draft{color:#a22;font-size:22pt;font-weight:bold}.help{font-size:10pt}@media print{.help{display:none}.draft{position:fixed;top:45%;left:30%;opacity:.15;transform:rotate(-30deg);font-size:60pt;z-index:1;pointer-events:none}}
+    </style></head><body><p class="help">Use your browser Print / Save as PDF command (Ctrl+P).</p>
+    ${report.status!=="final"?'<div class="draft">DRAFT — UNSIGNED</div>':""}<header><h1>Radiology report</h1>
+    <p dir="auto">${e(report.identity.patientName)} · ${e(report.identity.patientIdentifier)}<br>Accession: ${e(report.identity.accession)}<br>${e(report.identity.examination)} · ${e(report.identity.studyDate)}</p></header>
+    ${Object.entries(labels).filter(([k])=>report.sections[k]).map(([k,label])=>`<section><h2>${label}</h2><p dir="auto">${e(report.sections[k])}</p></section>`).join("")}
+    <p>Author: ${e(report.author)}${report.finalizer?`<br>Signed by ${e(report.finalizer)} · ${e(report.finalizedAt)}`:""}</p>
+    ${report.keyImages.map((image,index)=>`<figure><img alt="Report illustration ${index+1}" src="/api/native-reporting/appointments/${report.appointmentId}/images/${e(image.id)}"><figcaption>${index+1}. ${e(image.caption)}<br>${e(image.provenance.sourceStudyDate)} ${image.provenance.prior?"(prior study)":""} · ${e(image.provenance.sourceSeriesDescription)}<br>Rendered report illustration</figcaption></figure>`).join("")}
+    ${report.addenda.map(a=>`<section><h2>Signed addendum</h2><p dir="auto">${e(a.text)}</p><p>${e(a.author)} · ${e(a.signedAt)}</p></section>`).join("")}</body></html>`;
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }

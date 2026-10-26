@@ -47,6 +47,7 @@ ohifViewerRouter.get(
     const authoritative = configuration.settings.accessStrategy === "authoritative_orthanc" ? await readAuthoritativeOrthancSettings() : null;
     res.json({
       enabled: env.ohifEnabled && configuration.settings.enabled,
+      nativeReportingEnabled: configuration.settings.nativeReportingEnabled === true,
       openMode: configuration.settings.openMode,
       configured: authoritative ? Boolean(authoritative.enabled && authoritative.baseUrl) : Boolean(configuration.settings.selectedPacsNodeId),
     });
@@ -108,11 +109,14 @@ ohifDicomWebProxyRouter.get(
       if (!res.writableFinished) controller.abort();
     });
     let response: globalThis.Response;
+    const contextMatch = /^\/context\/([a-f0-9-]{36})(\/.*)$/i.exec(req.url);
     try {
       response = await proxyAuthorizedDicomWebRequest({
         userId: current.sub,
+        appRole: current.role,
+        contextId: contextMatch?.[1],
         launchToken: String(req.cookies?.[env.ohifSessionCookieName] || ""),
-        relativePathWithQuery: req.url,
+        relativePathWithQuery: contextMatch?.[2] ?? req.url,
         headers: { accept: String(req.headers.accept || ""), range: String(req.headers.range || "") },
         signal: controller.signal,
       });

@@ -1,0 +1,5 @@
+.rispro-report{height:100%;overflow:auto;padding:12px;color:#eee;font-size:13px;background:#111d2d;display:flex;flex-direction:column;gap:12px;min-width:240px}
+.rispro-report-identity{position:sticky;top:-12px;background:#111d2d;z-index:2;border-bottom:1px solid #526375;padding:8px 0;overflow-wrap:anywhere}
+.rispro-report label{display:flex;flex-direction:column;gap:5px}.rispro-report textarea{width:100%;resize:vertical;background:#071322;color:#fff;border:1px solid #53677e;border-radius:4px;padding:8px;font:inherit;line-height:1.45}
+.rispro-report textarea:focus{outline:2px solid #60a5fa}.rispro-report textarea[readonly]{background:#172332}.rispro-report-major>span{font-size:16px;font-weight:600}
+.rispro-report-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.rispro-report [role=alert]{background:#512724;padding:10px;white-space:pre-wrap}.rispro-report figure{margin:0;padding:8px;border:1px solid #53677e}.rispro-report figure img{width:100%;height:auto;max-height:280px;object-fit:contain}.rispro-report-text{white-space:pre-wrap;overflow-wrap:anywhere}

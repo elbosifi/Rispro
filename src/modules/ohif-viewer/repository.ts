@@ -15,6 +15,7 @@ function nullableText(value: unknown): string | null {
 function settingsRow(row: Row): OhifViewerSettings {
   return {
     enabled: row.enabled === true,
+    nativeReportingEnabled: row.native_reporting_enabled === true,
     ohifPublicBaseUrl: String(row.ohif_public_base_url || "/ohif"),
     selectedPacsNodeId: row.selected_pacs_node_id == null ? null : Number(row.selected_pacs_node_id),
     accessStrategy: String(row.access_strategy || "native_dicomweb") as OhifViewerSettings["accessStrategy"],
@@ -87,12 +88,12 @@ export async function saveOhifViewerConfiguration(input: {
       `update ohif_viewer_settings set enabled=$1, ohif_public_base_url=$2, selected_pacs_node_id=$3,
        access_strategy=$4, orthanc_gateway_enabled=$5, orthanc_modality_key=$6, open_mode=$7,
        allow_prior_studies=$8, max_prior_studies=$9, launch_token_ttl_seconds=$10,
-       cache_retention_hours=$11, retrieval_timeout_seconds=$12, updated_by_user_id=$13, updated_at=now()
+       cache_retention_hours=$11, retrieval_timeout_seconds=$12, updated_by_user_id=$13, native_reporting_enabled=$14, updated_at=now()
        where singleton_key=true`,
       [settings.enabled, settings.ohifPublicBaseUrl, settings.selectedPacsNodeId, settings.accessStrategy,
        settings.orthancGatewayEnabled, settings.orthancModalityKey, settings.openMode, settings.allowPriorStudies,
        settings.maxPriorStudies, settings.launchTokenTtlSeconds, settings.cacheRetentionHours,
-       settings.retrievalTimeoutSeconds, input.userId]
+       settings.retrievalTimeoutSeconds, input.userId, settings.nativeReportingEnabled === true]
     );
     if (settings.selectedPacsNodeId && input.endpoint) {
       const endpoint = input.endpoint;
@@ -194,18 +195,21 @@ export async function upsertStudyResolution(input: {
 export async function createViewerLaunchSession(input: {
   userId: UserId; appointmentId: number; sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy;
   currentStudyUid: string; permittedStudyUids: string[]; tokenHash: string; expiresAt: Date;
+  patientId?: number; studyDate?: string;
 }): Promise<number> {
   const result = await pool.query<{ id: string }>(
     `insert into viewer_launch_sessions
-      (user_id,case_id,appointment_id,source_pacs_node_id,access_strategy,study_instance_uid,permitted_study_uids,token_hash,expires_at)
-     values ($1,$2,$2,$3,$4,$5,$6::jsonb,$7,$8) returning id`,
+      (user_id,case_id,appointment_id,source_pacs_node_id,access_strategy,study_instance_uid,permitted_study_uids,token_hash,expires_at,reporting_patient_id,primary_study_date)
+     values ($1,$2,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10) returning id`,
     [input.userId, input.appointmentId, input.sourcePacsNodeId, input.accessStrategy, input.currentStudyUid,
-     JSON.stringify(input.permittedStudyUids), input.tokenHash, input.expiresAt.toISOString()]
+     JSON.stringify(input.permittedStudyUids), input.tokenHash, input.expiresAt.toISOString(), input.patientId ?? null, input.studyDate ?? null]
   );
   return Number(result.rows[0]?.id);
 }
 
 export interface ViewerLaunchSessionRecord {
+  reportContextId: string;
+  patientId: number | null; studyDate: string | null;
   id: number; userId: number; appointmentId: number; studyInstanceUid: string; permittedStudyUids: string[];
   sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy; expiresAt: string; usedAt: string | null; revokedAt: string | null;
 }
@@ -213,6 +217,8 @@ export interface ViewerLaunchSessionRecord {
 function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
   return {
     id: Number(row.id), userId: Number(row.user_id), appointmentId: Number(row.appointment_id),
+    reportContextId: String(row.report_context_id || ""),
+    patientId: row.reporting_patient_id == null ? null : Number(row.reporting_patient_id), studyDate: nullableText(row.primary_study_date),
     studyInstanceUid: String(row.study_instance_uid),
     permittedStudyUids: Array.isArray(row.permitted_study_uids) ? row.permitted_study_uids.map(String) : [],
     sourcePacsNodeId: row.source_pacs_node_id == null ? null : Number(row.source_pacs_node_id),
@@ -241,6 +247,15 @@ export async function findAuthorizedViewerSession(viewerSessionTokenHash: string
     `select * from viewer_launch_sessions where viewer_session_token_hash=$1 and user_id=$2 and used_at is not null
      and revoked_at is null and expires_at>now() limit 1`, [viewerSessionTokenHash, userId]
   );
+  return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
+}
+
+// This per-tab UUID is a selector, never a credential: a live authenticated RISpro
+// user and the original used/non-revoked session are required on every request.
+export async function findViewerContext(contextId: string, userId: UserId, executor: DbExecutor = pool): Promise<ViewerLaunchSessionRecord | null> {
+  const result = await executor.query<Row>(`select * from viewer_launch_sessions
+    where report_context_id=$1::uuid and user_id=$2 and used_at is not null
+      and revoked_at is null and expires_at>now()`, [contextId, userId]);
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
 

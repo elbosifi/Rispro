@@ -19,6 +19,7 @@ import {
   createViewerLaunchSession,
   enqueueRetrievalJob,
   findAuthorizedViewerSession,
+  findViewerContext,
   findPacsWebEndpoint,
   findRetrievalJob,
   findStudyResolution,
@@ -163,6 +164,7 @@ export async function putOhifAdminConfiguration(value: unknown, userId: UserId) 
   const saved = await saveOhifViewerConfiguration({
     settings: {
       enabled,
+      nativeReportingEnabled: bool(settingsInput.nativeReportingEnabled, false),
       ohifPublicBaseUrl: normalizeViewerBasePath(settingsInput.ohifPublicBaseUrl, env.ohifPublicBaseUrl),
       selectedPacsNodeId,
       accessStrategy: accessStrategy as OhifAccessStrategy,
@@ -293,6 +295,7 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
     const { token, tokenHash } = createLaunchToken();
     const expiresAt = new Date(Date.now() + configuration.settings.launchTokenTtlSeconds * 1000);
     await createViewerLaunchSession({
+      patientId: row.patientId, studyDate: currentStudy.studyDate,
       userId: actor.userId, appointmentId, sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
       accessStrategy: configuration.settings.accessStrategy, currentStudyUid: currentStudy.studyInstanceUid,
       permittedStudyUids, tokenHash, expiresAt,
@@ -345,15 +348,22 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   const configuration = await readOhifViewerConfiguration();
   const basePath = normalizeViewerBasePath(configuration.settings.ohifPublicBaseUrl, env.ohifPublicBaseUrl);
   const studies = session.permittedStudyUids.map(encodeURIComponent).join(",");
-  return `${basePath}/viewer?StudyInstanceUIDs=${studies}`;
+  return `${basePath}/viewer?StudyInstanceUIDs=${studies}&risproContext=${session.reportContextId}`;
 }
 
 export async function proxyAuthorizedDicomWebRequest(input: {
-  userId: UserId; launchToken: string; relativePathWithQuery: string; headers: Record<string, string>; signal?: AbortSignal;
+  userId: UserId; launchToken: string; contextId?: string; appRole?: Actor["appRole"]; relativePathWithQuery: string; headers: Record<string, string>; signal?: AbortSignal;
 }): Promise<globalThis.Response> {
-  if (!input.launchToken) throw new HttpError(401, "Viewer session is required.");
-  const session = await findAuthorizedViewerSession(hashLaunchToken(input.launchToken), input.userId);
+  if (!input.launchToken && !input.contextId) throw new HttpError(401, "Viewer session is required.");
+  const session = input.contextId
+    ? await findViewerContext(input.contextId, input.userId)
+    : await findAuthorizedViewerSession(hashLaunchToken(input.launchToken), input.userId);
   if (!session) throw new HttpError(401, "Viewer session is invalid or expired.");
+  if (input.contextId) {
+    const appRole = input.appRole ?? (await pool.query<{ role: Actor["appRole"] }>("select role from users where id=$1 and is_active=true", [input.userId])).rows[0]?.role;
+    if (!appRole) throw new HttpError(403, "Viewer access was revoked.");
+    await getAuthorizedReportingBoardAppointmentRead({ userId: input.userId, appRole }, session.appointmentId);
+  }
   const requested = requestedStudyUids(input.relativePathWithQuery);
   if (requested.length === 0 || requested.some((uid) => !isValidDicomUid(uid) || !session.permittedStudyUids.includes(uid))) {
     await logAuditEntry({ entityType: "ohif_dicomweb", entityId: session.appointmentId, actionType: "viewer_proxy_denied", newValues: { status: "rejected", reason: "study_not_permitted" }, changedByUserId: input.userId });

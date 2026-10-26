@@ -53,6 +53,7 @@ export interface PacsWebEndpoint {
 
 export interface OhifViewerSettings {
   enabled: boolean;
+  nativeReportingEnabled?: boolean;
   ohifPublicBaseUrl: string;
   selectedPacsNodeId: number | null;
   accessStrategy: OhifAccessStrategy;

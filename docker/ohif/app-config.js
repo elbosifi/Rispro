@@ -1,3 +1,7 @@
+// A context UUID selects this tab's authenticated launch; it is not a bearer token.
+const risproContext = new URLSearchParams(window.location.search).get('risproContext');
+const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
+  ? '/ohif-dicomweb/context/' + risproContext : '/ohif-dicomweb';
 window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
@@ -16,9 +20,9 @@ window.config = {
       configuration: {
         friendlyName: 'RISpro authorized imaging source',
         name: 'RISpro',
-        qidoRoot: '/ohif-dicomweb',
-        wadoRoot: '/ohif-dicomweb',
-        wadoUriRoot: '/ohif-dicomweb',
+        qidoRoot: risproDicomWebRoot,
+        wadoRoot: risproDicomWebRoot,
+        wadoUriRoot: risproDicomWebRoot,
         qidoSupportsIncludeField: true,
         supportsReject: false,
         imageRendering: 'wadors',

@@ -61,6 +61,7 @@ export function PersonalReportingViewerActions({
     && Boolean(accessionNumber)
     && Boolean(ohifAvailability?.enabled && ohifAvailability.configured);
   const showSonicDicom = authorized && row.caseType === "appointment" && Boolean(accessionNumber);
+  const showNativeReport = authorized && row.caseType === "appointment" && row.reportStatusSource === "rispro";
   const showRadiant = authorized && !isMobile && isWindowsWorkstation() && Boolean(radiantStudyUrl);
   const isResolving = viewerState === "resolving" || viewerState === "retrieving";
 
@@ -125,6 +126,7 @@ export function PersonalReportingViewerActions({
           {actionText(isMobile, "SonicDICOM")}
         </a>
       ) : null}
+      {showNativeReport && <a href={`/reporting/native/${row.appointmentId}`} target="_blank" rel="noopener noreferrer" className={actionClasses(isMobile)}>Open Report</a>}
       {showOhif ? (
         <Button
           type="button"

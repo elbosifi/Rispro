@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildAccessionLabelHtml, buildIrSpecimenLabelHtml, buildPrinterTestHtml, SERVER_PRINT_FONT_FAMILY } from "./generated-print-html-service.js";
+import { buildAccessionLabelHtml, buildIrSpecimenLabelHtml, buildNativeReportHtml, buildPrinterTestHtml, SERVER_PRINT_FONT_FAMILY } from "./generated-print-html-service.js";
 
 describe("server-owned generated print HTML", () => {
+  it("prints saved narrative text, ordered protected images and signed addenda with escaped content",()=>{
+    const report={appointmentId:42,status:"draft",identity:{patientName:"SYNTHETIC <patient>",patientIdentifier:"TEST-42",accession:"V2-000042",examination:"Synthetic CT",studyDate:"2026-10-26"},sections:{findings:"<script>not markup</script>",impression:"Synthetic impression"},author:"Synthetic author",finalizer:null,finalizedAt:null,keyImages:[{id:"image-b",caption:"Second & chosen first",provenance:{sourceStudyDate:"20261001",prior:true}},{id:"image-a",caption:"Current",provenance:{sourceStudyDate:"20261026"}}],addenda:[{text:"Append only",author:"Signer",signedAt:"2026-10-26T10:00:00Z"}]};
+    const html=buildNativeReportHtml(report);
+    assert.match(html,/DRAFT/);assert.match(html,/&lt;script&gt;not markup&lt;\/script&gt;/);assert.doesNotMatch(html,/<script>/);
+    assert.ok(html.indexOf('/images/image-b')<html.indexOf('/images/image-a'));assert.match(html,/prior study/);assert.match(html,/Append only/);assert.match(html,/object-fit:contain/);
+    assert.doesNotMatch(buildNativeReportHtml({...report,status:"final"}),/<div class="draft">/);
+  });
   it("builds an exact-size escaped Arabic label with accession QR content", async () => {
     const html = await buildAccessionLabelHtml({ patientName: "محمد <أحمد>", accessionNumber: "ACC-0008", modality: "CT", appointmentDate: "2026-08-07", mrn: "MRN-8" }, 50, 30);
     assert.match(html, /size: 50mm 30mm/);

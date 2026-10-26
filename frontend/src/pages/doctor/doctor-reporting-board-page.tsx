@@ -935,6 +935,7 @@ function RowActionMenu({
 
   const menuContent = (
     <>
+      {row.caseType === "appointment" && row.reportStatusSource === "rispro" && <a role="menuitem" href={`/reporting/native/${row.appointmentId}`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">Open Report</a>}
       {ohifAvailability?.enabled && row.caseType === "appointment" && (
         <button type="button" role="menuitem" disabled={viewerState === "resolving" || viewerState === "retrieving"} onClick={() => void openImages()} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:cursor-wait disabled:opacity-60">
           {viewerState === "resolving" ? "Resolving images…" : viewerState === "retrieving" ? "Retrieving study…" : "Open Images"}
@@ -959,7 +960,7 @@ function RowActionMenu({
           Open patient list in SonicDICOM
         </button>
       )}
-      {(row.caseType === "appointment" || (row.caseType === "comparison" && row.comparisonRequestId !== null)) && (
+      {((row.caseType === "appointment" && row.reportStatusSource !== "rispro") || (row.caseType === "comparison" && row.comparisonRequestId !== null)) && (
         <button type="button" role="menuitem" disabled={refreshingReportStatus} onClick={() => { setOpen(false); void onRefreshReportStatus(row); }} className="mt-1 block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-foreground hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">
           {refreshingReportStatus ? "Refreshing report status…" : "Refresh report status"}
         </button>

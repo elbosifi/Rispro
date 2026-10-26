@@ -667,6 +667,7 @@ export interface ReportingBoardCaseRow {
 
 export interface OhifViewerAvailability {
   enabled: boolean;
+  nativeReportingEnabled?: boolean;
   configured: boolean;
   openMode: "new_tab" | "same_tab";
 }

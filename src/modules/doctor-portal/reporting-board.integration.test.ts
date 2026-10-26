@@ -633,12 +633,14 @@ async function createDoctorPortalTestApp() {
   const { createDoctorPortalRouter } = await import("./index.js");
   const { reportingBoardPublicRouter } = await import("./reporting-board-public-routes.js");
   const { ohifDicomWebProxyRouter } = await import("../ohif-viewer/routes.js");
+  const { nativeReportingRouter } = await import("../reporting/reporting-routes.js");
   const { env } = await import("../../config/env.js");
   const appInstance = express();
   appInstance.set("trust proxy", 1);
   appInstance.use(express.json({ limit: "10mb" }));
   appInstance.use(cookieParser());
   appInstance.use("/api/reporting", reportingBoardPublicRouter);
+  appInstance.use("/api/native-reporting", nativeReportingRouter);
   appInstance.use("/api/doctor", createDoctorPortalRouter());
   appInstance.use(env.ohifDicomWebProxyPath, ohifDicomWebProxyRouter);
   appInstance.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
@@ -855,6 +857,238 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
 
   beforeEach(() => {
     installDefaultSonicDicomReadersForTest();
+  });
+
+  it("native reporting enforces case context, permissions, concurrency, signatures and worklist authority", async (t) => {
+    guard();
+    const native = await import("../reporting/reporting-service.js");
+    const viewer = await import("../ohif-viewer/repository.js");
+    const { createLaunchToken } = await import("../ohif-viewer/validation.js");
+    const { EMPTY_SECTIONS } = await import("../reporting/reporting-validation.js");
+    const old = (await pool.query("select * from ohif_viewer_settings where singleton_key=true")).rows[0];
+    const createdIds: number[] = [];
+    t.after(async () => {
+      // Disposable-test-only cleanup bypasses retention triggers for these exact synthetic cases.
+      const db = await pool.connect();
+      try {
+        await db.query("begin"); await db.query("set local session_replication_role=replica");
+        await db.query("delete from native_report_versions where report_id in (select id from native_reports where appointment_id=any($1::bigint[]))", [createdIds]);
+        await db.query("delete from native_report_key_images where report_id in (select id from native_reports where appointment_id=any($1::bigint[]))", [createdIds]);
+        await db.query("delete from native_reports where appointment_id=any($1::bigint[])",[createdIds]);
+        await db.query("commit");
+      } finally {db.release();}
+      await pool.query("update ohif_viewer_settings set enabled=$1,native_reporting_enabled=$2,access_strategy=$3,selected_pacs_node_id=$4 where singleton_key=true",[old.enabled,old.native_reporting_enabled,old.access_strategy,old.selected_pacs_node_id]);
+    });
+    await pool.query("update ohif_viewer_settings set enabled=true,native_reporting_enabled=true,access_strategy='authoritative_orthanc',selected_pacs_node_id=null where singleton_key=true");
+    const actor = {userId:doctor.id,appRole:"doctor" as const};
+    async function fixture(owner = doctor, mr = false) {
+      const appointmentId = await createBooking({modalityId:mr?mrModalityId:ctModalityId,examTypeId:mr?mrExamTypeId:ctExamTypeId,date:addDays(1)});
+      createdIds.push(appointmentId);
+      await pool.query("delete from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1",[appointmentId]);
+      await assignDirectly(appointmentId,owner.doctorId);
+      const row = (await pool.query("select b.patient_id,p.identifier_value from appointments_v2.bookings b join patients p on p.id=b.patient_id where b.id=$1",[appointmentId])).rows[0];
+      const study = "1.2.826.0.1.3680043.10."+appointmentId;
+      await viewer.upsertStudyResolution({appointmentId,accessionNumber:`V2-${String(appointmentId).padStart(6,"0")}`,patientIdValue:row.identifier_value,
+        study:{patientId:row.identifier_value,patientName:"SYNTHETIC",accessionNumber:`V2-${String(appointmentId).padStart(6,"0")}`,modality:mr?"MR":"CT",studyDescription:"SYNTHETIC",studyDate:addDays(1),studyInstanceUid:study},sourcePacsNodeId:null,resolutionMethod:"exact_accession",diagnostic:{synthetic:true}});
+      const token=createLaunchToken();
+      const sessionId=await viewer.createViewerLaunchSession({userId:owner.id,appointmentId,patientId:Number(row.patient_id),studyDate:addDays(1),sourcePacsNodeId:null,accessStrategy:"authoritative_orthanc",currentStudyUid:study,permittedStudyUids:[study,study+".1"],tokenHash:token.tokenHash,expiresAt:new Date(Date.now()+60000)});
+      const session=await viewer.consumeViewerLaunchToken(token.tokenHash,owner.id,"synthetic-session-"+sessionId,new Date(Date.now()+3600000));
+      return {appointmentId,contextId:session!.reportContextId,study,sessionId};
+    }
+    await withSonicDicomConfig({sonicDicomReportsEnabled:false},async()=>{
+      const first=await fixture(),second=await fixture();
+      const context=await native.resolveReportContext(actor,first.contextId);
+      assert.equal(context.report,null);assert.equal(context.primaryStudyUid,first.study);
+      assert.equal((await pool.query("select count(*)::int n from native_reports where appointment_id=any($1::bigint[])",[createdIds])).rows[0].n,0);
+      await t.test("wrong-user and cross-tab mutations are rejected without taking over identity",async()=>{
+        await assert.rejects(()=>native.resolveReportContext({userId:otherDoctor.id,appRole:"doctor"},first.contextId),/expired|revoked|different case/);
+        await assert.rejects(()=>native.createReport(actor,second.contextId,first.appointmentId),/different case/);
+        assert.equal((await native.resolveReportContext(actor,second.contextId)).appointmentId,second.appointmentId);
+      });
+      await t.test("external drafts and manual final overrides retain report ownership",async()=>{
+        const external=await fixture();
+        await seedSonicDicomCache(external.appointmentId,"draft");
+        await assert.rejects(()=>native.createReport(actor,external.contextId,external.appointmentId),/external reporting ownership|manual final override/);
+        assert.equal(await native.getReport(actor,external.appointmentId),null);
+        await seedSonicDicomCache(external.appointmentId,"unavailable");
+        await assert.rejects(()=>native.createReport(actor,external.contextId,external.appointmentId),/unverifiable legacy status/);
+        const manual=await fixture(supervisor);
+        await pool.query("insert into doctor_portal.reporting_board_manual_final_overrides(appointment_id,reason,created_by_user_id,created_by_doctor_id) values($1,'Synthetic existing manual final',$2,$3)",[manual.appointmentId,supervisor.id,supervisor.doctorId]);
+        await assert.rejects(()=>native.createReport({userId:supervisor.id,appRole:"supervisor"},manual.contextId,manual.appointmentId),/external reporting ownership|manual final override/);
+      });
+      await t.test("explicit concurrent creation is unique and reopening returns the same report",async()=>{
+        const results=await Promise.all([native.createReport(actor,first.contextId,first.appointmentId),native.createReport(actor,first.contextId,first.appointmentId)]);
+        assert.equal(results[0].id,results[1].id);assert.equal((await native.getReport(actor,first.appointmentId))!.id,results[0].id);
+      });
+      await t.test("case read access alone grants neither native editing nor signing",async()=>{
+        const manager={userId:supervisor.id,appRole:"supervisor" as const};
+        await pool.query("update doctor_portal.doctor_modality_permissions set can_report=false where doctor_id=$1 and modality_id=$2",[supervisor.doctorId,ctModalityId]);
+        try{
+          assert.ok(await native.getReport(manager,first.appointmentId));
+          const readOnly=await fixture(supervisor),resolved=await native.resolveReportContext(manager,readOnly.contextId);
+          assert.equal(resolved.canEdit,false);assert.equal(resolved.canFinalize,false);
+          await assert.rejects(()=>native.createReport(manager,readOnly.contextId,readOnly.appointmentId),/reporting permission/);
+        }finally{await pool.query("update doctor_portal.doctor_modality_permissions set can_report=true where doctor_id=$1 and modality_id=$2",[supervisor.doctorId,ctModalityId]);}
+      });
+      await t.test("expired login and revoked accounts cannot read native reports",async()=>{
+        const {env}=await import("../../config/env.js"),jwt=(await import("jsonwebtoken")).default;
+        const expired=env.cookieName+"="+jwt.sign({sub:doctor.id,role:"doctor"},env.jwtSecret,{expiresIn:-1});
+        assert.equal((await rawApi(expired,`/api/native-reporting/appointments/${first.appointmentId}`)).status,401);
+        await pool.query("update users set is_active=false where id=$1",[doctor.id]);
+        try{assert.equal((await rawApi(doctor.cookie,`/api/native-reporting/appointments/${first.appointmentId}`)).status,401);}
+        finally{await pool.query("update users set is_active=true where id=$1",[doctor.id]);}
+      });
+      const text={...EMPTY_SECTIONS,findings:"Synthetic focal observation.\nPasted text retained.",impression:"Synthetic impression."};
+      await t.test("only one stale editor wins; no-op saves create no extra versions",async()=>{
+        const results=await Promise.allSettled([native.saveDraft(actor,first.contextId,first.appointmentId,{expectedRevision:1,sections:text}),native.saveDraft(actor,first.contextId,first.appointmentId,{expectedRevision:1,sections:{...text,findings:"Other editor"}})]);
+        assert.equal(results.filter(r=>r.status==="fulfilled").length,1);assert.equal(results.filter(r=>r.status==="rejected").length,1);
+        const saved=(await native.getReport(actor,first.appointmentId))!;
+        await native.saveDraft(actor,first.contextId,first.appointmentId,{expectedRevision:saved.revision,sections:saved.sections});
+        assert.equal((await native.getReportHistory(actor,first.appointmentId)).length,2);
+      });
+      await t.test("native draft status is selected before filtering/counting and Sonic sync cannot change it",async()=>{
+        await sonicDicomCacheService.persistReportingBoardSonicDicomCacheResult({bookingId:first.appointmentId,accessionNumber:"synthetic",studyInstanceUid:first.study,requiresReport:true,status:"completed"},{state:"final",source:"sonicdicom",canViewReport:true,reportFinalAt:new Date().toISOString()});
+        const rows=await reportingBoardService.getReportingBoardCases({userId:supervisor.id,appRole:"supervisor"},{appointmentId:first.appointmentId,reportStatus:"draft"});
+        assert.equal(rows.cases.length,1);assert.equal(rows.cases[0].reportStatusSource,"rispro");
+        const stats=await reportingBoardService.getReportingBoardStats({userId:supervisor.id,appRole:"supervisor"},{appointmentId:first.appointmentId,reportStatus:"draft"});
+        assert.equal(stats.summary.total,1);
+      });
+      await t.test("key images persist protected PNGs with prior provenance, retry safely and freeze with the ordered signature",async()=>{
+        const sharp=(await import("sharp")).default;
+        const fs=await import("node:fs/promises");
+        const path=await import("node:path");
+        const {env}=await import("../../config/env.js");
+        const {resolveStoredPath}=await import("../../services/document-storage-path.js");
+        const oldUploads=env.uploadsDir;
+        const uploadDir=await fs.mkdtemp(path.join(process.cwd(),"storage","native-report-test-"));
+        const oldStorage=(await pool.query("select * from system_settings where category='documents_and_uploads'")).rows;
+        const oldArchive=(await pool.query("select * from system_settings where category='authoritative_orthanc'")).rows;
+        const patient=(await pool.query("select p.identifier_value from patients p join appointments_v2.bookings b on b.patient_id=p.id where b.id=$1",[first.appointmentId])).rows[0].identifier_value;
+        let holdMetadata: Promise<void> | null=null, metadataEntered: (()=>void) | null=null;
+        const archive=createServer(async(req,res)=>{
+          if(holdMetadata){metadataEntered?.();await holdMetadata;}
+          const uid=req.url?.includes(first.study+".1/")?first.study+".1":first.study;
+          res.setHeader("Content-Type","application/dicom+json");
+          res.end(JSON.stringify([{"0020000D":{Value:[uid]},"0020000E":{Value:[uid+".2"]},"00080018":{Value:[uid+".2.1"]},"00100020":{Value:[patient]},"00080020":{Value:["20261001"]},"0008103E":{Value:["SYNTHETIC KEY IMAGE"]},"00280008":{Value:[1]}}]));
+        });
+        await new Promise<void>(resolve=>archive.listen(0,"127.0.0.1",resolve));
+        const address=archive.address() as {port:number};
+        env.uploadsDir=uploadDir;
+        t.after(async()=>{
+          env.uploadsDir=oldUploads;
+          await pool.query("delete from system_settings where category='documents_and_uploads'");
+          for(const row of oldStorage)await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values($1,$2,$3,$4)",[row.category,row.setting_key,row.setting_value,row.updated_by_user_id]);
+          await fs.rm(uploadDir,{recursive:true,force:true});
+        });
+        try {
+          for(const [key,value] of Object.entries({storage_path:"",storage_fallback_enabled:"true"}))await pool.query("insert into system_settings(category,setting_key,setting_value) values('documents_and_uploads',$1,$2) on conflict(category,setting_key) do update set setting_value=excluded.setting_value",[key,JSON.stringify({value})]);
+          for(const [key,value] of Object.entries({enabled:"enabled",base_url:`http://127.0.0.1:${address.port}`,username:"",password:"",verify_tls:"true",timeout_seconds:"5"}))await pool.query("insert into system_settings(category,setting_key,setting_value) values('authoritative_orthanc',$1,$2) on conflict(category,setting_key) do update set setting_value=excluded.setting_value",[key,JSON.stringify({value})]);
+          const pixels=Buffer.alloc(96*64*3);for(let i=0;i<pixels.length;i++)pixels[i]=i%255;
+          const png=await sharp(pixels,{raw:{width:96,height:64,channels:3}}).png().toBuffer();
+          const base={frameOfReferenceUid:"1.2.30",viewportType:"stack",display:{invert:true,rotation:90,voiRange:{lower:0,upper:100}},camera:{viewPlaneNormal:[0,0,1],viewUp:[0,-1,0],position:[0,0,10],focalPoint:[0,0,0]},slabThickness:null,blendMode:null};
+          const p=(study:string)=>({...base,studyInstanceUid:study,seriesInstanceUid:study+".2",sopInstanceUid:study+".2.1",frameNumber:1});
+          let report=(await native.getReport(actor,first.appointmentId))!;
+          const upload={requestId:randomUUID(),expectedRevision:report.revision,provenance:p(first.study)};
+          await native.uploadKeyImage(actor,first.contextId,first.appointmentId,upload,png);
+          await native.uploadKeyImage(actor,first.contextId,first.appointmentId,upload,png);
+          report=(await native.getReport(actor,first.appointmentId))!;assert.equal(report.keyImages.length,1);
+          await native.uploadKeyImage(actor,first.contextId,first.appointmentId,{requestId:randomUUID(),expectedRevision:report.revision,provenance:p(first.study+".1")},png);
+          report=(await native.getReport(actor,first.appointmentId))!;assert.equal(report.keyImages.length,2);assert.equal(report.keyImages[1].provenance.prior,true);
+          assert.equal((await native.resolveReportContext(actor,first.contextId)).primaryStudyUid,first.study);
+          const image=await rawApi(doctor.cookie,`/api/native-reporting/appointments/${first.appointmentId}/images/${upload.requestId}`);
+          assert.equal(image.status,200);assert.deepEqual(Buffer.from(await image.arrayBuffer()),png);
+          assert.equal((await rawApi(otherDoctor.cookie,`/api/native-reporting/appointments/${first.appointmentId}/images/${upload.requestId}`)).status,403);
+          assert.equal((await rawApi("",`/api/native-reporting/appointments/${first.appointmentId}/images/${upload.requestId}`)).status,401);
+          await assert.rejects(()=>native.uploadKeyImage(actor,first.contextId,first.appointmentId,{requestId:randomUUID(),expectedRevision:report.revision,provenance:{...p(first.study),frameNumber:2}},png),/does not exist/);
+          await native.updateKeyImages(actor,first.contextId,first.appointmentId,{expectedRevision:report.revision,images:[{id:report.keyImages[1].id,caption:"Prior illustration"},{id:upload.requestId,caption:"Current illustration"}]});
+          report=(await native.getReport(actor,first.appointmentId))!;assert.equal(report.keyImages[0].caption,"Prior illustration");
+          await native.updateKeyImages(actor,first.contextId,first.appointmentId,{expectedRevision:report.revision,images:[{id:upload.requestId,caption:"Current illustration"}]});
+          const stored=(await pool.query("select * from native_report_key_images where id=$1",[upload.requestId])).rows[0];
+          assert.deepEqual(await fs.readFile(resolveStoredPath(stored.stored_path)),png);
+          const removed=(await pool.query("select * from native_report_key_images where report_id=$1 and removed=true",[report.id])).rows[0];
+          assert.deepEqual(await fs.readFile(resolveStoredPath(removed.stored_path)),png);
+          report=(await native.getReport(actor,first.appointmentId))!;
+          let releaseMetadata!: ()=>void;
+          holdMetadata=new Promise<void>(resolve=>{releaseMetadata=resolve;});
+          const entered=new Promise<void>(resolve=>{metadataEntered=resolve;});
+          const pendingUpload=native.uploadKeyImage(actor,first.contextId,first.appointmentId,{requestId:randomUUID(),expectedRevision:report.revision,provenance:p(first.study)},png);
+          await entered;
+          const pendingSign=native.finalizeReport(actor,first.contextId,first.appointmentId,{expectedRevision:report.revision,confirmed:true,requestId:randomUUID()});
+          releaseMetadata();await pendingUpload;await assert.rejects(()=>pendingSign,/changed in another editor/);holdMetadata=null;
+          assert.equal((await native.getReport(actor,first.appointmentId))!.status,"draft");
+          const {resolveBackupV3StorageRoots}=await import("../../services/backup-v3-storage-roots.js");
+          const {collectBackupV3StorageFiles}=await import("../../services/backup-v3-file-collector.js");
+          const {buildBackupV3Manifest,DEFAULT_BACKUP_V3_ARCHIVE_LIMITS}=await import("../../services/backup-v3-manifest.js");
+          const {buildBackupV3DatabaseMetadata}=await import("../../services/backup-v3-database-metadata.js");
+          const {restoreBackupV3AppOwnedStorageOnly}=await import("../../services/backup-v3-storage-restore.js");
+          const staging=await fs.mkdtemp(path.join(process.cwd(),".tmp","native-image-restore-"));
+          try{
+            const root=resolveBackupV3StorageRoots({uploadsDir:uploadDir}).find(r=>r.id==="uploads")!;
+            assert.equal(root.absolutePath,uploadDir);
+            const files=await collectBackupV3StorageFiles([root],DEFAULT_BACKUP_V3_ARCHIVE_LIMITS,staging);
+            assert.equal(files.length,3);
+            const db=await pool.connect();let metadata;
+            try{metadata=await buildBackupV3DatabaseMetadata(db);}finally{db.release();}
+            for(const name of ["native_reports","native_report_versions","native_report_key_images"])assert.ok(metadata.tables.some(table=>table.schema==="public" && table.name===name && table.rowCount>0));
+            const manifest=buildBackupV3Manifest({appName:"rispro-reception",packageVersion:null,gitCommit:null,createdAt:new Date().toISOString(),initiatedByUserId:null,database:metadata,storageRoots:[root],files,envVariableNames:[]});
+            await fs.writeFile(resolveStoredPath(stored.stored_path),"deliberately damaged synthetic test file");
+            await restoreBackupV3AppOwnedStorageOnly({manifest,stagingDir:staging,currentRoots:[root],safetyBackupsCreated:{timestamp:new Date().toISOString(),initiatingUserId:null,uploadedArchiveName:"synthetic",uploadedArchiveSha256:"synthetic",dbSafetyMethod:"v3_snapshot",dbSafetyPath:path.join(staging,"db"),envSafetyPath:path.join(staging,"env"),storageSafetyRoot:staging,storageSafetyPaths:[staging],metadataPath:path.join(staging,"metadata")}});
+            assert.deepEqual(await native.getKeyImage(actor,first.appointmentId,upload.requestId),png);
+          }finally{await fs.rm(staging,{recursive:true,force:true});}
+          // Keep canonical bytes through signing; a later cleanup hook removes only this synthetic root.
+        } finally {
+          await pool.query("delete from system_settings where category='authoritative_orthanc'");
+          for(const row of oldArchive)await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values($1,$2,$3,$4)",[row.category,row.setting_key,row.setting_value,row.updated_by_user_id]);
+          await new Promise<void>(resolve=>archive.close(()=>resolve()));
+        }
+      });
+      await t.test("finalization requires its own permission, finishes at one revision, and retries once",async()=>{
+        const limited=await fixture(noFinalizeDoctor);const limitedActor={userId:noFinalizeDoctor.id,appRole:"doctor" as const};
+        await native.createReport(limitedActor,limited.contextId,limited.appointmentId);
+        await native.saveDraft(limitedActor,limited.contextId,limited.appointmentId,{expectedRevision:1,sections:text});
+        await assert.rejects(()=>native.finalizeReport(limitedActor,limited.contextId,limited.appointmentId,{expectedRevision:2,confirmed:true,requestId:randomUUID()}),/finalization permission/);
+        const saved=(await native.getReport(actor,first.appointmentId))!;
+        const body={expectedRevision:saved.revision,confirmed:true,requestId:randomUUID()};
+        const final=await Promise.all([native.finalizeReport(actor,first.contextId,first.appointmentId,body),native.finalizeReport(actor,first.contextId,first.appointmentId,body)]);
+        assert.deepEqual(final[0],final[1]);
+        await assert.rejects(()=>native.saveDraft(actor,first.contextId,first.appointmentId,{expectedRevision:saved.revision+1,sections:text}),/signed/);
+        await assert.rejects(()=>pool.query("update native_reports set sections='{}' where appointment_id=$1",[first.appointmentId]),/immutable/);
+        await assert.rejects(()=>pool.query("update native_report_key_images set caption='replacement' where report_id=$1",[saved.id]),/immutable/);
+        const open=await rawApi(doctor.cookie,`/api/native-reporting/appointments/${first.appointmentId}`);
+        assert.equal(open.status,200);assert.match(open.headers.get("cache-control")!,/no-store/);
+        assert.equal((await native.getReportHistory(actor,first.appointmentId)).filter(v=>v.kind==="final").length,1);
+      });
+      await t.test("signed text addenda are append-only and retry safe",async()=>{
+        const signed=(await native.getReport(actor,first.appointmentId))!;
+        const body={expectedRevision:signed.revision,confirmed:true,requestId:randomUUID(),text:"Synthetic signed correction."};
+        await native.addAddendum(actor,first.contextId,first.appointmentId,body);await native.addAddendum(actor,first.contextId,first.appointmentId,body);
+        const amended=(await native.getReport(actor,first.appointmentId))!;assert.deepEqual(amended.sections,signed.sections);assert.equal(amended.addenda.length,1);
+        await assert.rejects(()=>pool.query("update native_report_versions set snapshot='{}' where report_id=$1",[signed.id]),/append only/);
+        const printed=await rawApi(doctor.cookie,`/api/native-reporting/appointments/${first.appointmentId}/print`);
+        assert.equal(printed.status,200);assert.match(await printed.text(),/Synthetic signed correction/);
+        const filtered=await reportingBoardService.getReportingBoardCases({userId:supervisor.id,appRole:"supervisor"},{appointmentId:first.appointmentId,reportStatus:"required_not_final"});
+        assert.equal(filtered.cases.length,0);
+      });
+      await t.test("disabled integration retains authorized signed reads and rejects edits",async()=>{
+        await pool.query("update ohif_viewer_settings set native_reporting_enabled=false where singleton_key=true");
+        assert.equal((await native.getReport(actor,first.appointmentId))!.status,"final");
+        await assert.rejects(()=>native.createReport(actor,second.contextId,second.appointmentId),/report creation/);
+        await pool.query("update ohif_viewer_settings set native_reporting_enabled=true where singleton_key=true");
+      });
+      await t.test("changed mapping, revoked context and expired session stop editing",async()=>{
+        await native.createReport(actor,second.contextId,second.appointmentId);
+        await pool.query("update ohif_viewer_settings set access_strategy='native_dicomweb' where singleton_key=true");
+        assert.match((await native.resolveReportContext(actor,second.contextId)).blockedReason!,/imaging source changed/);
+        await assert.rejects(()=>native.saveDraft(actor,second.contextId,second.appointmentId,{expectedRevision:1,sections:text}),/imaging source changed/);
+        await pool.query("update ohif_viewer_settings set access_strategy='authoritative_orthanc' where singleton_key=true");
+        await pool.query("update appointments_v2.bookings set study_instance_uid=$2 where id=$1",[second.appointmentId,second.study+".99"]);
+        await assert.rejects(()=>native.saveDraft(actor,second.contextId,second.appointmentId,{expectedRevision:1,sections:text}),/mapping changed/);
+        await pool.query("update viewer_launch_sessions set revoked_at=now() where id=$1",[second.sessionId]);
+        await assert.rejects(()=>native.resolveReportContext(actor,second.contextId),/expired|revoked/);
+        await pool.query("update viewer_launch_sessions set expires_at=now()-interval '1 minute' where id=$1",[first.sessionId]);
+        await assert.rejects(()=>native.resolveReportContext(actor,first.contextId),/expired|revoked/);
+      });
+    });
   });
 
   it("uses the protected automatic-assignment age order independently of the visible board sort", () => {

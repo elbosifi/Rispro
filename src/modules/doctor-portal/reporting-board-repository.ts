@@ -970,14 +970,14 @@ function addCaseFilters(input: Required<Pick<ReportingBoardFilters, "limit" | "o
   }
   if (input.finalizedByDoctorId) {
     values.push(input.finalizedByDoctorId);
-    where.push(`cache.finalized_by_doctor_id = $${values.length}`);
+    where.push(`coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) = $${values.length}`);
   }
   if (input.assignmentStatus === "unassigned") where.push(`cta.id is null`);
   if (input.assignmentStatus === "assigned") where.push(`cta.id is not null`);
-  if (input.assignmentMatch === "matched") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id`);
-  if (input.assignmentMatch === "mismatch") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id`);
-  if (input.assignmentMatch === "finalized_unassigned") where.push(`cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null`);
-  if (input.assignmentMatch === "unmapped_finalizer") where.push(`cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null`);
+  if (input.assignmentMatch === "matched") where.push(`coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)`);
+  if (input.assignmentMatch === "mismatch") where.push(`coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)`);
+  if (input.assignmentMatch === "finalized_unassigned") where.push(`coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is null`);
+  if (input.assignmentMatch === "unmapped_finalizer") where.push(`cache.sonicdicom_finalized_by_account is not null and coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is null`);
   if (input.caseCategory) {
     values.push(input.caseCategory);
     where.push(`b.case_category = $${values.length}`);
@@ -1147,32 +1147,32 @@ export async function listReportingBoardCaseCandidates(
         assigned_doctor_user.full_name as "assignedDoctorNameAr",
         assigned_doctor_user.english_name as "assignedDoctorNameEn",
         coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
-        cache.finalized_by_doctor_id as "finalizedByDoctorId",
-        finalized_doctor.display_name as "finalizedByDoctorName",
-        coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorNameAr",
-        coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) as "finalizedByDoctorNameEn",
+        coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) as "finalizedByDoctorId",
+        coalesce(native_report.finalizer_name, finalized_doctor.display_name) as "finalizedByDoctorName",
+        case when native_report.id is not null then native_report.finalizer_name else coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) end as "finalizedByDoctorNameAr",
+        case when native_report.id is not null then native_report.finalizer_name else coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) end as "finalizedByDoctorNameEn",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
         case
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id then 'matched'
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id then 'mismatch'
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
-          when cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null then 'unmapped_finalizer'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) then 'matched'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) then 'mismatch'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
+          when cache.sonicdicom_finalized_by_account is not null and coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is null then 'unmapped_finalizer'
           else 'not_applicable'
         end as "assignmentMatch",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
+        case when native_report.id is not null then native_report.finalized_at when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
         cta.expected_reporting_date::text as "dueAt",
         null::int as "completedToAssignedMinutes",
         null::int as "assignedToFinalMinutes",
         null::int as "completedToFinalMinutes",
         null::int as "currentAssignmentAgeMinutes",
         null::int as "completedUnassignedAgeMinutes",
-        case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
+        case when native_report.id is not null then native_report.status when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
         cache.last_success_at as "reportStatusCheckedAt",
         cache.sonicdicom_study_note as "sonicDicomStudyNote",
         cache.last_success_at as "sonicDicomStudyNoteCheckedAt",
@@ -1182,7 +1182,7 @@ export async function listReportingBoardCaseCandidates(
         manual_final.created_by_doctor_id as "manualFinalByDoctorId",
         manual_final_doctor.display_name as "manualFinalByName",
         manual_final.reason as "manualFinalReason",
-        case when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
+        case when native_report.id is not null then 'rispro' when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
@@ -1235,8 +1235,9 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
+      left join native_reports native_report on native_report.appointment_id = b.id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
-      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
+      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)
       left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
@@ -1381,9 +1382,9 @@ export async function listReportingBoardStatsRows(
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
-        case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
-        case when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
+        case when native_report.id is not null then native_report.finalized_at when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
+        case when native_report.id is not null then native_report.status when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
+        case when native_report.id is not null then 'rispro' when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
         manual_final.id as "manualFinalOverrideId",
         case
           when supplement_follow_up.id is not null and (manual_final.id is not null or cache.report_status = 'final') then 'additional_imaging_ready_for_supplement'
@@ -1418,6 +1419,7 @@ export async function listReportingBoardStatsRows(
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
+      left join native_reports native_report on native_report.appointment_id = b.id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join lateral (
         select recall.id, recall.reporting_disposition, recall.original_report_dependency
@@ -1496,32 +1498,32 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         assigned_doctor_user.full_name as "assignedDoctorNameAr",
         assigned_doctor_user.english_name as "assignedDoctorNameEn",
         coalesce(cta.assignment_origin, 'rispro') as "assignmentOrigin",
-        cache.finalized_by_doctor_id as "finalizedByDoctorId",
-        finalized_doctor.display_name as "finalizedByDoctorName",
-        coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) as "finalizedByDoctorNameAr",
-        coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) as "finalizedByDoctorNameEn",
+        coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) as "finalizedByDoctorId",
+        coalesce(native_report.finalizer_name, finalized_doctor.display_name) as "finalizedByDoctorName",
+        case when native_report.id is not null then native_report.finalizer_name else coalesce(cache.finalized_by_name_ar_snapshot, finalized_doctor_user.full_name, finalized_doctor.display_name) end as "finalizedByDoctorNameAr",
+        case when native_report.id is not null then native_report.finalizer_name else coalesce(cache.finalized_by_name_en_snapshot, finalized_doctor_user.english_name) end as "finalizedByDoctorNameEn",
         cache.sonicdicom_finalized_by_account as "sonicDicomFinalizedByAccount",
         cache.sonicdicom_latest_document_id as "sonicDicomLatestDocumentId",
         cache.correlation_method as "sonicDicomCorrelationMethod",
         case
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = cache.finalized_by_doctor_id then 'matched'
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> cache.finalized_by_doctor_id then 'mismatch'
-          when cache.finalized_by_doctor_id is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
-          when cache.sonicdicom_finalized_by_account is not null and cache.finalized_by_doctor_id is null then 'unmapped_finalizer'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) then 'matched'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is not null and cta.assigned_doctor_id <> coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) then 'mismatch'
+          when coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is not null and cta.assigned_doctor_id is null then 'finalized_unassigned'
+          when cache.sonicdicom_finalized_by_account is not null and coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id) is null then 'unmapped_finalizer'
           else 'not_applicable'
         end as "assignmentMatch",
         case when cta.id is null then 'unassigned' else 'assigned' end as "assignmentStatus",
         b.completed_at as "completedAt",
         cta.assigned_at as "currentAssignedAt",
         first_assignment.first_assigned_at as "firstAssignedAt",
-        case when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
+        case when native_report.id is not null then native_report.finalized_at when manual_final.id is not null then manual_final.created_at else cache.report_final_at end as "reportFinalAt",
         cta.expected_reporting_date::text as "dueAt",
         null::int as "completedToAssignedMinutes",
         null::int as "assignedToFinalMinutes",
         null::int as "completedToFinalMinutes",
         null::int as "currentAssignmentAgeMinutes",
         null::int as "completedUnassignedAgeMinutes",
-        case when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
+        case when native_report.id is not null then native_report.status when manual_final.id is not null then 'final' else coalesce(cache.report_status, 'unavailable') end as "reportStatus",
         cache.last_success_at as "reportStatusCheckedAt",
         cache.sonicdicom_study_note as "sonicDicomStudyNote",
         cache.last_success_at as "sonicDicomStudyNoteCheckedAt",
@@ -1530,7 +1532,7 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
         manual_final.created_at as "manualFinalAt",
         manual_final_doctor.display_name as "manualFinalByName",
         manual_final.reason as "manualFinalReason",
-        case when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
+        case when native_report.id is not null then 'rispro' when manual_final.id is not null then 'manual' when cache.last_success_at is not null then 'sonicdicom' else null end as "reportStatusSource",
         (b.requires_report = true and b.status = 'completed') as "canAssign",
         case
           when b.requires_report = false then 'report_not_required'
@@ -1558,8 +1560,9 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
+      left join native_reports native_report on native_report.appointment_id = b.id
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
-      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = cache.finalized_by_doctor_id
+      left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)
       left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
       left join doctor_portal.doctor_profiles manual_final_doctor on manual_final_doctor.id = manual_final.created_by_doctor_id
       left join lateral (
@@ -1828,7 +1831,8 @@ export async function bulkPlaceReportingBoardCaseHolds(input: {
         from appointments_v2.bookings b
         left join doctor_portal.reporting_board_manual_final_overrides manual_final
           on manual_final.appointment_id = b.id and manual_final.cleared_at is null
-        left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
+        left join native_reports native_report on native_report.appointment_id = b.id
+      left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
         where b.id = any($1::bigint[])
         order by b.id
         for update of b

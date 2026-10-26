@@ -320,6 +320,7 @@ export async function enqueueReportingBoardSonicDicomCacheRows(appointmentIds: n
     select b.id, 'unavailable', now(), b.study_instance_uid, ('V2-' || lpad(b.id::text, 6, '0'))
     from appointments_v2.bookings b
     where b.id = any($1::bigint[]) and b.status = 'completed' and b.requires_report = true
+      and not exists(select 1 from native_reports nr where nr.appointment_id=b.id)
     on conflict (appointment_id) do update
       set next_check_at = least(doctor_portal.reporting_board_sonicdicom_cache.next_check_at, now()), updated_at = now()
       where $2::boolean
@@ -340,6 +341,7 @@ export async function queueFullReportingBoardSonicDicomResync(requestedAt: strin
       left join doctor_portal.reporting_board_manual_final_overrides manual
         on manual.appointment_id = b.id and manual.cleared_at is null
       where b.status = 'completed' and b.requires_report = true and manual.id is null
+      and not exists(select 1 from native_reports nr where nr.appointment_id=b.id)
       on conflict (appointment_id) do update set
         next_check_at = $1::timestamptz,
         study_instance_uid_snapshot = excluded.study_instance_uid_snapshot,
@@ -430,6 +432,7 @@ export async function selectDueReportingBoardSonicDicomCacheCandidates(limit: nu
     left join modalities modality on modality.id = b.modality_id
     left join reporting_priorities rp on rp.id = b.reporting_priority_id
     where b.status = 'completed' and b.requires_report = true and manual.id is null
+      and not exists(select 1 from native_reports nr where nr.appointment_id=b.id)
       and (cache.appointment_id is null or cache.next_check_at <= now()
         or cache.study_instance_uid_snapshot is distinct from b.study_instance_uid
         or cache.accession_number_snapshot is distinct from ('V2-' || lpad(b.id::text, 6, '0')))

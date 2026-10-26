@@ -19,6 +19,7 @@ interface OhifConfigurationResponse {
   configuration: {
     settings: {
       enabled: boolean;
+      nativeReportingEnabled?: boolean;
       ohifPublicBaseUrl: string;
       selectedPacsNodeId: number | null;
       accessStrategy: "native_dicomweb" | "orthanc_gateway" | "authoritative_orthanc";
@@ -65,6 +66,7 @@ interface OhifConfigurationResponse {
 
 type FormState = {
   enabled: boolean;
+  nativeReportingEnabled: boolean;
   ohifPublicBaseUrl: string;
   selectedPacsNodeId: string;
   accessStrategy: "native_dicomweb" | "orthanc_gateway" | "authoritative_orthanc";
@@ -92,7 +94,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  enabled: false, ohifPublicBaseUrl: "/ohif", selectedPacsNodeId: "", accessStrategy: "native_dicomweb",
+  enabled: false, nativeReportingEnabled: false, ohifPublicBaseUrl: "/ohif", selectedPacsNodeId: "", accessStrategy: "native_dicomweb",
   orthancGatewayEnabled: false, orthancModalityKey: "", openMode: "new_tab", allowPriorStudies: true,
   maxPriorStudies: "5", launchTokenTtlSeconds: "600", cacheRetentionHours: "24", retrievalTimeoutSeconds: "300",
   webEnabled: false, dicomwebBaseUrl: "", qidoRoot: "", wadoRsRoot: "", wadoUriRoot: "", authType: "none",
@@ -109,7 +111,7 @@ function formFromResponse(data: OhifConfigurationResponse): FormState {
   const settings = data.configuration.settings;
   const endpoint = data.configuration.webEndpoint;
   return {
-    enabled: settings.enabled, ohifPublicBaseUrl: settings.ohifPublicBaseUrl,
+    enabled: settings.enabled, nativeReportingEnabled: settings.nativeReportingEnabled === true, ohifPublicBaseUrl: settings.ohifPublicBaseUrl,
     selectedPacsNodeId: settings.selectedPacsNodeId ? String(settings.selectedPacsNodeId) : "",
     accessStrategy: settings.accessStrategy, orthancGatewayEnabled: settings.orthancGatewayEnabled,
     orthancModalityKey: settings.orthancModalityKey || "", openMode: settings.openMode,
@@ -164,7 +166,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
       method: "PUT",
       body: JSON.stringify({
         settings: {
-          enabled: form.enabled, ohifPublicBaseUrl: form.ohifPublicBaseUrl,
+          enabled: form.enabled, nativeReportingEnabled: form.nativeReportingEnabled, ohifPublicBaseUrl: form.ohifPublicBaseUrl,
           selectedPacsNodeId: !authoritativeSource && form.selectedPacsNodeId ? Number(form.selectedPacsNodeId) : null,
           accessStrategy: form.accessStrategy, orthancGatewayEnabled: form.orthancGatewayEnabled,
           orthancModalityKey: form.orthancModalityKey || null, openMode: form.openMode,
@@ -216,6 +218,7 @@ export default function OhifViewerSection({ onReAuthRequired }: { onReAuthRequir
       <div><h4 className="font-semibold">General</h4><p className="text-sm text-muted-foreground">OHIF is disabled by default. RISpro remains authoritative for access, source selection, and audit.</p></div>
       <div className="grid gap-4 md:grid-cols-2">
         <label className={labelClass}><span>Enable OHIF Viewer</span><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /></label>
+        <label className={labelClass}><span>Enable RISpro native reporting (CT/MRI)</span><input type="checkbox" checked={form.nativeReportingEnabled} onChange={(event) => setForm({ ...form, nativeReportingEnabled: event.target.checked })} /></label>
         <label className={labelClass}><span>OHIF public base URL</span><input className={inputClass} value={form.ohifPublicBaseUrl} onChange={(event) => setForm({ ...form, ohifPublicBaseUrl: event.target.value })} /></label>
         <label className={labelClass}><span>Open mode</span><select className={inputClass} value={form.openMode} onChange={(event) => setForm({ ...form, openMode: event.target.value as FormState["openMode"] })}><option value="new_tab">New tab</option><option value="same_tab">Same tab</option></select></label>
         <label className={labelClass}><span>Launch token lifetime (seconds)</span><input type="number" className={inputClass} value={form.launchTokenTtlSeconds} onChange={(event) => setForm({ ...form, launchTokenTtlSeconds: event.target.value })} /></label>

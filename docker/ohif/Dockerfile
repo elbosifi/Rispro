@@ -23,6 +23,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
   && bun add --config=/tmp/bunfig.toml ajv@8.12.0
 
 COPY docker/ohif/app-config.js platform/app/public/config/rispro.js
+COPY docker/ohif/rispro-reporting extensions/rispro-reporting
+COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
+RUN node /tmp/register-reporting.cjs \
+  && mkdir -p node_modules/@rispro \
+  && ln -s ../../extensions/rispro-reporting node_modules/@rispro/extension-reporting
 ENV QUICK_BUILD=true
 ENV PUBLIC_URL=${PUBLIC_URL}
 RUN bun run show:config \

@@ -41,6 +41,7 @@ import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-ser
 import { cleanupExpiredDiagnosticEvents } from "./services/system-diagnostics-service.js";
 import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
 import { ohifDicomWebProxyRouter, ohifViewerRouter } from "./modules/ohif-viewer/routes.js";
+import { nativeReportingRouter } from "./modules/reporting/reporting-routes.js";
 import { backupControlRouter } from "./routes/backup-control.js";
 import { requestScansRouter } from "./routes/request-scans.js";
 import { emailSettingsRouter } from "./routes/email-settings.js";
@@ -203,6 +204,7 @@ export function createApp(): Application {
   app.use("/api/pacs", pacsRouter);
   app.use("/api/legacy-access-viewer", legacyAccessViewerRouter);
   app.use("/api/ohif", ohifViewerRouter);
+  app.use("/api/native-reporting", nativeReportingRouter);
   app.use("/api/doctor", createDoctorPortalRouter());
   app.use("/api/reporting", reportingBoardPublicRouter);
 

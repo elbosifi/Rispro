@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -31,6 +31,9 @@ console.log(JSON.stringify({
     artifacts: temp
 }));
 const containerPrefix = 'rispro-ohif-phase2-' + process.pid;
+const networkName = containerPrefix + '-network';
+let networkCreated = false;
+const viewerImage = process.env.OHIF_TEST_IMAGE || 'rispro-ohif:v3.12.6';
 const docker = (...args) => execFileSync('docker', args, {
     encoding: 'utf8'
 }).trim();
@@ -105,7 +108,7 @@ async function verifyVisiblePixels(page, stage) {
     throw Error('Synthetic diagnostic viewport remained blank');
 }
 try {
-    docker('image', 'inspect', 'orthancteam/orthanc:26.4.0', 'rispro-ohif:v3.12.6', 'nginx:1.27.5-alpine');
+    docker('image', 'inspect', 'orthancteam/orthanc:26.4.0', viewerImage, 'nginx:1.27.5-alpine');
     writeFileSync(join(temp, 'orthanc.json'), JSON.stringify({
         Name: 'SYNTHETIC OHIF BENCHMARK', RemoteAccessAllowed: true, AuthenticationEnabled: true, RegisteredUsers: {
             synthetic: 'synthetic-only'
@@ -229,10 +232,14 @@ try {
     const originConfig = readFileSync(join(root, 'docker/ohif/nginx.conf'), 'utf8');
     writeFileSync(join(temp, 'origin.conf'), process.env.OHIF_PHASE2_VARIANT === 'baseline' ? originConfig.replace('gzip on;', 'gzip off;') : originConfig);
     viewerMounts.push('-v', join(temp, 'origin.conf') + ':/etc/nginx/conf.d/default.conf:ro');
-    const viewerPort = startContainer(containerPrefix + '-viewer', 'rispro-ohif:v3.12.6', viewerMounts);
-    let nginx = readFileSync(join(root, 'docker/reverse-proxy/nginx.conf'), 'utf8').replace('server app:3000 resolve;', `server host.docker.internal:${appPort};`).replace('http {', `http {\n upstream phase2_viewer {server host.docker.internal:${viewerPort};}`).replace('http://ohif:80', 'http://phase2_viewer').replace('listen 8080;', 'listen 80;');
+    // Match Compose's direct edge -> OHIF route. Hairpinning through a Windows
+    // published port intermittently times out connecting during chunk fan-out.
+    docker('network', 'create', networkName);
+    networkCreated = true;
+    startContainer(containerPrefix + '-viewer', viewerImage, ['--network', networkName, '--network-alias', 'ohif', ...viewerMounts]);
+    let nginx = readFileSync(join(root, 'docker/reverse-proxy/nginx.conf'), 'utf8').replace('server app:3000 resolve;', `server host.docker.internal:${appPort};`).replace('listen 8080;', 'listen 80;');
     writeFileSync(join(temp, 'edge.conf'), nginx);
-    const edgePort = startContainer(containerPrefix + '-edge', 'nginx:1.27.5-alpine', ['-v', join(temp, 'edge.conf') + ':/etc/nginx/nginx.conf:ro']);
+    const edgePort = startContainer(containerPrefix + '-edge', 'nginx:1.27.5-alpine', ['--network', networkName, '-v', join(temp, 'edge.conf') + ':/etc/nginx/nginx.conf:ro']);
     const origin = 'http://127.0.0.1:' + edgePort;
     const cookie = env.cookieName + '=' + login + '; ' + env.ohifSessionCookieName + '=' + token;
     let producerClosed = false, producerBytes = 0;
@@ -465,25 +472,32 @@ try {
                     });
                     const page = await context.newPage();
                     const errors = [];
+                    const errorDetails = [];
+                    const consoleMessages = [];
+                    const pending = new Map();
                     const failed = [];
                     const renderedRequests = [];
                     let active = 0, peak = 0;
                     const isFrame = r => r.url().includes('/frames/');
                     page.on('request', r => {
+                        pending.set(r, { path: new URL(r.url()).pathname, resourceType: r.resourceType() });
                         if (isFrame(r)) {
                             active++;
                             peak = Math.max(peak, active);
                         }
                     });
                     page.on('requestfinished', r => {
+                        pending.delete(r);
                         if (isFrame(r))
                             active--;
                     });
                     page.on('requestfailed', r => {
+                        pending.delete(r);
                         if (isFrame(r))
                             active--;
                         failed.push({
-                            type: isFrame(r) ? 'frame' : r.url().includes('/ohif-dicomweb/') ? 'dicomweb' : 'asset', status: 0, canceled: /abort|cancel/i.test(r.failure()?.errorText || '')
+                            type: isFrame(r) ? 'frame' : r.url().includes('/ohif-dicomweb/') ? 'dicomweb' : 'asset', status: 0, canceled: /abort|cancel/i.test(r.failure()?.errorText || ''),
+                            path: new URL(r.url()).pathname, resourceType: r.resourceType(), error: r.failure()?.errorText
                         });
                     });
                     if (process.env.OHIF_PHASE2_NETWORK === '10mbps' && engine === 'chromium') {
@@ -493,7 +507,13 @@ try {
                             offline: false, latency: 40, downloadThroughput: 1250000, uploadThroughput: 1250000
                         });
                     }
-                    page.on('pageerror', e => errors.push(e.name));
+                    page.on('pageerror', e => {
+                        errors.push(e.name);
+                        errorDetails.push(e.stack || e.message);
+                    });
+                    page.on('console', message => {
+                        if (['warning', 'error'].includes(message.type())) consoleMessages.push(message.text());
+                    });
                     page.on('response', r => {
                         if (r.url().includes('/rendered'))
                             renderedRequests.push({
@@ -501,15 +521,32 @@ try {
                             });
                         if (r.status() >= 400)
                             failed.push({
-                                type: r.url().includes('/frames/') ? 'frame' : r.url().includes('/ohif-dicomweb/') ? 'dicomweb' : 'asset', status: r.status()
+                                type: r.url().includes('/frames/') ? 'frame' : r.url().includes('/ohif-dicomweb/') ? 'dicomweb' : 'asset', status: r.status(),
+                                path: new URL(r.url()).pathname, resourceType: r.request().resourceType()
                             });
                     });
-                    await page.goto(origin + '/ohif/viewer?StudyInstanceUIDs=' + s.study, {
-                        waitUntil: 'domcontentloaded', timeout: 60000
-                    });
-                    await page.waitForFunction(() => window.__phase2.rendered.length > 0, null, {
-                        timeout: 90000
-                    });
+                    console.log(JSON.stringify({ bootstrapStart: { variant, engine, modality: s.modality } }));
+                    try {
+                        await page.goto(origin + '/ohif/viewer?StudyInstanceUIDs=' + s.study, {
+                            waitUntil: 'domcontentloaded', timeout: 60000
+                        });
+                        await page.waitForFunction(() => window.__phase2.rendered.length > 0, null, {
+                            timeout: 90000
+                        });
+                    } catch (error) {
+                        await page.screenshot({ path: join(temp, variant + '-' + engine + '-' + s.modality + '-failed.png') }).catch(() => undefined);
+                        const state = await page.evaluate(() => ({
+                            readyState: document.readyState, bodyText: document.body?.innerText,
+                            servicesReady: Boolean(window.services),
+                            resources: performance.getEntriesByType('resource').map(e => ({
+                                path: new URL(e.name).pathname, durationMs: Math.round(e.duration), encodedBytes: e.encodedBodySize
+                            }))
+                        })).catch(e => ({ error: e.message }));
+                        const failure = { engine, modality: s.modality, errors, errorDetails, failed, pending: [...pending.values()], consoleMessages, state };
+                        writeFileSync(join(temp, 'bootstrap-failure.json'), JSON.stringify(failure, null, 2));
+                        console.log(JSON.stringify({ bootstrapFailure: failure }));
+                        throw error;
+                    }
                     // Fresh contexts show onboarding over the diagnostic viewport.
                     // Acknowledge it before inspecting pixels; keep this time in the navigation measurement.
                     const skipTour = page.getByText('Skip all', { exact: true });
@@ -526,6 +563,8 @@ try {
                     const visibleVerifiedAtMs = verifiedAtMs;
                     writeFileSync(join(temp, variant + '-' + engine + '-' + s.modality + '.png'), screenshot);
                     const measurements = await page.evaluate(() => ({
+                        bootstrapDomContentLoadedMs: Math.round(performance.getEntriesByType('navigation')[0].domContentLoadedEventEnd),
+                        bootstrapMainChunkMs: Math.round(performance.getEntriesByType('resource').find(e => /\/app\.bundle\.[a-f0-9]+\.js/.test(e.name))?.responseEnd || 0),
                         firstRenderEventMs: Math.round(window.__phase2.rendered[0]), requests: performance.getEntriesByType('resource').filter(e => e.name.includes('/ohif-dicomweb/')).map(e => ({
                             type: e.name.includes('/frames/') ? 'frame' : e.name.includes('/metadata') ? 'metadata' : e.name.includes('/rendered') ? 'thumbnail' : 'qido', ttfbMs: Math.round(e.responseStart - e.requestStart), downloadMs: Math.round(e.responseEnd - e.responseStart), encodedBytes: e.encodedBodySize, decodedBytes: e.decodedBodySize
                         }))
@@ -567,6 +606,7 @@ try {
                         variant, engine, modality: s.modality, switchingMs: switchingSamplesMs[0], scrollingMs: scrollingSamplesMs[0], switchingSamplesMs, scrollingSamplesMs, previouslyUnloadedFramesAtSwitch: unloadedAtSwitch, pixelsAfterSwitchAndScroll: true, canceledRequests: failed.filter(f => f.canceled).length, renderedRequests, failedFrames: failed.filter(f => f.type === 'frame' && !f.canceled).length
                     }));
                     assert.deepEqual(errors, []);
+                    assert.equal(failed.filter(f => f.type === 'asset' && !f.canceled).length, 0);
                     assert.equal(failed.filter(f => f.type === 'frame' && !f.canceled).length, 0);
                     await context.close();
                 }
@@ -576,6 +616,15 @@ try {
             }
         }
     }
+}
+catch (error) {
+    // These containers and request paths contain only this harness's synthetic data.
+    // Retain both nginx streams before --rm removes the evidence on failure.
+    for (const name of containers) {
+        const logs = spawnSync('docker', ['logs', name], { encoding: 'utf8' });
+        writeFileSync(join(temp, name + '.log'), (logs.stdout || '') + (logs.stderr || ''));
+    }
+    throw error;
 }
 finally {
     if (appServer)
@@ -609,4 +658,5 @@ finally {
         await pool.query('update ohif_viewer_settings set enabled=$1,access_strategy=$2,selected_pacs_node_id=$3 where singleton_key=true', [priorOhif.enabled, priorOhif.access_strategy, priorOhif.selected_pacs_node_id]);
     }
     await pool.end();
+    if (networkCreated) docker('network', 'rm', networkName);
 }
