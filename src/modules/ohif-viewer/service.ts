@@ -347,8 +347,11 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   });
   const configuration = await readOhifViewerConfiguration();
   const basePath = normalizeViewerBasePath(configuration.settings.ohifPublicBaseUrl, env.ohifPublicBaseUrl);
-  const studies = session.permittedStudyUids.map(encodeURIComponent).join(",");
-  return `${basePath}/viewer?StudyInstanceUIDs=${studies}&risproContext=${session.reportContextId}`;
+  const primary = encodeURIComponent(session.studyInstanceUid);
+  const priors = session.permittedStudyUids.filter(uid => uid !== session.studyInstanceUid).map(encodeURIComponent).join(",");
+  // OHIF eagerly initializes every StudyInstanceUIDs entry. Keep priors in the
+  // authorized study browser for explicit loading, without granting new access.
+  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${priors ? `&risproPriorStudyUIDs=${priors}` : ""}&risproContext=${session.reportContextId}`;
 }
 
 export async function proxyAuthorizedDicomWebRequest(input: {

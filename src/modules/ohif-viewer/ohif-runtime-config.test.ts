@@ -26,4 +26,10 @@ describe("OHIF runtime configuration", () => {
     assert.equal(root("00000000-0000-4000-8000-000000000001"),"/ohif-dicomweb/context/00000000-0000-4000-8000-000000000001");
     assert.notEqual(root("00000000-0000-4000-8000-000000000001"),root("00000000-0000-4000-8000-000000000002"));
   });
+  it("lists explicit primary/prior selectors without adding them to eager study loading", async () => {
+    const source=await fs.readFile(appConfigPath,"utf8");
+    const context={window:{location:{search:'?StudyInstanceUIDs=1.2.3&risproPriorStudyUIDs=1.2.4,1.2.3,invalid'},config:{} as {dataSources?:{configuration:{risproStudyInstanceUIDs:string[]}}[]}},URLSearchParams};
+    vm.runInNewContext(source,context);
+    assert.deepEqual(Array.from(context.window.config.dataSources![0].configuration.risproStudyInstanceUIDs),['1.2.3','1.2.4']);
+  });
 });

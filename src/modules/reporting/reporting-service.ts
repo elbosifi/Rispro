@@ -125,8 +125,23 @@ export async function createReport(actor: Actor, contextId: string, appointmentI
     if (!currentAccess.canEdit) throw new HttpError(403,"Reporting access changed before report creation.");
     assertSource(session,currentAccess.configuration);
     await assertMapping(db, session);
+    const currentSonic = await readSonicDicomReportSettings();
+    if (currentSonic.sonicDicomReportsEnabled !== sonic.sonicDicomReportsEnabled)
+      throw new HttpError(409, "External reporting configuration changed. Reopen the case before creating a report.");
+    // Worklist reads enqueue an untouched 'unavailable' placeholder. It carries
+    // no ownership evidence when that integration is disabled. Any attempted
+    // check, retained source/history or external document still fails closed.
     const legacy = await db.query(`select 1 from doctor_portal.reporting_board_manual_final_overrides where appointment_id=$1 and cleared_at is null
-      union all select 1 from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1 and (report_status not in ('no_report','study_not_found') or sonicdicom_latest_document_id is not null)`, [appointmentId]);
+      union all select 1 from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1 and (
+        sonicdicom_latest_document_id is not null or (
+          report_status not in ('no_report','study_not_found') and not (
+            $2::boolean and report_status='unavailable' and source is null
+            and last_attempt_at is null and last_success_at is null and failure_count=0 and last_error is null
+            and status_changed_at is null and report_final_at is null
+            and sonicdicom_finalized_by_account is null and finalized_by_doctor_id is null
+          )
+        )
+      )`, [appointmentId, !currentSonic.sonicDicomReportsEnabled]);
     if (legacy.rows.length) throw new HttpError(409, "This case has external reporting ownership, unverifiable legacy status, or a manual final override.");
     const r = (await db.query<ReportRow>(`insert into native_reports(appointment_id,patient_id,primary_study_uid,imaging_source,identity,sections,author_user_id,author_name)
       values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(appointment_id) do nothing returning *`,

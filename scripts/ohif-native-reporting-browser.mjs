@@ -1,15 +1,17 @@
 // Synthetic-only real OHIF/Cornerstone/Orthanc browser acceptance.
 // Run serially after db:test:up/check/migrations. Never accepts patient/archive URLs.
-import {execFileSync} from 'node:child_process';
-import {mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {existsSync,mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
 import fs from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
-import {createServer} from 'node:http';
+import {createServer,request as httpRequest} from 'node:http';
+import {createServer as createHttpsServer} from 'node:https';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {runRenderingStress} from './ohif-rendering-stress.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const require=createRequire(join(root,'package.json'));
 const {chromium}=require('@playwright/test'),sharp=require('sharp'),dcmjs=require('dcmjs'),jwt=require('jsonwebtoken');
@@ -31,9 +33,10 @@ const module=name=>import(pathToFileURL(join(root,name)));
 const {pool}=await module('src/db/pool.ts');const {env}=await module('src/config/env.ts');
 if(new URL(env.databaseUrl).href!==dbUrl.href)throw Error('Runtime database safety guard failed');
 const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
+const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
-const oldUploads=env.uploadsDir;const cases=[];let userId,doctorId,policySetId,appServer,browser,activePage;
+const oldUploads=env.uploadsDir;const cases=[];let userId,doctorId,policySetId,appServer,tlsServer,browser,activePage,viewerPort;
 async function setting(category,key,value){await pool.query('insert into system_settings(category,setting_key,setting_value) values($1,$2,$3) on conflict(category,setting_key) do update set setting_value=excluded.setting_value',[category,key,JSON.stringify({value})]);}
 try{
   docker('image','inspect',viewerImage,'orthancteam/orthanc:26.4.0','nginx:1.27.5-alpine');
@@ -52,7 +55,7 @@ try{
   doctorId=Number((await pool.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active,can_finalize_reports,can_assign_protocols,can_supervise) values($1,'SYNTHETIC RADIOLOGIST','consultant',true,true,false,true) returning id",[userId])).rows[0].id);
   policySetId=Number((await pool.query("insert into appointments_v2.policy_sets(key,name) values($1,'SYNTHETIC NATIVE REPORTING') returning id",['native.'+randomUUID()])).rows[0].id);
   const policyVersion=Number((await pool.query("insert into appointments_v2.policy_versions(policy_set_id,version_no,status,config_hash) values($1,1,'draft','synthetic') returning id",[policySetId])).rows[0].id);
-  for(const modality of ['CT','MR']){
+  for(const modality of renderingStress?['MR']:['CT','MR']){
     const modalityId=Number((await pool.query('select id from modalities where code=$1',[modality])).rows[0]?.id);
     assert.ok(modalityId,'Migrate the disposable DB before running this harness');
     await pool.query('insert into doctor_portal.doctor_modality_permissions(doctor_id,modality_id,can_protocol,can_report,can_supervise,active) values($1,$2,false,true,false,true)',[doctorId,modalityId]);
@@ -61,16 +64,21 @@ try{
     const appointmentId=Number((await pool.query("insert into appointments_v2.bookings(patient_id,modality_id,booking_date,case_category,status,requires_report,policy_version_id,completed_at) values($1,$2,current_date,'non_oncology','completed',true,$3,now()) returning id",[patientId,modalityId,policyVersion])).rows[0].id);
     const c={modality,patientId,appointmentId,identifier,study:'2.25.'+BigInt('0x'+randomUUID().replaceAll('-','')).toString()};cases.push(c);
     await pool.query("insert into doctor_portal.case_team_assignments(appointment_id,assigned_doctor_id,modality_id,assignment_type,status,expected_reporting_date) values($1,$2,$3,'reporting','active',current_date)",[appointmentId,doctorId,modalityId]);
-    for(let seriesNo=1;seriesNo<=4;seriesNo++)for(let slice=0;slice<16;slice++){
-      if(seriesNo===4 && (modality!=='MR' || slice!==0))continue;
-      const size=modality==='CT'?256:192;const pixels=new Uint16Array(size*size);
-      for(let y=0;y<size;y++)for(let x=0;x<size;x++){const radius=((x-size/2)/(size*.36))**2+((y-size/2)/(size*.3))**2;pixels[y*size+x]=radius<1?600+Math.round(400*Math.sin(x/9)+300*Math.cos(y/11)+slice*20):20;}
-      const sopClass=seriesNo===4?'1.2.840.10008.5.1.4.1.1.4.1':modality==='CT'?'1.2.840.10008.5.1.4.1.1.2':'1.2.840.10008.5.1.4.1.1.4';
+    const stressSize=process.env.OHIF_RENDER_SMOKE==='1'?256:512,stressSlices=process.env.OHIF_RENDER_SMOKE==='1'?40:800;
+    if(renderingStress)Object.assign(c,{size:stressSize,slices:stressSlices});
+    const template=renderingStress?Uint16Array.from({length:stressSize*stressSize},(_,i)=>{const x=i%stressSize,y=Math.floor(i/stressSize),r=((x-stressSize/2)/(stressSize*.36))**2+((y-stressSize/2)/(stressSize*.3))**2;return r<1?700+Math.round(220*Math.sin(x/19)+180*Math.cos(y/23)):20;}):null;
+    for(let seriesNo=renderingStress?0:1;seriesNo<=4;seriesNo++)for(let slice=0;slice<(renderingStress?(seriesNo===0?1:seriesNo<=2?stressSlices:Math.min(96,stressSlices)):16);slice++){
+      if(!renderingStress && seriesNo===4 && (modality!=='MR' || slice!==0))continue;
+      const size=renderingStress?stressSize:modality==='CT'?256:192;const pixels=renderingStress?template.slice():new Uint16Array(size*size);
+      if(renderingStress){for(let i=0;i<pixels.length;i++)if(pixels[i]>20)pixels[i]+=(slice%16)*8+seriesNo*20;}
+      else for(let y=0;y<size;y++)for(let x=0;x<size;x++){const radius=((x-size/2)/(size*.36))**2+((y-size/2)/(size*.3))**2;pixels[y*size+x]=radius<1?600+Math.round(400*Math.sin(x/9)+300*Math.cos(y/11)+slice*20):20;}
+      const sopClass=renderingStress&&seriesNo===0?'1.2.840.10008.5.1.4.1.1.7':!renderingStress&&seriesNo===4?'1.2.840.10008.5.1.4.1.1.4.1':modality==='CT'?'1.2.840.10008.5.1.4.1.1.2':'1.2.840.10008.5.1.4.1.1.4';
       const sop=c.study+'.'+seriesNo+'.'+(slice+1);
       const ds={_vrMap:{PixelData:'OW'},SOPClassUID:sopClass,SOPInstanceUID:sop,StudyInstanceUID:c.study,SeriesInstanceUID:c.study+'.'+seriesNo,FrameOfReferenceUID:c.study+'.9',PatientName:'SYNTHETIC^'+modality,PatientID:identifier,PatientBirthDate:'19860101',PatientSex:'O',StudyDate:new Date().toISOString().slice(0,10).replaceAll('-',''),StudyTime:'120000',StudyDescription:'SYNTHETIC '+modality,AccessionNumber:'V2-'+String(appointmentId).padStart(6,'0'),Modality:modality,SeriesNumber:seriesNo,SeriesDescription:'SYNTHETIC '+modality+' SERIES '+seriesNo,InstanceNumber:slice+1,ImageType:['ORIGINAL','PRIMARY','AXIAL'],Rows:size,Columns:size,SamplesPerPixel:1,PhotometricInterpretation:'MONOCHROME2',BitsAllocated:16,BitsStored:16,HighBit:15,PixelRepresentation:0,ImageOrientationPatient:[1,0,0,0,1,0],ImagePositionPatient:[0,0,slice*2],PixelSpacing:[1,1],SliceThickness:2,SpacingBetweenSlices:2,WindowCenter:700,WindowWidth:1800,RescaleIntercept:0,RescaleSlope:1,PixelData:pixels.buffer};
-      if(seriesNo===3)Object.assign(ds,{StudyInstanceUID:c.study+'.8',StudyDate:new Date(Date.now()-86400000).toISOString().slice(0,10).replaceAll('-',''),StudyDescription:'SYNTHETIC '+modality+' PRIOR',AccessionNumber:'SYNTHETIC-PRIOR-'+appointmentId});
+      if(seriesNo===3 || renderingStress&&seriesNo===4)Object.assign(ds,{StudyInstanceUID:c.study+'.'+(seriesNo+5),StudyDate:new Date(Date.now()-86400000*(seriesNo-2)).toISOString().slice(0,10).replaceAll('-',''),StudyDescription:'SYNTHETIC '+modality+' PRIOR '+seriesNo,AccessionNumber:'SYNTHETIC-PRIOR-'+appointmentId+'-'+seriesNo});
+      if(renderingStress&&seriesNo===0)Object.assign(ds,{Modality:'OT',SeriesDescription:'Request Documents',ImageType:['DERIVED','SECONDARY']});
       if(modality==='MR')Object.assign(ds,{ScanningSequence:'SE',SequenceVariant:'NONE',ScanOptions:'',MRAcquisitionType:'2D',RepetitionTime:600,EchoTime:15,EchoNumbers:1,MagneticFieldStrength:1.5});
-      if(seriesNo===4){
+      if(!renderingStress&&seriesNo===4){
         const frames=new Uint16Array(size*size*4);for(let f=0;f<4;f++)for(let pixel=0;pixel<pixels.length;pixel++)frames[f*pixels.length+pixel]=pixels[pixel]+f*50;
         Object.assign(ds,{NumberOfFrames:4,SeriesDescription:'SYNTHETIC ENHANCED MR MULTIFRAME',PixelData:frames.buffer,
           SharedFunctionalGroupsSequence:[{PixelMeasuresSequence:[{PixelSpacing:[1,1],SliceThickness:2,SpacingBetweenSlices:2}],PlaneOrientationSequence:[{ImageOrientationPatient:[1,0,0,0,1,0]}]}],
@@ -78,31 +86,52 @@ try{
       }
       const dict=new dcmjs.data.DicomDict(dcmjs.data.DicomMetaDictionary.denaturalizeDataset({MediaStorageSOPClassUID:sopClass,MediaStorageSOPInstanceUID:sop,TransferSyntaxUID:'1.2.840.10008.1.2.1',ImplementationClassUID:'2.25.202610260001'}));dict.dict=dcmjs.data.DicomMetaDictionary.denaturalizeDataset(ds);
       assert.equal((await archiveRequest('/instances',{method:'POST',headers:{'Content-Type':'application/dicom'},body:Buffer.from(dict.write())})).status,200);
+      if(renderingStress && slice%200===0)console.log(JSON.stringify({syntheticFixture:{series:seriesNo,uploaded:slice+1,dimensions:[size,size]}}));
     }
   }
-  const {createApp}=await module('src/app.ts');const app=createApp();appServer=createServer((req,res)=>{
+  const {createApp}=await module('src/app.ts');const app=createApp();const handleRequest=(req,res)=>{
+    if(renderingStress&&req.url?.startsWith('/ohif/')){
+      // GPU stress uses the real host-run authenticated gateway directly. The
+      // Linux edge -> Windows host connection hop reproduces connect-time 504s
+      // under this workload; production gateway/app share a Docker network.
+      // Static OHIF responses still come from its real nginx without decoding.
+      const upstream=httpRequest('http://127.0.0.1:'+viewerPort+req.url,{method:req.method,headers:req.headers},response=>{res.writeHead(response.statusCode,response.headers);response.pipe(res);});
+      upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});
+      res.once('close',()=>{if(!res.writableFinished)upstream.destroy();});req.pipe(upstream);return;
+    }
     if(req.url?.startsWith('/api/native-reporting/') && req.method!=='GET'){
       const started=performance.now();console.log(JSON.stringify({reportingRequest:'start',method:req.method,operation:req.url.split('/').at(-1)}));
       res.once('finish',()=>console.log(JSON.stringify({reportingRequest:'finish',method:req.method,status:res.statusCode,durationMs:Math.round(performance.now()-started)})));
     }
     app(req,res);
-  });await new Promise(r=>appServer.listen(0,'127.0.0.1',r));
+  };appServer=createServer(handleRequest);await new Promise(r=>appServer.listen(0,'127.0.0.1',r));
   const appPort=appServer.address().port;
   // Use the same direct edge -> OHIF route as Compose, avoiding Windows
   // published-port hairpin connection timeouts during bootstrap chunk fan-out.
   docker('network','create',networkName);networkCreated=true;
-  start(prefix+'-viewer',viewerImage,80,['--network',networkName,'--network-alias','ohif']);
+  viewerPort=start(prefix+'-viewer',viewerImage,80,['--network',networkName,'--network-alias','ohif']);
   let nginx=readFileSync(join(root,'docker/reverse-proxy/nginx.conf'),'utf8').replace('server app:3000 resolve;',`server host.docker.internal:${appPort};`).replace('listen 8080;','listen 80;');
   writeFileSync(join(temp,'edge.conf'),nginx);
-  const origin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
+  const edgeOrigin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
+  let origin=renderingStress?'http://127.0.0.1:'+appPort:edgeOrigin;
+  if(renderingStress&&process.env.OHIF_RENDER_HTTPS==='1'){
+    const openssl=process.platform==='win32'?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl';
+    if(process.platform==='win32'&&!existsSync(openssl))throw Error('Synthetic HTTPS requires existing Git OpenSSL');
+    execFileSync(openssl,['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(temp,'test.key'),'-out',join(temp,'test.crt'),'-days','1','-subj','/CN=rispro-synthetic.invalid','-addext','subjectAltName=DNS:rispro-synthetic.invalid,IP:127.0.0.1'],{stdio:'pipe'});
+    tlsServer=createHttpsServer({key:readFileSync(join(temp,'test.key')),cert:readFileSync(join(temp,'test.crt'))},handleRequest);
+    await new Promise(r=>tlsServer.listen(0,'127.0.0.1',r));origin='https://127.0.0.1:'+tlsServer.address().port;
+  }
   const login=jwt.sign({sub:userId,role:'doctor'},env.jwtSecret,{expiresIn:'1h'});
   const {launchReportingBoardCaseInOhif}=await module('src/modules/ohif-viewer/service.ts');
   // A non-localhost HTTP origin verifies LAN-compatible capture and UUID creation.
   // Only Chromium resolves this reserved test hostname to the loopback fixture.
   const viewerOrigin=origin.replace('127.0.0.1','rispro-synthetic.invalid');
-  browser=await chromium.launch({headless:true,args:['--host-resolver-rules=MAP rispro-synthetic.invalid 127.0.0.1','--no-proxy-server']});const context=await browser.newContext({viewport:{width:1600,height:1000}});
+  browser=await chromium.launch({headless:true,channel:renderingStress&&process.env.OHIF_RENDER_BROWSER==='msedge'?'msedge':undefined,args:['--host-resolver-rules=MAP rispro-synthetic.invalid 127.0.0.1','--no-proxy-server']});const context=await browser.newContext({viewport:{width:1600,height:1000},ignoreHTTPSErrors:renderingStress});
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
+  if(renderingStress){
+    await runRenderingStress({browser,context,c:cases[0],origin:viewerOrigin,apiOrigin:origin,temp,launch:includePriors=>launchReportingBoardCaseInOhif({userId,appRole:'doctor'},cases[0].appointmentId,includePriors)});
+  }else{
   const pages=[];
   for(const c of cases){
     const startAt=performance.now();const launch=await launchReportingBoardCaseInOhif({userId,appRole:'doctor'},c.appointmentId,true);assert.equal(launch.status,'ready');assert.equal(launch.priorStudyCount,1);
@@ -151,6 +180,21 @@ try{
     assert.equal(await panel.getByLabel('Findings',{exact:true}).inputValue(),retained);
     await panel.getByRole('button',{name:'Save',exact:true}).click();await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
     if(c.modality==='CT'){
+      // Reopen the saved synthetic draft through the real Reporting Worklist UI.
+      const board=await context.newPage();activePage=board;
+      await board.goto(viewerOrigin+'/doctor/reporting-board');
+      await board.getByRole('button',{name:'Open actions for V2-'+String(c.appointmentId).padStart(6,'0'),exact:true}).click();
+      const openedPromise=originalOhif.open_mode==='same_tab'?Promise.resolve(board):context.waitForEvent('page');
+      await board.getByRole('menuitem',{name:'Open Images',exact:true}).click();
+      const reopened=await openedPromise;activePage=reopened;
+      await reopened.waitForURL('**/ohif/viewer?**');
+      await reopened.waitForFunction(()=>{try{const s=window.services;return !!s?.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.getCurrentImageId?.();}catch{return false;}},null,{timeout:120000});
+      await reopened.getByRole('button',{name:'Report',exact:true}).first().click();
+      const reopenedPanel=reopened.getByRole('region',{name:'RISpro report'});
+      await reopenedPanel.getByLabel('Findings',{exact:true}).waitFor();
+      assert.equal(await reopenedPanel.getByLabel('Findings',{exact:true}).inputValue(),retained);
+      await reopened.screenshot({path:join(temp,'CT-worklist-reopened.png')});
+      await reopened.close();if(reopened!==board)await board.close();activePage=page;
       const other=await context.newPage();activePage=other;await other.goto(page.url());await other.getByRole('button',{name:'Report',exact:true}).first().click();
       const otherPanel=other.getByRole('region',{name:'RISpro report'});
       await otherPanel.getByLabel('Impression',{exact:true}).fill('SYNTHETIC concurrent editor.');await otherPanel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
@@ -309,7 +353,9 @@ try{
   await pages[0].getByRole('region',{name:'RISpro report'}).getByText('Final — signed',{exact:true}).waitFor();
   assert.equal(await pages[0].getByRole('button',{name:'Add Key Image',exact:true}).count(),0);
   console.log('PASS: real modified OHIF CT/MRI native reporting browser journey');
+  }
 }catch(error){
+  for(const name of containers){const logs=spawnSync('docker',['logs',name],{encoding:'utf8'});writeFileSync(join(temp,name+'.log'),(logs.stdout||'')+(logs.stderr||''));}
   if(activePage)await activePage.screenshot({path:join(temp,'failure.png'),fullPage:true}).catch(()=>undefined);
   if(activePage){
     const diagnostics=await activePage.evaluate(()=>{
@@ -323,7 +369,7 @@ try{
   }
   throw error;
 }finally{
-  if(browser)await browser.close();if(appServer)await new Promise(r=>{appServer.closeAllConnections();appServer.close(r);});
+  if(browser)await browser.close();if(tlsServer)await new Promise(r=>{tlsServer.closeAllConnections();tlsServer.close(r);});if(appServer)await new Promise(r=>{appServer.closeAllConnections();appServer.close(r);});
   for(const name of containers.reverse())try{docker('rm','-f',name);}catch{}
   const ids=cases.map(c=>c.appointmentId);const db=await pool.connect();
   try{await db.query('begin');await db.query('set local session_replication_role=replica');

@@ -25,13 +25,17 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY docker/ohif/app-config.js platform/app/public/config/rispro.js
 COPY docker/ohif/rispro-reporting extensions/rispro-reporting
 COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
+COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
+COPY docker/ohif/verify-browser-build.cjs /tmp/verify-browser-build.cjs
 RUN node /tmp/register-reporting.cjs \
+  && node /tmp/configure-viewer.cjs \
   && mkdir -p node_modules/@rispro \
   && ln -s ../../extensions/rispro-reporting node_modules/@rispro/extension-reporting
 ENV QUICK_BUILD=true
 ENV PUBLIC_URL=${PUBLIC_URL}
 RUN bun run show:config \
-  && bun run build
+  && bun run build \
+  && node /tmp/verify-browser-build.cjs
 
 FROM nginx:1.27.5-alpine
 COPY docker/ohif/nginx.conf /etc/nginx/conf.d/default.conf

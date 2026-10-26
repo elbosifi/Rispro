@@ -1,5 +1,10 @@
 // A context UUID selects this tab's authenticated launch; it is not a bearer token.
-const risproContext = new URLSearchParams(window.location.search).get('risproContext');
+const risproParams = new URLSearchParams(window.location.search);
+const risproContext = risproParams.get('risproContext');
+const risproStudyInstanceUIDs = [...new Set([
+  risproParams.get('StudyInstanceUIDs') || '',
+  risproParams.get('risproPriorStudyUIDs') || '',
+].join(',').split(',').filter(uid => /^[0-9]+(?:\.[0-9]+)+$/.test(uid) && uid.length <= 64))];
 const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
   ? '/ohif-dicomweb/context/' + risproContext : '/ohif-dicomweb';
 window.config = {
@@ -20,6 +25,8 @@ window.config = {
       configuration: {
         friendlyName: 'RISpro authorized imaging source',
         name: 'RISpro',
+        // Discovery selectors only; the server's per-tab allowlist remains authoritative.
+        risproStudyInstanceUIDs,
         qidoRoot: risproDicomWebRoot,
         wadoRoot: risproDicomWebRoot,
         wadoUriRoot: risproDicomWebRoot,

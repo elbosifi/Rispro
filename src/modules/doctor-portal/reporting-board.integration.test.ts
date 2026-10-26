@@ -910,11 +910,41 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
         await seedSonicDicomCache(external.appointmentId,"draft");
         await assert.rejects(()=>native.createReport(actor,external.contextId,external.appointmentId),/external reporting ownership|manual final override/);
         assert.equal(await native.getReport(actor,external.appointmentId),null);
+        const final=await fixture(supervisor);
+        await seedSonicDicomCache(final.appointmentId,"final");
+        await assert.rejects(()=>native.createReport({userId:supervisor.id,appRole:"supervisor"},final.contextId,final.appointmentId),/external reporting ownership/);
+        await seedSonicDicomCache(external.appointmentId,"no_report");
+        await pool.query("update doctor_portal.reporting_board_sonicdicom_cache set sonicdicom_latest_document_id='synthetic-existing-document' where appointment_id=$1",[external.appointmentId]);
+        await assert.rejects(()=>native.createReport(actor,external.contextId,external.appointmentId),/external reporting ownership/);
+        await pool.query("update doctor_portal.reporting_board_sonicdicom_cache set sonicdicom_latest_document_id=null where appointment_id=$1",[external.appointmentId]);
         await seedSonicDicomCache(external.appointmentId,"unavailable");
         await assert.rejects(()=>native.createReport(actor,external.contextId,external.appointmentId),/unverifiable legacy status/);
         const manual=await fixture(supervisor);
         await pool.query("insert into doctor_portal.reporting_board_manual_final_overrides(appointment_id,reason,created_by_user_id,created_by_doctor_id) values($1,'Synthetic existing manual final',$2,$3)",[manual.appointmentId,supervisor.id,supervisor.doctorId]);
         await assert.rejects(()=>native.createReport({userId:supervisor.id,appRole:"supervisor"},manual.contextId,manual.appointmentId),/external reporting ownership|manual final override/);
+      });
+      await t.test("a never-checked worklist queue entry is not external ownership when SonicDICOM reporting is disabled",async()=>{
+        const queued=await fixture(doctor,true);
+        await sonicDicomCacheService.enqueueReportingBoardSonicDicomCacheRows([queued.appointmentId]);
+        const before=(await pool.query("select * from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1",[queued.appointmentId])).rows[0];
+        assert.equal(before.report_status,"unavailable");assert.equal(before.last_attempt_at,null);assert.equal(before.source,null);
+        const report=await native.createReport(actor,queued.contextId,queued.appointmentId);
+        assert.equal(report.appointmentId,queued.appointmentId);
+        assert.equal((await native.createReport(actor,queued.contextId,queued.appointmentId)).id,report.id);
+        assert.deepEqual((await pool.query("select * from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1",[queued.appointmentId])).rows[0],before,"Creation preserves the existing cache record");
+      });
+      await t.test("failed external checks and enabled but unverified reporting still fail closed",async()=>{
+        const failed=await fixture();
+        await sonicDicomCacheService.enqueueReportingBoardSonicDicomCacheRows([failed.appointmentId]);
+        await seedSonicDicomCache(failed.appointmentId,"throw");
+        await assert.rejects(()=>native.createReport(actor,failed.contextId,failed.appointmentId),/unverifiable legacy status/);
+        assert.equal(await native.getReport(actor,failed.appointmentId),null);
+        const enabled=await fixture();
+        await sonicDicomCacheService.enqueueReportingBoardSonicDicomCacheRows([enabled.appointmentId]);
+        await withSonicDicomConfig({sonicDicomReportsEnabled:true,sonicDicomReadinessMode:"api",sonicDicomSqlEnabled:false},async()=>{
+          await assert.rejects(()=>native.createReport(actor,enabled.contextId,enabled.appointmentId),/External reporting ownership exists or cannot be verified/);
+        });
+        assert.equal(await native.getReport(actor,enabled.appointmentId),null);
       });
       await t.test("explicit concurrent creation is unique and reopening returns the same report",async()=>{
         const results=await Promise.all([native.createReport(actor,first.contextId,first.appointmentId),native.createReport(actor,first.contextId,first.appointmentId)]);
@@ -4212,7 +4242,10 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const launchToken = launch.launchUrl.split("/").at(-1)!;
     const exchangedAt = Date.now();
     const redirect = await ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response);
-    assert.ok(redirect.includes(uid) && redirect.includes(priorUid));
+    const redirectParams = new URL(redirect, "http://synthetic.invalid").searchParams;
+    assert.equal(redirectParams.get("StudyInstanceUIDs"), uid);
+    assert.equal(redirectParams.get("risproPriorStudyUIDs"), priorUid);
+    assert.ok(redirectParams.get("risproContext"));
     const { env } = await import("../../config/env.js");
     const sessionDurationMs = env.sessionHours * 60 * 60 * 1000;
     assert.ok(viewerCookieExpiresAt.getTime() >= exchangedAt + sessionDurationMs - 1000);
@@ -4261,7 +4294,8 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
     const reopened = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, false);
     assert.ok(reopened.status === "ready");
-    await ohifViewerService.exchangeViewerLaunchToken(reopened.launchUrl.split("/").at(-1)!, doctor.id, response);
+    const reopenedRedirect = await ohifViewerService.exchangeViewerLaunchToken(reopened.launchUrl.split("/").at(-1)!, doctor.id, response);
+    assert.equal(new URL(reopenedRedirect,"http://synthetic.invalid").searchParams.has("risproPriorStudyUIDs"),false);
     const reopenedFrame = await rawApi(`${doctor.cookie}; ${env.ohifSessionCookieName}=${viewerCookie}`, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`);
     assert.equal(reopenedFrame.status, 200);
     assert.deepEqual(new Uint8Array(await reopenedFrame.arrayBuffer()), new Uint8Array([1, 2, 3]));
