@@ -2,6 +2,61 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { getStudiesForPatientByMRN, diagnosticSeriesRules } = require('./configure-viewer.cjs');
 const { protectBootstrapHtml } = require('./verify-browser-build.cjs');
+const { configureLoading, trackCachedFrames, isDiagnosticReady } = require('./configure-viewer.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+test('active synthetic CT/MRI frames count cached successes, failures, eviction and series switching without loading images', () => {
+  const target = new EventTarget();
+  const events = Object.fromEntries(['IMAGE_LOADED','IMAGE_LOAD_FAILED','IMAGE_CACHE_IMAGE_ADDED','IMAGE_CACHE_IMAGE_REMOVED'].map(name => [name,name]));
+  const cached = new Set(['ct1']);
+  const cache = { isLoaded: id => cached.has(id), getImage: id => cached.has(id) ? { imageId: id } : undefined };
+  const updates = [];
+  const send = (type, id) => { const event = new Event(type); event.detail = { imageId: id }; target.dispatchEvent(event); };
+  const stop = trackCachedFrames(['ct1','ct2','ct3'], cache, target, events, value => updates.push(value));
+  assert.deepEqual(updates.at(-1), {loaded:1,total:3,failed:0});
+  send(events.IMAGE_LOAD_FAILED,'ct2');
+  assert.deepEqual(updates.at(-1), {loaded:1,total:3,failed:1});
+  send(events.IMAGE_LOADED,'ct3'); // Load event alone is not proof of a cached frame.
+  assert.equal(updates.at(-1).loaded,1);
+  cached.add('ct3'); send(events.IMAGE_CACHE_IMAGE_ADDED,'ct3');
+  assert.deepEqual(updates.at(-1), {loaded:2,total:3,failed:1});
+  cached.add('ct2'); send(events.IMAGE_CACHE_IMAGE_ADDED,'ct2');
+  assert.deepEqual(updates.at(-1), {loaded:3,total:3,failed:0});
+  cached.delete('ct1'); send(events.IMAGE_CACHE_IMAGE_REMOVED,'ct1');
+  assert.equal(updates.at(-1).loaded,2);
+  stop();
+  const count = updates.length;
+  send(events.IMAGE_LOAD_FAILED,'ct3');
+  assert.equal(updates.length,count);
+  cached.add('mr1');
+  const stopMR = trackCachedFrames(['mr1','mr2'],cache,target,events,value => updates.push(value));
+  send(events.IMAGE_LOAD_FAILED,'ct1');
+  assert.deepEqual(updates.at(-1), {loaded:1,total:2,failed:0});
+  stopMR();
+});
+
+test('cold, warm, blank and volume readiness require a completed render and real pixels', () => {
+  const viewport = { viewportStatus:'loading', getCurrentImageId: () => 'ct1',
+    getCornerstoneImage: () => ({imageId:'ct1',getPixelData:() => new Uint16Array([1,2])}) };
+  assert.equal(isDiagnosticReady(viewport,'rendered'),false);
+  viewport.viewportStatus='rendered';
+  assert.equal(isDiagnosticReady(viewport,'rendered'),true); // Also handles pre-listener render.
+  viewport.getCurrentImageId=()=>'ct2';
+  assert.equal(isDiagnosticReady(viewport,'rendered'),false);
+  assert.equal(isDiagnosticReady({viewportStatus:'rendered',getImageData:()=>({scalarData:new Uint16Array([1])})},'rendered'),true);
+  assert.equal(isDiagnosticReady({viewportStatus:'rendered',getImageData:()=>({})},'rendered'),false);
+});
+
+test('pinned loading patches fail closed if the upstream layout changes', () => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'rispro-loading-test-'));
+  try {
+    fs.mkdirSync(path.join(root,'extensions/default/src/ViewerLayout'),{recursive:true});
+    fs.writeFileSync(path.join(root,'extensions/default/src/ViewerLayout/index.tsx'),'upstream changed');
+    assert.throws(()=>configureLoading(root),/Pinned OHIF loading integration changed/);
+  } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
 
 test('all bootstrap scripts opt out of CDN script rewriting before src without changing their load order',()=>{
   const html='<script>window.x=1;</script><script src="app-config.js"></script><script type="module" src="init-service-worker.js"></script><script defer src="app.bundle.hash.js"></script>';

@@ -10,6 +10,7 @@ const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
 window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
+  showLoadingIndicator: true,
   // Leave bandwidth available for visible images on slower connections.
   maxNumRequests: {
     interaction: 4,
