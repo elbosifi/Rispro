@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {chromium,webkit,devices} from '@playwright/test';
+import {installRenderingProbe} from './ohif-rendering-stress.mjs';
 
 const configurations=[
   ['phone-portrait','iPhone 13',390,844],
@@ -110,6 +111,7 @@ async function closePanel(page,side){
 }
 
 export async function runResponsiveAcceptance({context:sourceContext,cases,origin,temp,launch}){
+  if(process.env.OHIF_RELIABILITY==='1')return runReliabilityAcceptance({sourceContext,cases,origin,temp,launch});
   const results=[];
   for(const [engine,browserType] of [['chromium',chromium],['webkit',webkit]]){
     if(selectedEngine&&engine!==selectedEngine)continue;
@@ -301,4 +303,254 @@ export async function runResponsiveAcceptance({context:sourceContext,cases,origi
     }}finally{await browser.close();}
   }
   writeFileSync(join(temp,'responsive-results.json'),JSON.stringify(results,null,2));
+}
+
+export async function addReliabilityDocuments({c,dcmjs,archiveRequest}){
+  const pdfObjects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Length 46 >>\nstream\nBT /F1 12 Tf 20 100 Td (SYNTHETIC PDF) Tj ET\nendstream'];
+  let pdf='%PDF-1.4\n';const offsets=[0];
+  pdfObjects.forEach((value,i)=>{offsets.push(Buffer.byteLength(pdf));pdf+=`${i+1} 0 obj\n${value}\nendobj\n`;});
+  const xref=Buffer.byteLength(pdf);
+  pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  c.pdfDocument=Buffer.from(pdf).toString('base64');
+  for(const [number,suffix,label] of [[5,'7','Request Documents'],[6,'104.2','Clinical Documents (unsupported CDA)'],[7,'104.1','Supported PDF'],[8,'7','Clinical Documents (scanned)']]){
+    const sopClass='1.2.840.10008.5.1.4.1.1.'+suffix;
+    const ds={SOPClassUID:sopClass,SOPInstanceUID:c.study+'.'+number+'.1',StudyInstanceUID:c.study,SeriesInstanceUID:c.study+'.'+number,
+      PatientName:'SYNTHETIC^CT',PatientID:c.identifier,StudyDate:'20261027',StudyTime:'120000',
+      AccessionNumber:'V2-'+String(c.appointmentId).padStart(6,'0'),Modality:suffix==='7'?'OT':'DOC',SeriesNumber:number,
+      SeriesDescription:label,InstanceNumber:1};
+    if(suffix==='7')Object.assign(ds,{_vrMap:{PixelData:'OW'},Rows:64,Columns:64,SamplesPerPixel:1,PhotometricInterpretation:'MONOCHROME2',
+      BitsAllocated:16,BitsStored:16,HighBit:15,PixelRepresentation:0,ImageType:['DERIVED','SECONDARY'],
+      PixelData:Uint16Array.from({length:4096},(_,i)=>i%64*20).buffer});
+    else Object.assign(ds,{_vrMap:{EncapsulatedDocument:'OB'},MIMETypeOfEncapsulatedDocument:number===7?'application/pdf':'text/xml',
+      DocumentTitle:label,EncapsulatedDocument:Uint8Array.from(Buffer.from(number===7?pdf:'<ClinicalDocument xmlns="urn:hl7-org:v3"/>')).buffer});
+    const dict=new dcmjs.data.DicomDict(dcmjs.data.DicomMetaDictionary.denaturalizeDataset({MediaStorageSOPClassUID:sopClass,
+      MediaStorageSOPInstanceUID:ds.SOPInstanceUID,TransferSyntaxUID:'1.2.840.10008.1.2.1',ImplementationClassUID:'2.25.202610270001'}));
+    dict.dict=dcmjs.data.DicomMetaDictionary.denaturalizeDataset(ds);
+    assert.equal((await archiveRequest('/instances',{method:'POST',headers:{'Content-Type':'application/dicom'},body:Buffer.from(dict.write())})).status,200);
+  }
+}
+
+async function runReliabilityAcceptance({sourceContext,cases,origin,temp,launch}){
+  const results=[];
+  for(const [engine,browserType] of [['chromium',chromium],['webkit',webkit]]){
+    if(selectedEngine&&selectedEngine!==engine)continue;
+    const browser=await browserType.launch({headless:true});
+    // This host's Chromium software GPU lacks EXT_texture_norm16. Removing
+    // float-linear support also breaks its scalar textures, including stacks.
+    // WebKit has norm16 and exercises the actual iOS-style SHORT scalar path.
+    try{for(const capability of process.env.OHIF_RELIABILITY_CAPABILITY?[process.env.OHIF_RELIABILITY_CAPABILITY]:process.env.OHIF_RELIABILITY_PROBE||engine==='chromium'?['native']:['native','no-float-linear']){
+      for(const desktop of [false,true]){
+        if(selectedCase && (desktop?'desktop':'phone-portrait')!==selectedCase)continue;
+        const label=engine+'-'+(desktop?'desktop':'phone')+'-'+capability;
+        const context=await browser.newContext({...desktop?{}:devices['iPhone 13'],viewport:desktop?{width:1440,height:900}:{width:390,height:844},
+          storageState:await sourceContext.storageState()});
+        await context.addInitScript(installRenderingProbe);
+        await context.addInitScript(({capability})=>{
+          window.__glEvidence={uploads:[],scalarUploads:[],lost:0,messages:[]};
+          document.addEventListener('webglcontextlost',()=>window.__glEvidence.lost++,true);
+          for(const api of [window.WebGLRenderingContext,window.WebGL2RenderingContext].filter(Boolean)){
+            const original=api.prototype.getExtension;
+            api.prototype.getExtension=function(name){return capability==='no-float-linear'&&name==='OES_texture_float_linear'?null:original.call(this,name);};
+            const upload=api.prototype.texImage2D;
+            api.prototype.texImage2D=function(...args){
+              if(args.length===9&&args[4]===2&&[this.FLOAT,this.UNSIGNED_BYTE].includes(args[7]))window.__glEvidence.uploads.push({width:args[3],format:[this.RED,this.LUMINANCE,this.ALPHA].includes(args[6])?'opacity':'color',type:args[7]===this.FLOAT?'FLOAT':'UNSIGNED_BYTE'});
+              return upload.apply(this,args);
+            };
+            const sub=api.prototype.texSubImage2D;
+            api.prototype.texSubImage2D=function(...args){
+              if(args.length===9&&args[5]===2&&[this.FLOAT,this.UNSIGNED_BYTE].includes(args[7]))window.__glEvidence.uploads.push({width:args[4],format:[this.RED,this.LUMINANCE,this.ALPHA].includes(args[6])?'opacity':'color',type:args[7]===this.FLOAT?'FLOAT':'UNSIGNED_BYTE'});
+              return sub.apply(this,args);
+            };
+            const scalar=api.prototype.texSubImage3D;
+            if(scalar)api.prototype.texSubImage3D=function(...args){
+              const type=args[9]===this.SHORT?'SHORT':args[9]===this.UNSIGNED_SHORT?'UNSIGNED_SHORT':args[9]===this.FLOAT?'FLOAT':String(args[9]);
+              if(!window.__glEvidence.scalarUploads.includes(type))window.__glEvidence.scalarUploads.push(type);
+              return scalar.apply(this,args);
+            };
+          }
+        },{capability});
+        const page=await context.newPage(),errors=[],consoleErrors=[],limitations=[];
+        page.on('pageerror',e=>errors.push(e.stack||e.message));
+        page.on('console',m=>{
+          const text=m.text();
+          if(/Loading plugin data.*object-src 'none'|because it does not appear in the object-src directive of the Content Security Policy/.test(text)){
+            limitations.push('Existing OHIF PDF object blocked by viewer CSP; handler routing checked, PDF painting unverified.');return;
+          }
+          if(/Refused to execute a script because its hash, its nonce, or 'unsafe-inline'.*Content Security Policy/.test(text))return;
+          // Existing bootstrap CSP notices and the tour's stale selectors are
+          // recorded separately from renderer failures. Thumbnail disposal
+          // deliberately invokes loseContext; the probe distinguishes it.
+          if((m.type()==='error'||/WebGL.*(INVALID|error)/i.test(text)) &&
+              !/Executing inline script violates|Shepherd step|advanceOn:|CONTEXT_LOST_WEBGL: loseContext/.test(text))consoleErrors.push(text);
+        });
+        const c=cases.find(c=>c.modality==='CT');
+        // The fixture archive emits absolute loopback BulkDataURIs. Supply the
+        // same synthetic PDF inline so its existing handler can be exercised
+        // without granting a browser direct access to an archive origin.
+        await page.route('**/ohif-dicomweb/**/metadata',async route=>{
+          const response=await route.fetch(),data=await response.json();
+          for(const instance of data)if(instance['00080016']?.Value?.[0]==='1.2.840.10008.5.1.4.1.1.104.1')instance['00420011']={vr:'OB',InlineBinary:c.pdfDocument};
+          await route.fulfill({response,json:data});
+        });
+        const snapshot=()=>page.evaluate(()=>{
+          const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+          const gl=v&&s.cornerstoneViewportService.getRenderingEngine().getOffscreenMultiRenderWindow(v.id).getOpenGLRenderWindow().getContext();
+          return {type:v?.type,index:v?.getCurrentImageIdIndex(),slices:v?.getNumberOfSlices(),camera:v?.getCamera(),
+            image:v?.getCurrentImageId(),overlay:[...document.querySelectorAll('.viewport-overlay')].map(el=>el.textContent).join(' '),gl:window.__glEvidence,
+            probe:window.__renderProbe.events,layout:s.viewportGridService.getState().isHangingProtocolLayout,
+            activeGL:gl&&{lost:gl.isContextLost(),error:gl.getError()},engine:s.cornerstoneViewportService.getRenderingEngine().id,
+            norm16:!!gl?.getExtension('EXT_texture_norm16'),volumeType:v?.getVolumeId&&window.cornerstone.cache.getVolume(v.getVolumeId())?.dataType,
+            pixels:window.__lastDiagnosticPixels};
+        });
+        const rendered=async()=>{
+          await page.waitForFunction(()=>{
+            try {
+            const s=window.services,v=s?.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+            if(!v||v.viewportStatus!=='rendered')return false;
+            const c=document.createElement('canvas');c.width=c.height=96;
+            const ctx=c.getContext('2d');ctx.drawImage(v.canvas,0,0,96,96);const data=ctx.getImageData(0,0,96,96).data;
+            // Inspect the central image area. A uniformly dark image rectangle
+            // surrounded by a black canvas must not count as diagnostic pixels.
+            let lo=255,hi=0;for(let y=24;y<72;y++)for(let x=40;x<56;x++){
+              const i=(y*96+x)*4;lo=Math.min(lo,data[i]);hi=Math.max(hi,data[i]);
+            }
+            window.__lastDiagnosticPixels={lo,hi,contrast:hi-lo};return hi-lo>20;
+            } catch { return false; }
+          },null,{timeout:process.env.OHIF_RELIABILITY_PROBE?20000:90000});
+          const value=await snapshot();
+          assert.ok(Number.isInteger(value.index)&&value.index>=0&&Number.isFinite(value.slices)&&value.slices>value.index,JSON.stringify(value));
+          assert.ok(['focalPoint','position','viewUp','viewPlaneNormal'].every(key=>value.camera[key].every(Number.isFinite)),'Finite MPR camera');
+          assert.ok(Number.isFinite(value.camera.parallelScale)&&value.camera.parallelScale>0,'Finite diagnostic scale');
+          assert.doesNotMatch(value.overlay||'',/NaN|undefined|Infinity/);
+          assert.deepEqual(value.activeGL,{lost:false,error:0},'Active diagnostic WebGL context must remain healthy');
+          return value;
+        };
+        const select=async number=>{
+          const left=page.locator('[data-rispro-panel="left"]');
+          if(!await left.isVisible()){
+            if(desktop)await page.locator('[data-rispro-panel="left"] [data-cy="side-panel-header-left"]').first().click();
+            else await page.getByRole('button',{name:'Series',exact:true}).click();
+          }
+          const uid=await page.evaluate(number=>window.services.displaySetService.getActiveDisplaySets().find(ds=>ds.SeriesNumber===number)?.displaySetInstanceUID,number);
+          const thumbnail=left.locator(`[id="thumbnail-${uid}"]`);
+          await thumbnail.scrollIntoViewIfNeeded();
+          // The description is a TooltipTrigger button on list rows. Tap the
+          // series-number region so this tests selection, not the tooltip.
+          const position={x:18,y:[6,7].includes(number)?30:55};
+          if(desktop)await thumbnail.dblclick({position});else await thumbnail.tap({position});
+        };
+        try{
+          console.log(JSON.stringify({reliabilityStage:{label,stage:'launch'}}));
+          const prepared=await launch(c);assert.equal(prepared.status,'ready');
+          await page.goto(origin+prepared.launchUrl,{waitUntil:'domcontentloaded'});await rendered();
+          for(const label of ['Skip all','Confirm and hide']){
+            const button=page.getByText(label,{exact:true});try{await button.waitFor({timeout:3000});await button.click();}catch(e){if(e.name!=='TimeoutError')throw e;}
+          }
+          await page.locator('.shepherd-modal-is-visible').waitFor({state:'hidden'});
+          const metadata=await page.evaluate(()=>window.services.displaySetService.getActiveDisplaySets().map(ds=>({series:ds.SeriesNumber,sop:ds.SOPClassUID,
+            handler:ds.SOPClassHandlerId,unsupported:ds.unsupported,frames:ds.numImageFrames,reconstructable:ds.isReconstructable})));
+          writeFileSync(join(temp,label+'-displaysets.json'),JSON.stringify(metadata,null,2));
+          if(process.env.OHIF_RELIABILITY_PROBE!=='documents'){
+            await select(1);await rendered();
+            for(const orientation of ['sagittal','coronal','axial']){
+              console.log(JSON.stringify({reliabilityStage:{label,stage:orientation}}));
+              await page.evaluate(orientation=>{
+                const s=window.services,id=s.viewportGridService.getActiveViewportId(),v=s.cornerstoneViewportService.getCornerstoneViewport(id);
+                if(v.type==='stack')window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[{viewportId:id,
+                  displaySetInstanceUIDs:s.viewportGridService.getDisplaySetsUIDsForViewport(id),viewportOptions:{viewportType:'orthographic',orientation},displaySetOptions:[{}]}]});
+                else window.commandsManager.runCommand('setViewportOrientation',{viewportId:id,orientation});
+              },orientation);
+              await page.waitForFunction(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());return v?.type==='orthographic'&&window.cornerstone.cache.getVolume(v.getVolumeId())?.loadStatus.loaded;},null,{timeout:90000});
+              await rendered();await page.screenshot({path:join(temp,label+'-'+orientation+'.png')});
+            }
+            const evidence=await page.evaluate(()=>window.__glEvidence);
+            assert.ok(evidence.uploads.some(u=>u.format==='opacity'&&u.type===(capability==='no-float-linear'?'UNSIGNED_BYTE':'FLOAT')),'Expected actual opacity texture upload');
+            if(capability==='no-float-linear')assert.ok(!evidence.uploads.some(u=>u.format==='opacity'&&u.type==='FLOAT'),'Unsupported float opacity texture must never be allocated');
+            if(engine==='webkit'){
+              assert.ok((await snapshot()).norm16,'Missing-extension volume test requires a valid integer scalar path');
+              assert.ok(evidence.scalarUploads.includes('SHORT'),'Signed CT scalar textures must retain the SHORT path');
+            }
+            for(const number of [5,8]){
+              await select(number);await rendered();
+              assert.equal((await snapshot()).type,'stack','Non-reconstructable scanned documents must leave MPR');
+              await select(1);await rendered();
+              if(number===5){
+                await page.evaluate(()=>{const s=window.services,id=s.viewportGridService.getActiveViewportId();window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[{
+                  viewportId:id,displaySetInstanceUIDs:s.viewportGridService.getDisplaySetsUIDsForViewport(id),viewportOptions:{viewportType:'orthographic',orientation:'sagittal'},displaySetOptions:[{}]}]});});
+                await page.waitForFunction(()=>{const s=window.services;return s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.type==='orthographic';});await rendered();
+              }
+            }
+            await page.evaluate(()=>{const s=window.services,id=s.viewportGridService.getActiveViewportId(),ds=s.displaySetService.getActiveDisplaySets().find(ds=>ds.SeriesNumber===1);window.commandsManager.runCommand('setDisplaySetsForViewports',{
+              viewportsToUpdate:[{viewportId:id,displaySetInstanceUIDs:[ds.displaySetInstanceUID],viewportOptions:{viewportType:'stack'},displaySetOptions:[{}]}]});});
+            await page.waitForFunction(()=>{const s=window.services;return s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.type==='stack';});
+            await rendered();
+            await select(2);await page.waitForFunction(uid=>{const s=window.services;return s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.getCurrentImageId()?.includes('/series/'+uid+'/');},c.study+'.2');await rendered();
+          }
+          // OHIF's own grid-layout command changes the compatibility path:
+          // getViewportsRequireUpdate returns early for custom layouts.
+          await page.evaluate(()=>window.commandsManager.runCommand('setViewportGridLayout',{numRows:1,numCols:1}));
+          await rendered();
+          await page.waitForFunction(()=>window.services.viewportGridService.getState().isHangingProtocolLayout===false);
+          for(const number of [5,8,6,7]){
+            console.log(JSON.stringify({reliabilityStage:{label,stage:'document-'+number}}));
+            await select(number);await page.waitForTimeout(1500);
+            writeFileSync(join(temp,label+'-document-'+number+'.html'),await page.content());
+            if([5,8].includes(number))await rendered();
+            else if(number===6){assert.equal(errors.length,0,errors.join('\n'));await page.getByText(/not supported|unsupported content/i).first().waitFor({timeout:5000});}
+            else {
+              const pdf=page.locator('object[type="application/pdf"]');await pdf.waitFor({timeout:10000});
+              assert.match(await pdf.getAttribute('data'),/^blob:/,'Existing supported PDF handler must still receive the document');
+            }
+            await select(2);await rendered();
+          }
+          if(!desktop&&!process.env.OHIF_RELIABILITY_PROBE){
+            for(const failure of ['create','assign','orientation']){
+              console.log(JSON.stringify({reliabilityStage:{label,stage:'recover-'+failure}}));
+              await page.evaluate(failure=>{
+                const s=window.services,id=s.viewportGridService.getActiveViewportId();
+                if(failure==='orientation'){
+                  // The prior cases leave a stack; first initialize a volume.
+                  window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[{viewportId:id,
+                    displaySetInstanceUIDs:s.viewportGridService.getDisplaySetsUIDsForViewport(id),viewportOptions:{viewportType:'orthographic',orientation:'axial'},displaySetOptions:[{}]}]});
+                  return;
+                }
+                const target=failure==='create'?s.cornerstoneCacheService:window.cornerstone.VolumeViewport.prototype;
+                const key=failure==='create'?'createViewportData':'setVolumes',original=target[key];
+                target[key]=async function(...args){target[key]=original;throw Error('SYNTHETIC MPR '+failure+' rejection');};
+                window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[{viewportId:id,
+                  displaySetInstanceUIDs:s.viewportGridService.getDisplaySetsUIDsForViewport(id),viewportOptions:{viewportType:'orthographic',orientation:'sagittal'},displaySetOptions:[{}]}]});
+              },failure);
+              if(failure==='orientation'){
+                await page.waitForFunction(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());return v?.type==='orthographic'&&window.cornerstone.cache.getVolume(v.getVolumeId())?.loadStatus.loaded;});
+                await rendered();
+                await page.evaluate(()=>{
+                  const s=window.services,id=s.viewportGridService.getActiveViewportId(),v=s.cornerstoneViewportService.getCornerstoneViewport(id),original=v.setOrientation;
+                  v.setOrientation=()=>{v.setOrientation=original;throw Error('SYNTHETIC MPR orientation rejection');};
+                  window.commandsManager.runCommand('setViewportOrientation',{viewportId:id,orientation:'coronal'});
+                });
+              }
+              await page.getByText('MPR unavailable',{exact:true}).first().waitFor();
+              await page.waitForFunction(()=>{const s=window.services;return s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.type==='stack';});
+              await rendered();await select(1);await rendered();await select(2);await rendered();
+              // Let the notification expire before the next independent fault.
+              await page.waitForTimeout(7200);
+            }
+          }
+          assert.equal(errors.length,0,errors.join('\n'));assert.equal(consoleErrors.length,0,consoleErrors.join('\n'));
+          assert.deepEqual((await snapshot()).activeGL,{lost:false,error:0});
+          results.push({label,status:'PASS',metadata,limitations:[...new Set(limitations)],final:await snapshot()});
+          writeFileSync(join(temp,'reliability-results.json'),JSON.stringify(results,null,2));
+          console.log(JSON.stringify({reliability:{label,status:'PASS'}}));
+        }catch(error){
+          writeFileSync(join(temp,label+'-failure.html'),await page.content());
+          writeFileSync(join(temp,label+'-failure.json'),JSON.stringify({error:error.stack,errors,consoleErrors,state:await snapshot().catch(()=>null)},null,2));
+          await page.screenshot({path:join(temp,label+'-failure.png')}).catch(()=>{});throw error;
+        }finally{await context.close();}
+      }
+    }}finally{await browser.close();}
+  }
+  writeFileSync(join(temp,'reliability-results.json'),JSON.stringify(results,null,2));
 }

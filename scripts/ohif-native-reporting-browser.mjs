@@ -36,6 +36,7 @@ if(new URL(env.databaseUrl).href!==dbUrl.href)throw Error('Runtime database safe
 const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const responsive=process.env.OHIF_RESPONSIVE==='1';
+const reliability=responsive && process.env.OHIF_RELIABILITY==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
 const oldUploads=env.uploadsDir;const cases=[];let userId,doctorId,policySetId,appServer,tlsServer,browser,activePage,viewerPort;
@@ -69,14 +70,15 @@ try{
     const stressSize=process.env.OHIF_RENDER_SMOKE==='1'?256:512,stressSlices=process.env.OHIF_RENDER_SMOKE==='1'?40:800;
     if(renderingStress)Object.assign(c,{size:stressSize,slices:stressSlices});
     const template=renderingStress?Uint16Array.from({length:stressSize*stressSize},(_,i)=>{const x=i%stressSize,y=Math.floor(i/stressSize),r=((x-stressSize/2)/(stressSize*.36))**2+((y-stressSize/2)/(stressSize*.3))**2;return r<1?700+Math.round(220*Math.sin(x/19)+180*Math.cos(y/23)):20;}):null;
-    for(let seriesNo=renderingStress?0:1;seriesNo<=4;seriesNo++)for(let slice=0;slice<(renderingStress?(seriesNo===0?1:seriesNo<=2?stressSlices:Math.min(96,stressSlices)):16);slice++){
+    for(let seriesNo=renderingStress?0:1;seriesNo<=4;seriesNo++)for(let slice=0;slice<(reliability&&modality==='CT'&&seriesNo===1?512:renderingStress?(seriesNo===0?1:seriesNo<=2?stressSlices:Math.min(96,stressSlices)):16);slice++){
       if(!renderingStress && seriesNo===4 && (modality!=='MR' || slice!==0))continue;
-      const size=renderingStress?stressSize:modality==='CT'?256:192;const pixels=renderingStress?template.slice():new Uint16Array(size*size);
+      const size=renderingStress?stressSize:modality==='CT'?256:192;const pixels=renderingStress?template.slice():reliability&&modality==='CT'?new Int16Array(size*size):new Uint16Array(size*size);
       if(renderingStress){for(let i=0;i<pixels.length;i++)if(pixels[i]>20)pixels[i]+=(slice%16)*8+seriesNo*20;}
-      else for(let y=0;y<size;y++)for(let x=0;x<size;x++){const radius=((x-size/2)/(size*.36))**2+((y-size/2)/(size*.3))**2;pixels[y*size+x]=radius<1?600+Math.round(400*Math.sin(x/9)+300*Math.cos(y/11)+slice*20):20;}
+      else for(let y=0;y<size;y++)for(let x=0;x<size;x++){const radius=((x-size/2)/(size*.36))**2+((y-size/2)/(size*.3))**2;pixels[y*size+x]=radius<1?600+Math.round(400*Math.sin(x/9)+300*Math.cos(y/11)+(reliability?100*Math.sin(slice/8):slice*20)):reliability&&modality==='CT'?-1000:20;}
       const sopClass=renderingStress&&seriesNo===0?'1.2.840.10008.5.1.4.1.1.7':!renderingStress&&seriesNo===4?'1.2.840.10008.5.1.4.1.1.4.1':modality==='CT'?'1.2.840.10008.5.1.4.1.1.2':'1.2.840.10008.5.1.4.1.1.4';
       const sop=c.study+'.'+seriesNo+'.'+(slice+1);
       const ds={_vrMap:{PixelData:'OW'},SOPClassUID:sopClass,SOPInstanceUID:sop,StudyInstanceUID:c.study,SeriesInstanceUID:c.study+'.'+seriesNo,FrameOfReferenceUID:c.study+'.9',PatientName:'SYNTHETIC^'+modality,PatientID:identifier,PatientBirthDate:'19860101',PatientSex:'O',StudyDate:new Date().toISOString().slice(0,10).replaceAll('-',''),StudyTime:'120000',StudyDescription:'SYNTHETIC '+modality,AccessionNumber:'V2-'+String(appointmentId).padStart(6,'0'),Modality:modality,SeriesNumber:seriesNo,SeriesDescription:'SYNTHETIC '+modality+' SERIES '+seriesNo,InstanceNumber:slice+1,ImageType:['ORIGINAL','PRIMARY','AXIAL'],Rows:size,Columns:size,SamplesPerPixel:1,PhotometricInterpretation:'MONOCHROME2',BitsAllocated:16,BitsStored:16,HighBit:15,PixelRepresentation:0,ImageOrientationPatient:[1,0,0,0,1,0],ImagePositionPatient:[0,0,slice*2],PixelSpacing:[1,1],SliceThickness:2,SpacingBetweenSlices:2,WindowCenter:700,WindowWidth:1800,RescaleIntercept:0,RescaleSlope:1,PixelData:pixels.buffer};
+      if(reliability&&modality==='CT')ds.PixelRepresentation=1;
       // Distinct stored VOIs expose cross-series window leakage and cached
       // presentation restoration. Keep the established regression fixtures intact.
       if(responsive && seriesNo===2)Object.assign(ds,{WindowCenter:420,WindowWidth:900});
@@ -92,6 +94,12 @@ try{
       const dict=new dcmjs.data.DicomDict(dcmjs.data.DicomMetaDictionary.denaturalizeDataset({MediaStorageSOPClassUID:sopClass,MediaStorageSOPInstanceUID:sop,TransferSyntaxUID:'1.2.840.10008.1.2.1',ImplementationClassUID:'2.25.202610260001'}));dict.dict=dcmjs.data.DicomMetaDictionary.denaturalizeDataset(ds);
       assert.equal((await archiveRequest('/instances',{method:'POST',headers:{'Content-Type':'application/dicom'},body:Buffer.from(dict.write())})).status,200);
       if(renderingStress && slice%200===0)console.log(JSON.stringify({syntheticFixture:{series:seriesNo,uploaded:slice+1,dimensions:[size,size]}}));
+    }
+    if(reliability && modality==='CT'){
+      // Explicit SOP classes: a supported scanned image, unsupported encapsulated
+      // CDA, and a supported PDF. Labels alone never determine compatibility.
+      const {addReliabilityDocuments}=await import('./ohif-responsive-browser.mjs');
+      await addReliabilityDocuments({c,dcmjs,archiveRequest});
     }
   }
   const {createApp}=await module('src/app.ts');const app=createApp();const handleRequest=(req,res)=>{

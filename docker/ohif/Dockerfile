@@ -29,10 +29,14 @@ COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
 COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
 COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.cjs
 COPY docker/ohif/configure-responsive.cjs /tmp/configure-responsive.cjs
+COPY docker/ohif/configure-cornerstone-compat.cjs /tmp/configure-cornerstone-compat.cjs
+COPY docker/ohif/configure-viewport-reliability.cjs /tmp/configure-viewport-reliability.cjs
 COPY docker/ohif/responsive /tmp/responsive
 COPY docker/ohif/verify-browser-build.cjs /tmp/verify-browser-build.cjs
 RUN node /tmp/register-reporting.cjs \
+  && node /tmp/configure-cornerstone-compat.cjs \
   && node /tmp/configure-viewer.cjs \
+  && node /tmp/configure-viewport-reliability.cjs \
   && mkdir -p node_modules/@rispro \
   && ln -s ../../extensions/rispro-reporting node_modules/@rispro/extension-reporting
 ENV QUICK_BUILD=true

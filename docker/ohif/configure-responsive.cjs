@@ -2,6 +2,44 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+async function selectSupportedDisplaySet(uid, servicesManager, select, commandsManager) {
+  const { displaySetService, uiNotificationService, viewportGridService, cornerstoneViewportService } = servicesManager.services;
+  const displaySet = displaySetService.getDisplaySetByUID(uid);
+  if (!displaySet || displaySet.unsupported) {
+    uiNotificationService.show({ title: 'Unsupported content',
+      message: 'This series is not supported by this viewer. Select an imaging series to continue.',
+      type: 'warning', duration: 5000 });
+    return false;
+  }
+  try {
+    const viewportId = viewportGridService?.getActiveViewportId();
+    const viewport = cornerstoneViewportService?.getCornerstoneViewport(viewportId);
+    // A scanned Secondary Capture can be a supported stack without patient-space
+    // geometry. Retaining an MPR viewport for it creates NaN volume bounds and
+    // an invalid vtkMaximumNumberOfSamples shader. Route it before volume setup.
+    if (!displaySet.isReconstructable && displaySet.images?.length &&
+        displaySet.SOPClassHandlerId === '@ohif/extension-default.sopClassHandlerModule.stack' &&
+        ['orthographic', 'volume'].includes(viewport?.type)) {
+      commandsManager.run('setDisplaySetsForViewports', { viewportsToUpdate: [{
+        viewportId, displaySetInstanceUIDs: [uid],
+        viewportOptions: { viewportType: 'stack', toolGroupId: 'default', presentationIds: {} },
+        displaySetOptions: [{}],
+      }] });
+      return true;
+    }
+    // Keep OHIF's registered PDF, SR and other supported handlers, including
+    // non-reconstructable scanned images. Warning badges are not a type check.
+    await select(uid);
+    return true;
+  } catch (error) {
+    console.warn('OHIF series selection failed', error);
+    uiNotificationService.show({ title: 'Unable to open series',
+      message: 'This series could not be opened. Select another series to continue.',
+      type: 'error', duration: 5000 });
+    return false;
+  }
+}
+
 function configureResponsive(root) {
   const replace = (file, anchor, replacement) => {
     const filename = path.join(root, file);
@@ -30,9 +68,10 @@ function configureResponsive(root) {
     "export function Toolbar({ buttonSection = 'primary', viewportId, location, buttonFilter }: ToolbarProps)");
   replace(toolbar, '        if (!toolDef) {', '        if (!toolDef || (buttonFilter && !buttonFilter(toolDef.id))) {');
   const study = 'extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx';
+  replace(study, 'function PanelStudyBrowser({', selectSupportedDisplaySet.toString() + '\n\nfunction PanelStudyBrowser({');
   replace(study, '        onClickThumbnail={() => {}}', `        onClickThumbnail={async uid => {
           if (!window.matchMedia('(pointer: coarse)').matches) return;
-          await onDoubleClickThumbnailHandler(uid);
+          if (!await selectSupportedDisplaySet(uid, servicesManager, onDoubleClickThumbnailHandler, commandsManager)) return;
           if (window.matchMedia('(max-width: 1023px)').matches) {
             const { panelService } = servicesManager.services;
             panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED,
@@ -40,7 +79,9 @@ function configureResponsive(root) {
           }
         }}`);
   replace(study, '        onDoubleClickThumbnail={onDoubleClickThumbnailHandler}', `        onDoubleClickThumbnail={uid => {
-          if (!window.matchMedia('(pointer: coarse)').matches) onDoubleClickThumbnailHandler(uid);
+          if (!window.matchMedia('(pointer: coarse)').matches) {
+            void selectSupportedDisplaySet(uid, servicesManager, onDoubleClickThumbnailHandler, commandsManager);
+          }
         }}`);
   const thumbnail = 'platform/ui-next/src/components/Thumbnail/Thumbnail.tsx';
   replace(thumbnail, "import React, { useState } from 'react';",
@@ -64,5 +105,5 @@ function configureResponsive(root) {
     fs.copyFileSync(path.join(__dirname, 'responsive', name), path.join(destination, name));
   }
 }
-module.exports = { configureResponsive };
+module.exports = { configureResponsive, selectSupportedDisplaySet };
 if (require.main === module) configureResponsive(process.cwd());
