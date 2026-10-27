@@ -1,3 +1,4 @@
+import { ModuleWorkspaceSwitcher } from "@/components/layout/navigation";
 import { DictationControl } from "@/components/layout/dictation-control";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BookOpenText, ClipboardList, FileUp, GraduationCap, History, LogOut, NotebookTabs, Scan } from "lucide-react";
@@ -35,6 +36,7 @@ export function TeachingLayout({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <DictationControl />
+          <ModuleWorkspaceSwitcher language="en" currentWorkspace="teaching" />
           <span className="hidden max-w-48 truncate text-sm text-muted-foreground sm:block">{identity?.displayName}</span>
           <Button variant="ghost" size="sm" onClick={signOut} aria-label="Sign out of Teaching">
             <LogOut size={16} aria-hidden="true" />

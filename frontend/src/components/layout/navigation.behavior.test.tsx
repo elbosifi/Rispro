@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
-import { MobileDrawer, SideNav, TopBar } from "./navigation";
+import { MobileDrawer, SideNav, TopBar, WorkspaceSwitcher } from "./navigation";
 import { APP_NAV_ITEMS as NAV_ITEMS } from "@/lib/route-registry";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 
@@ -43,6 +43,7 @@ vi.mock("lucide-react", () => {
   };
 });
 
+const gammaState: { value: { permissions: string[]; canManageSettings: boolean } | undefined } = { value: undefined };
 const matrixState: { value: unknown } = { value: DEFAULT_PAGE_VISIBILITY_MATRIX };
 const recallSummaryState: { value: unknown } = { value: { pendingCount: 0, unseenPendingCount: 0 } };
 const requestScanSummaryState: { value: { needsAttentionCount: number; latestProcessedAt: string | null; latestFailedAt: string | null } | undefined } = { value: undefined };
@@ -70,6 +71,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (options: { queryKey?: unknown[]; enabled?: boolean }) => {
+      if (options.queryKey?.[0] === "gamma-knife") return { data: gammaState.value };
       if (options.enabled === false) return { data: undefined };
       if (options.queryKey?.[0] === "complementary-recalls" && options.queryKey[1] === "reception-summary") return { data: recallSummaryState.value };
       if (options.queryKey?.[0] === "request-scans" && options.queryKey[1] === "reception-summary") return { data: requestScanSummaryState.value };
@@ -79,6 +81,31 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 describe("Navigation governance", () => {
+  it("keeps Gamma Knife permission and entry routing in the shared switcher", async () => {
+    const navigate = vi.fn();
+    gammaState.value = { permissions: ["access"], canManageSettings: false };
+    const view = render(<WorkspaceSwitcher language="en" currentWorkspace="gamma" canAccessDoctorWorkspace canAccessTeaching onNavigate={navigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: Gamma Knife" }));
+    expect(screen.getByRole("menuitem", { name: /Gamma Knife/ }).getAttribute("aria-current")).toBe("true");
+    for (const [name, path] of [["RISpro Core", "/dashboard"], ["Doctor Workspace", "/doctor/my-work"], ["Teaching", "/teaching/dashboard"], ["Gamma Knife", "/gamma-knife"]]) {
+      await userEvent.click(screen.getByRole("menuitem", { name: new RegExp(name) }));
+      expect(navigate).toHaveBeenLastCalledWith(path);
+      await userEvent.click(screen.getByRole("button", { name: "Switch workspace: Gamma Knife" }));
+    }
+    view.unmount();
+    gammaState.value = { permissions: [], canManageSettings: true };
+    const settingsView = render(<WorkspaceSwitcher language="en" currentWorkspace="core" canAccessDoctorWorkspace onNavigate={navigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: RISpro Core" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Gamma Knife" }));
+    expect(navigate).toHaveBeenLastCalledWith("/gamma-knife/settings");
+    settingsView.unmount();
+    gammaState.value = { permissions: [], canManageSettings: false };
+    render(<WorkspaceSwitcher language="en" currentWorkspace="core" canAccessDoctorWorkspace onNavigate={navigate} />);
+    await userEvent.click(screen.getByRole("button", { name: "Switch workspace: RISpro Core" }));
+    expect(screen.queryByRole("menuitem", { name: "Gamma Knife" })).toBeNull();
+    gammaState.value = undefined;
+  });
+
   it("places Authoritative Orthanc between PACS and MWL monitor for authorized users", async () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(<SideNav currentRoute="authoritative.orthanc" user={{ id: 5, username: "sa", fullName: "Super Admin", role: "super_admin" }} language="en" isRtl={false} onNavigate={() => {}} />);

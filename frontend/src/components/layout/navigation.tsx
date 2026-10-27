@@ -1,3 +1,8 @@
+import { gk, type Permission } from "@/pages/gamma-knife/api";
+import { useAuth } from "@/providers/auth-provider";
+import { useTeachingIdentity } from "@/teaching/api/use-teaching-identity";
+import { hasDoctorWorkspaceAccess } from "./navigation.helpers";
+import { requestNavigationWithUnsavedGuard } from "@/lib/unsaved-navigation-guard";
 import { DictationControl } from "./dictation-control";
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -12,7 +17,7 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
-import { fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallReceptionSummary, fetchRequestScanReceptionSummary } from "@/lib/api-hooks";
+import { fetchDoctorMe, fetchNoShowSummary, fetchPageVisibilityMatrix, fetchComplementaryRecallReceptionSummary, fetchRequestScanReceptionSummary } from "@/lib/api-hooks";
 import { APP_NAV_ITEMS, type AppNavIcon, type AppNavItem } from "@/lib/route-registry";
 import {
   LayoutGrid,
@@ -502,23 +507,27 @@ function AccountMenu({ user, language, accountActions, canAccessSettings, onSett
 
 export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessTeaching = false, canAccessCoreWorkspace = true, onNavigate }: {
   language: Language;
-  currentWorkspace: "core" | "doctor";
+  currentWorkspace: "core" | "doctor" | "teaching" | "gamma";
   canAccessDoctorWorkspace: boolean;
   canAccessTeaching?: boolean;
   canAccessCoreWorkspace?: boolean;
-  onNavigate: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard") => void;
+  onNavigate: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard" | "/gamma-knife" | "/gamma-knife/settings") => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useCloseOnOutside(ref, () => setOpen(false), open);
 
-  if (!canAccessDoctorWorkspace && !canAccessTeaching) return null;
+  const gammaIdentity = useQuery({ queryKey: ["gamma-knife", "me"], queryFn: () => gk<{ permissions: Permission[]; canManageSettings: boolean }>("/me"), retry: false, staleTime: 30000 });
+  const canAccessGamma = Boolean(gammaIdentity.data?.permissions?.includes("access") || gammaIdentity.data?.canManageSettings);
+  if (!canAccessDoctorWorkspace && !canAccessTeaching && !canAccessGamma && currentWorkspace === "core") return null;
 
-  const currentLabel = t(language, currentWorkspace === "doctor" ? "workspace.doctor" : "workspace.core");
-  const workspaces: Array<"core" | "doctor" | "teaching"> = [];
+  const labelFor = (workspace: "core" | "doctor" | "teaching" | "gamma") => t(language, workspace === "doctor" ? "workspace.doctor" : workspace === "teaching" ? "workspace.teaching" : workspace === "gamma" ? "gk.title" : "workspace.core");
+  const currentLabel = labelFor(currentWorkspace);
+  const workspaces: Array<"core" | "doctor" | "teaching" | "gamma"> = [];
   if (canAccessCoreWorkspace) workspaces.push("core");
   if (canAccessDoctorWorkspace) workspaces.push("doctor");
   if (canAccessTeaching) workspaces.push("teaching");
+  if (canAccessGamma) workspaces.push("gamma");
   return (
     <div ref={ref} className="relative">
       <button
@@ -537,7 +546,7 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
         <div role="menu" className="absolute end-0 top-full z-50 mt-2 min-w-48 rounded-xl border bg-card p-2 shadow-xl" style={{ borderColor: "var(--border)" }}>
           <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t(language, "workspace.switcher")}</p>
           {workspaces.map((workspace) => {
-            const label = t(language, workspace === "doctor" ? "workspace.doctor" : workspace === "teaching" ? "workspace.teaching" : "workspace.core");
+            const label = labelFor(workspace);
             return (
               <button
                 key={workspace}
@@ -546,7 +555,7 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
                 className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-start text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                 aria-current={currentWorkspace === workspace ? "true" : undefined}
                 onClick={() => {
-                  onNavigate(workspace === "doctor" ? "/doctor/my-work" : workspace === "teaching" ? "/teaching/dashboard" : "/dashboard");
+                  onNavigate(workspace === "doctor" ? "/doctor/my-work" : workspace === "teaching" ? "/teaching/dashboard" : workspace === "gamma" ? (gammaIdentity.data?.permissions?.includes("access") ? "/gamma-knife" : "/gamma-knife/settings") : "/dashboard");
                   setOpen(false);
                 }}
               >
@@ -559,6 +568,14 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
       ) : null}
     </div>
   );
+}
+
+export function ModuleWorkspaceSwitcher({ language, currentWorkspace }: { language: Language; currentWorkspace: "teaching" | "gamma" }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const doctor = useQuery({ queryKey: ["doctor", "me"], queryFn: fetchDoctorMe, enabled: Boolean(user), staleTime: 60000, retry: false });
+  const teaching = useTeachingIdentity(user ? String(user.id) : null);
+  return <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctor.data)} canAccessCoreWorkspace={doctor.data?.canAccessCoreWorkspace ?? false} canAccessTeaching={Boolean(teaching.data?.permissions?.includes("teaching.access"))} onNavigate={(path) => requestNavigationWithUnsavedGuard(() => navigate(path))} />;
 }
 
 export function TopBar({
@@ -613,8 +630,8 @@ export function TopBar({
   canAccessTeaching?: boolean;
   canAccessCoreWorkspace?: boolean;
   showLanguageControl?: boolean;
-  currentWorkspace?: "core" | "doctor";
-  onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard") => void;
+  currentWorkspace?: "core" | "doctor" | "teaching" | "gamma";
+  onWorkspaceNavigate?: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard" | "/gamma-knife" | "/gamma-knife/settings") => void;
 }) {
   return (
     <header className="sticky top-0 z-[60] border-b" dir={isRtl ? "rtl" : "ltr"} style={{ backgroundColor: "var(--background)", borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}>

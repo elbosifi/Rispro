@@ -1,5 +1,4 @@
 import "./doctor-workspace.css";
-import { GammaKnifeLauncher } from '@/pages/gamma-knife/gamma-knife-page';
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -556,7 +555,6 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
         extraActions={(
           <>
             <NoShowReviewTopBarAction enabled={canRoleAccessRoute(normalizedMatrix, "queue", user.role)} />
-            <GammaKnifeLauncher />
             <SchedulingOverrideApprovalCenter user={user} doctorMe={me} />
             {me.hasActiveDoctorProfile && <ReportingBoardNotificationsButton />}
           </>

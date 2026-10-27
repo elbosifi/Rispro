@@ -1,3 +1,4 @@
+import { ModuleWorkspaceSwitcher } from "@/components/layout/navigation";
 import { useGammaKnifeText } from './use-gamma-knife-text';
 import { chooseLocalized } from '@/lib/i18n';
 import './gamma-knife.css';
@@ -8,21 +9,11 @@ import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState } from
 import { gk, STATUS_LABELS, nextAction, today, type Config, type Episode, type Permission, type Settings } from './api';
 import { GammaKnifeSettings } from './gamma-knife-settings';
 import { GammaKnifeProfile } from './gamma-knife-profile';
-export function GammaKnifeLauncher() {
-    const { tr } = useGammaKnifeText();
-    const identity = useQuery({ queryKey: ['gamma-knife', 'me'], queryFn: () => gk<{
-            permissions: Permission[];
-            canManageSettings: boolean;
-        }>('/me'), retry: false, staleTime: 30000 });
-    if (!identity.data?.permissions.includes('access') && !identity.data?.canManageSettings)
-        return null;
-    return <Link className="btn-secondary text-xs whitespace-nowrap" to={identity.data.permissions.includes('access') ? '/gamma-knife' : '/gamma-knife/settings'}>{tr("Gamma Knife")}</Link>;
-}
 export function GammaKnifeApplication() {
     const { tr, isArabic, language, toggleLanguage } = useGammaKnifeText();
     const identity = useQuery({ queryKey: ['gamma-knife', 'me'], queryFn: () => gk<{ permissions: Permission[]; canManageSettings: boolean }>('/me'), retry: false });
     return <main lang={language} dir={isArabic ? "rtl" : "ltr"} className="gk-shell min-h-screen bg-background text-foreground"><div className="mx-auto max-w-6xl p-4 sm:p-6 space-y-5">
-    <header className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-semibold">{tr("Gamma Knife")}</h1><nav aria-label={tr("Gamma Knife")}><div className="flex flex-wrap gap-4 text-sm"><a href="/">{tr("RISpro")}</a>{identity.data?.permissions.includes('access') && <a href="/gamma-knife">{tr("Patient list")}</a>}{identity.data?.canManageSettings && <a href="/gamma-knife/settings">{tr("Settings")}</a>}</div></nav><Button variant="secondary" size="sm" onClick={toggleLanguage} aria-label={isArabic ? 'Switch to English' : 'التبديل إلى العربية'}>{isArabic ? 'English' : 'العربية'}</Button></header>
+    <header className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-semibold">{tr("Gamma Knife")}</h1><nav aria-label={tr("Gamma Knife")}><div className="flex flex-wrap gap-4 text-sm"><a href="/">{tr("RISpro")}</a>{identity.data?.permissions.includes('access') && <a href="/gamma-knife">{tr("Patient list")}</a>}{identity.data?.canManageSettings && <a href="/gamma-knife/settings">{tr("Settings")}</a>}</div></nav><ModuleWorkspaceSwitcher language={language} currentWorkspace="gamma" /><Button variant="secondary" size="sm" onClick={toggleLanguage} aria-label={isArabic ? 'Switch to English' : 'التبديل إلى العربية'}>{isArabic ? 'English' : 'العربية'}</Button></header>
     <Routes><Route index element={<PatientList />}/><Route path="settings" element={<SettingsPage />}/><Route path="episodes/:id" element={<GammaKnifeProfile />}/><Route path="*" element={<ErrorState retryLabel={tr('Retry')} message={tr("Page not found.")}/>}/></Routes>
   </div></main>;
 }
