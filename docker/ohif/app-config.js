@@ -38,6 +38,8 @@ window.config = {
         name: 'RISpro',
         // Discovery selectors only; the server's per-tab allowlist remains authoritative.
         risproStudyInstanceUIDs,
+        risproStudyListUrl: risproParams.get('risproSessionStudies') === '1' && /^[a-f0-9-]{36}$/i.test(risproContext || '')
+          ? '/api/ohif/contexts/' + risproContext + '/studies' : null,
         qidoRoot: risproDicomWebRoot,
         wadoRoot: risproWadoRoot,
         wadoUriRoot: risproDicomWebRoot,

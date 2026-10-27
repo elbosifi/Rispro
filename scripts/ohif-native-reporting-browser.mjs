@@ -228,6 +228,9 @@ try{
       if(visible){await button.click();await button.waitFor({state:'hidden'});}
     }
     await page.locator('.shepherd-modal-is-visible').waitFor({state:'hidden'});
+    await page.getByText('SYNTHETIC '+c.modality+' PRIOR 3', { exact: false }).first().waitFor({ state: 'visible', timeout: 30000 });
+    assert.ok([...frameCounts.keys()].every(url => !url.includes('/studies/'+c.study+'.8/')), 'Other studies must not load frames before selection');
+    await page.waitForFunction(study => { const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); return v?.getCurrentImageId?.()?.includes('/studies/'+study+'/'); }, c.study, {timeout:30000});
     // A hanging protocol may initially display a permitted prior. Select the
     // primary series explicitly so the subsequent prior-switch assertion is real.
     await page.evaluate(async study=>{

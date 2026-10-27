@@ -13,6 +13,7 @@ import {
   exchangeViewerLaunchToken,
   getOhifAdminConfiguration,
   getRetrievalStatusForDoctor,
+  listViewerStudyUids,
   proxyAuthorizedDicomWebRequest,
   putOhifAdminConfiguration,
   runOhifDiagnostic,
@@ -85,6 +86,18 @@ ohifViewerRouter.get(
   requireAuth,
   asyncRoute(async (req: OhifRequest, res: Response) => {
     res.json(await getRetrievalStatusForDoctor(actor(req), positiveInteger(req.params.jobId, "jobId")));
+  })
+);
+
+ohifViewerRouter.get(
+  "/contexts/:contextId/studies",
+  requireAuth,
+  asyncRoute(async (req: OhifRequest, res: Response) => {
+    const contextId = String(req.params.contextId || "");
+    const offset = Number(req.query.offset ?? 0);
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(contextId) || !Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, "Invalid viewer study page.");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await listViewerStudyUids({ ...actor(req), contextId, offset }));
   })
 );
 

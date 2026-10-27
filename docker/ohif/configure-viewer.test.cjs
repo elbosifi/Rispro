@@ -236,6 +236,20 @@ test('all bootstrap scripts opt out of CDN script rewriting before src without c
   assert.equal(protectBootstrapHtml(protectedHtml),protectedHtml);
 });
 
+test('study browser loads session-scoped pages as summaries without image requests', async () => {
+  const previousFetch = global.fetch;
+  const urls = [], queries = [];
+  const current = { studyInstanceUid: '1.2.1' };
+  try {
+    global.fetch = async url => { urls.push(url); return { ok: true, json: async () => url.endsWith('=0') ? { uids: ['1.2.1', '1.2.2'], nextOffset: 2 } : { uids: ['1.2.3'], nextOffset: null } }; };
+    const source = { getConfig: () => ({ risproStudyListUrl: '/api/ohif/contexts/test/studies' }), query: { studies: { search: async query => { queries.push(query); return [{ studyInstanceUid: query.studyInstanceUid }]; } } } };
+    const result = await getStudiesForPatientByMRN(source, [current]);
+    assert.deepEqual(result.map(study => study.studyInstanceUid), ['1.2.1', '1.2.2', '1.2.3']);
+    assert.deepEqual(queries, [{ studyInstanceUid: '1.2.2' }, { studyInstanceUid: '1.2.3' }]);
+    assert.deepEqual(urls, ['/api/ohif/contexts/test/studies?offset=0', '/api/ohif/contexts/test/studies?offset=2']);
+  } finally { global.fetch = previousFetch; }
+});
+
 test('study browser queries only explicit study selectors and reuses the primary QIDO result', async () => {
   const calls=[];
   const current={studyInstanceUid:'1.2.3',mrn:'SYNTHETIC'};

@@ -6,6 +6,24 @@ const { configureSeriesWindowing } = require('./configure-series-windowing.cjs')
 
 async function getStudiesForPatientByMRN(dataSource, currentStudies) {
   if (!currentStudies?.length) return [];
+  const studyListUrl = dataSource.getConfig()?.risproStudyListUrl;
+  if (studyListUrl) {
+    const result = [];
+    let offset = 0;
+    do {
+      const response = await fetch(`${studyListUrl}?offset=${offset}`, { credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Unable to load the authorized study list.');
+      const page = await response.json();
+      if (!Array.isArray(page.uids) || (page.nextOffset !== null && (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset))) throw new Error('Invalid authorized study list.');
+      const studies = await Promise.all(page.uids.map(studyInstanceUid => {
+        const current = currentStudies.find(study => study.studyInstanceUid === studyInstanceUid);
+        return current ? [current] : dataSource.query.studies.search({ studyInstanceUid });
+      }));
+      result.push(...studies.flat());
+      offset = page.nextOffset;
+    } while (offset !== null);
+    return result;
+  }
   const studyUids = dataSource.getConfig()?.risproStudyInstanceUIDs;
   if (Array.isArray(studyUids)) {
     // These URL selectors grant no access. RISpro rechecks the persisted launch

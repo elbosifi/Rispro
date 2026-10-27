@@ -15,6 +15,7 @@ export type ViewerLaunchStatus =
 
 export interface ImagingStudy {
   patientId: string;
+  patientIdIssuer?: string;
   patientName: string;
   accessionNumber: string;
   modality: string;

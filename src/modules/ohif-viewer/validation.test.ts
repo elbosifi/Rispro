@@ -9,6 +9,7 @@ import {
   normalizeEnvironmentKey,
   normalizeViewerBasePath,
   selectPriorStudies,
+  selectPatientHistory,
 } from "./validation.js";
 import type { ImagingStudy } from "./types.js";
 
@@ -57,6 +58,18 @@ describe("OHIF Viewer validation", () => {
     });
     assert.equal(result.status, "ambiguous");
     assert.equal(result.candidateCount, 2);
+  });
+
+  it("includes all verified patient history regardless of date, accession or modality and rejects other identities", () => {
+    const primary = { ...current, studyDate: "20261018", patientIdIssuer: "HOSPITAL" };
+    const later = { ...primary, studyInstanceUid: "1.2.26", studyDate: "20261026", accessionNumber: "OTHER", modality: "MR" };
+    const sameDay = { ...primary, studyInstanceUid: "1.2.18", studyDate: "20261018" };
+    const older = { ...primary, studyInstanceUid: "1.2.14", studyDate: "20260514", accessionNumber: "OLD" };
+    const other = { ...later, studyInstanceUid: "1.2.99", patientId: "OTHER" };
+    const otherIssuer = { ...later, studyInstanceUid: "1.2.98", patientIdIssuer: "OTHER" };
+    assert.deepEqual(selectPatientHistory([older, later, sameDay, other, otherIssuer, later], primary, "P-42").map(s => s.studyInstanceUid), ["1.2.26", "1.2.18", "1.2.14"]);
+    assert.deepEqual(selectPatientHistory([later], primary, "OTHER"), []);
+    assert.deepEqual(selectPatientHistory([later], { ...primary, patientId: "" }, "P-42"), []);
   });
 
   it("sorts same-modality priors first, newest first, and bounds the result", () => {

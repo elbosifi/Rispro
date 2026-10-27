@@ -125,6 +125,20 @@ export function selectPriorStudies(input: {
   }).slice(0, Math.max(0, input.maxPriors));
 }
 
+// Authoritative history is based on the primary study's verified DICOM identity.
+export function selectPatientHistory(studies: ImagingStudy[], currentStudy: ImagingStudy, verifiedPatientId: string): ImagingStudy[] {
+  const patientId = verifiedPatientId.trim();
+  const issuer = (currentStudy.patientIdIssuer || "").trim();
+  if (!patientId || currentStudy.patientId.trim() !== patientId) return [];
+  const unique = new Map<string, ImagingStudy>();
+  for (const study of studies) {
+    if (!isValidDicomUid(study.studyInstanceUid) || study.studyInstanceUid === currentStudy.studyInstanceUid) continue;
+    if (study.patientId.trim() !== patientId || (study.patientIdIssuer || "").trim() !== issuer) continue;
+    unique.set(study.studyInstanceUid, study);
+  }
+  return [...unique.values()].sort((a, b) => b.studyDate.localeCompare(a.studyDate) || a.studyInstanceUid.localeCompare(b.studyInstanceUid));
+}
+
 export function createLaunchToken(): { token: string; tokenHash: string } {
   const token = crypto.randomBytes(32).toString("base64url");
   return { token, tokenHash: hashLaunchToken(token) };

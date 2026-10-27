@@ -4199,6 +4199,8 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const accession = `V2-${String(appointmentId).padStart(6, "0")}`;
     const uid = `1.2.840.42.${appointmentId}`;
     const priorUid = `${uid}.1`;
+    const laterUid = `${uid}.3`;
+    const unrelatedUid = `${uid}.4`;
     const previousOhif = await pool.query(`select * from ohif_viewer_settings where singleton_key=true`);
     const previousArchive = await pool.query<{ setting_key: string; setting_value: unknown; updated_by_user_id: number | null }>(`select setting_key,setting_value,updated_by_user_id from system_settings where category='authoritative_orthanc'`);
     const originalFetch = globalThis.fetch;
@@ -4266,7 +4268,11 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
       }
       if (url.pathname.endsWith("/metadata")) return Response.json([current]);
       assert.equal(url.pathname, "/dicom-web/studies");
-      if (url.searchParams.has("PatientID")) return Response.json([current, { ...current, "00080050": { Value: ["PRIOR"] }, "0020000D": { Value: [priorUid] }, "00080020": { Value: [addDays(-1).replaceAll("-", "")] } }]);
+      if (url.searchParams.has("PatientID")) return Response.json([current,
+        { ...current, "00080050": { Value: ["PRIOR"] }, "0020000D": { Value: [priorUid] }, "00080020": { Value: [addDays(-1).replaceAll("-", "")] } },
+        { ...current, "00080050": { Value: ["LATER"] }, "0020000D": { Value: [laterUid] }, "00080020": { Value: ["20991231"] }, "00080061": { Value: ["MR"] } },
+        { ...current, "00100020": { Value: ["OTHER-PATIENT"] }, "0020000D": { Value: [unrelatedUid] } },
+      ]);
       if (resultMode === "missing") return Response.json([]);
       if (resultMode === "wrong_patient") return Response.json([{ ...current, "00100020": { Value: ["OTHER-PATIENT"] } }]);
       if (resultMode === "ambiguous") return Response.json([current, { ...current, "0020000D": { Value: [`${uid}.2`] } }]);
@@ -4276,9 +4282,9 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const launch = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
     assert.equal(launch.status, "ready");
     assert.ok(launch.status === "ready");
-    assert.equal(launch.priorStudyCount, 1);
+    assert.equal(launch.priorStudyCount, 2);
     assert.equal(launch.currentStudy.studyInstanceUid, uid);
-    assert.equal(launch.priorStudies[0]?.studyInstanceUid, priorUid);
+    assert.deepEqual(launch.priorStudies.map(study => study.studyInstanceUid), [laterUid, priorUid]);
     const session = await pool.query(`select access_strategy,source_pacs_node_id from viewer_launch_sessions where appointment_id=$1`, [appointmentId]);
     assert.equal(session.rows[0]?.access_strategy, "authoritative_orthanc");
     assert.equal(session.rows[0]?.source_pacs_node_id, null);
@@ -4298,7 +4304,14 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const redirect = await ohifViewerService.exchangeViewerLaunchToken(launchToken, doctor.id, response);
     const redirectParams = new URL(redirect, "http://synthetic.invalid").searchParams;
     assert.equal(redirectParams.get("StudyInstanceUIDs"), uid);
-    assert.equal(redirectParams.get("risproPriorStudyUIDs"), priorUid);
+    assert.equal(redirectParams.get("risproPriorStudyUIDs"), null);
+    assert.equal(redirectParams.get("risproSessionStudies"), "1");
+    const contextId = redirectParams.get("risproContext")!;
+    const listResponse = await rawApi(doctor.cookie, `/api/ohif/contexts/${contextId}/studies?offset=0`);
+    assert.equal(listResponse.status, 200);
+    assert.deepEqual(await listResponse.json(), { uids: [uid, laterUid, priorUid], nextOffset: null });
+    assert.equal((await rawApi(otherDoctor.cookie, `/api/ohif/contexts/${contextId}/studies?offset=0`)).status, 401);
+    assert.equal((await rawApi("", `/api/ohif/contexts/${contextId}/studies?offset=0`)).status, 401);
     assert.ok(redirectParams.get("risproContext"));
     const { env } = await import("../../config/env.js");
     const sessionDurationMs = env.sessionHours * 60 * 60 * 1000;
@@ -4335,6 +4348,7 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     } finally { clearTimeout(cancellationDeadline); }
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies?PatientID=${encodeURIComponent(patientId)}`)).status, 403);
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/9.9.9/series`)).status, 403);
+    assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${unrelatedUid}/series`)).status, 403);
     assert.equal((await rawApi("", `${env.ohifDicomWebProxyPath}/studies/${uid}/series`)).status, 401);
     assert.equal((await rawApi(doctor.cookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
     for (const relativePathWithQuery of [`/studies/${uid}/metadata`, `/studies/${priorUid}/series/1.2.3/instances/1.2.4/frames/1`]) {
@@ -4348,11 +4362,17 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal((await rawApi(scopedCookie, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`)).status, 401);
     const reopened = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, false);
     assert.ok(reopened.status === "ready");
+    assert.equal(reopened.priorStudyCount, 0);
     const reopenedRedirect = await ohifViewerService.exchangeViewerLaunchToken(reopened.launchUrl.split("/").at(-1)!, doctor.id, response);
     assert.equal(new URL(reopenedRedirect,"http://synthetic.invalid").searchParams.has("risproPriorStudyUIDs"),false);
     const reopenedFrame = await rawApi(`${doctor.cookie}; ${env.ohifSessionCookieName}=${viewerCookie}`, `${env.ohifDicomWebProxyPath}/studies/${uid}/series/1.2.3/instances/1.2.4/frames/1`);
     assert.equal(reopenedFrame.status, 200);
     assert.deepEqual(new Uint8Array(await reopenedFrame.arrayBuffer()), new Uint8Array([1, 2, 3]));
+    await pool.query(`update ohif_viewer_settings set allow_prior_studies=false where singleton_key=true`);
+    const disabledHistory = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
+    assert.ok(disabledHistory.status === "ready");
+    assert.equal(disabledHistory.priorStudyCount, 0);
+    await pool.query(`update ohif_viewer_settings set allow_prior_studies=true where singleton_key=true`);
     await assert.rejects(() => ohifViewerService.launchReportingBoardCaseInOhif({ userId: otherDoctor.id, appRole: "doctor" }, appointmentId, true), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
     for (const [mode, expected] of [["wrong_patient", "not_found"], ["ambiguous", "ambiguous"], ["missing", "not_found"], ["offline", "source_unavailable"]] as const) {
       resultMode = mode;

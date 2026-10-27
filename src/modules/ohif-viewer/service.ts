@@ -41,6 +41,7 @@ import {
   normalizeViewerBasePath,
   requestedStudyUids,
   selectPriorStudies,
+  selectPatientHistory,
 } from "./validation.js";
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -270,8 +271,14 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
 
     let priors: ImagingStudy[] = [];
     if (includePriors && configuration.settings.allowPriorStudies && row.patientDicomId) {
-      const candidates = await adapter.searchStudiesByPatient(row.patientDicomId);
-      priors = selectPriorStudies({ studies: candidates, currentStudy, patientId: row.patientDicomId, maxPriors: configuration.settings.maxPriorStudies });
+      // The primary QIDO result must independently agree with the appointment's
+      // DICOM identity before it can authorize a patient-wide search.
+      if (adapter.strategy !== "authoritative_orthanc" || (currentStudy.patientId && currentStudy.patientId.trim() === row.patientDicomId.trim())) {
+        const candidates = await adapter.searchStudiesByPatient(adapter.strategy === "authoritative_orthanc" ? currentStudy.patientId : row.patientDicomId);
+        priors = adapter.strategy === "authoritative_orthanc"
+          ? selectPatientHistory(candidates, currentStudy, row.patientDicomId)
+          : selectPriorStudies({ studies: candidates, currentStudy, patientId: row.patientDicomId, maxPriors: configuration.settings.maxPriorStudies });
+      }
       if (adapter.strategy === "orthanc_gateway") {
         let firstMissingJobId: number | null = null;
         for (const prior of priors) {
@@ -352,7 +359,10 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   // OHIF eagerly initializes every StudyInstanceUIDs entry. Keep priors in the
   // authorized study browser for explicit loading, without granting new access.
   const delivery = env.ohifNativeDeliveryEnabled && session.accessStrategy === "authoritative_orthanc" ? "&risproDelivery=native" : "";
-  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${priors ? `&risproPriorStudyUIDs=${priors}` : ""}&risproContext=${session.reportContextId}${delivery}`;
+  const studySelector = session.accessStrategy === "authoritative_orthanc"
+    ? "&risproSessionStudies=1"
+    : (priors ? `&risproPriorStudyUIDs=${priors}` : "");
+  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${studySelector}&risproContext=${session.reportContextId}${delivery}`;
 }
 
 export async function authorizeViewerDicomWebRequest(input: {
@@ -374,6 +384,18 @@ export async function authorizeViewerDicomWebRequest(input: {
     throw new HttpError(403, "This DICOMweb request is outside the authorized viewer session.");
   }
   return session;
+}
+
+export async function listViewerStudyUids(input: {
+  userId: UserId; appRole: Actor["appRole"]; contextId: string; offset: number;
+}) {
+  // Reuse the same live session and appointment authorization used for images.
+  const session = await findViewerContext(input.contextId, input.userId);
+  if (!session) throw new HttpError(401, "Viewer session is invalid or expired.");
+  await authorizeViewerDicomWebRequest({ ...input, launchToken: "", relativePathWithQuery: `/studies/${session.studyInstanceUid}` });
+  const limit = 50;
+  const uids = session.permittedStudyUids.slice(input.offset, input.offset + limit);
+  return { uids, nextOffset: input.offset + uids.length < session.permittedStudyUids.length ? input.offset + uids.length : null };
 }
 
 export async function proxyAuthorizedDicomWebRequest(input: {

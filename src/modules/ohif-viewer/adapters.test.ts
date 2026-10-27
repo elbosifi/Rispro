@@ -144,6 +144,35 @@ describe("AuthoritativeOrthancSourceAdapter", () => {
     assert.equal("deleteOwnedCacheStudy" in adapter, false);
   });
 
+  it("reads every page of patient studies without a hidden 100-study limit", async () => {
+    const offsets: number[] = [];
+    globalThis.fetch = async input => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("PatientID"), "P-42");
+      const offset = Number(url.searchParams.get("offset"));
+      offsets.push(offset);
+      return Response.json(Array.from({ length: Math.min(100, Math.max(0, 205 - offset)) }, (_, i) => ({
+        "00100020": { Value: ["P-42"] }, "00100021": { Value: ["ISSUER"] }, "0020000D": { Value: [`1.2.${offset + i + 1}`] },
+      })));
+    };
+    const studies = await new AuthoritativeOrthancSourceAdapter(archive).searchStudiesByPatient("P-42");
+    assert.equal(studies.length, 205);
+    assert.equal(studies[204]?.patientIdIssuer, "ISSUER");
+    assert.deepEqual(offsets, [0, 100, 200]);
+  });
+
+  it("accepts a QIDO no-content response after a full final page", async () => {
+    globalThis.fetch = async input => Number(new URL(String(input)).searchParams.get("offset")) === 0
+      ? Response.json(Array.from({ length: 100 }, (_, i) => ({ "0020000D": { Value: [`1.2.${i + 1}`] } })))
+      : new Response(null, { status: 204 });
+    assert.equal((await new AuthoritativeOrthancSourceAdapter(archive).searchStudiesByPatient("P-42")).length, 100);
+  });
+
+  it("fails closed if the server ignores the pagination offset", async () => {
+    globalThis.fetch = async () => Response.json(Array.from({ length: 100 }, (_, i) => ({ "0020000D": { Value: [`1.2.${i + 1}`] } })));
+    await assert.rejects(() => new AuthoritativeOrthancSourceAdapter(archive).searchStudiesByPatient("P-42"), /pagination returned duplicate/);
+  });
+
   it("rejects disabled or missing archive configuration before sending requests", () => {
     globalThis.fetch = async () => { throw new Error("Unexpected source request"); };
     assert.throws(() => new AuthoritativeOrthancSourceAdapter({ ...archive, enabled: false }), /Enable and configure Authoritative Orthanc/);

@@ -36,6 +36,7 @@ function dicomJsonStudy(value: unknown): ImagingStudy {
   const dataset = value && typeof value === "object" ? value as UnknownRecord : {};
   return {
     patientId: firstString(dataset["00100020"] ?? dataset.PatientID),
+    patientIdIssuer: firstString(dataset["00100021"] ?? dataset.IssuerOfPatientID),
     patientName: firstString(dataset["00100010"] ?? dataset.PatientName),
     accessionNumber: firstString(dataset["00080050"] ?? dataset.AccessionNumber),
     modality: firstString(dataset["00080061"] ?? dataset["00080060"] ?? dataset.ModalitiesInStudy ?? dataset.Modality),
@@ -109,12 +110,13 @@ class DicomWebSourceAdapter implements ImagingSourceAdapter {
     private readonly headers: () => Record<string, string>,
   ) {}
 
-  private async json(url: string, operation: string): Promise<unknown> {
+  protected async json(url: string, operation: string, allowEmpty = false): Promise<unknown> {
     const result = await fetchBytes(url, {
       headers: { Accept: "application/dicom+json, application/json", ...this.headers() },
       timeoutSeconds: this.endpoint.timeoutSeconds,
       verifyTls: this.endpoint.verifyTls,
     });
+    if (allowEmpty && result.response.status === 204) return [];
     return parseJsonResponse(result, operation);
   }
 
@@ -179,6 +181,25 @@ export class AuthoritativeOrthancSourceAdapter extends DicomWebSourceAdapter {
     assertAuthoritativeOrthancConfigured(settings);
     const root = joinUrl(settings.baseUrl, "/dicom-web");
     super("authoritative_orthanc", { qidoRoot: root, wadoRsRoot: root, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls }, () => authoritativeHeaders(settings));
+  }
+
+  async searchStudiesByPatient(patientId: string): Promise<ImagingStudy[]> {
+    const studies: ImagingStudy[] = [];
+    const seen = new Set<string>();
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      const params = new URLSearchParams({ PatientID: patientId, includefield: "all", limit: String(limit), offset: String(offset) });
+      const payload = await this.json(`${this.endpoint.qidoRoot}/studies?${params}`, "QIDO patient-study search", true);
+      if (!Array.isArray(payload)) throw new ImagingSourceError("malformed", "QIDO patient-study search did not return an array.");
+      const page = payload.map(dicomJsonStudy);
+      // A server ignoring offset must fail rather than silently truncate or loop.
+      if (page.some(study => isValidDicomUid(study.studyInstanceUid) && seen.has(study.studyInstanceUid))) {
+        throw new ImagingSourceError("malformed", "QIDO patient-study pagination returned duplicate studies.");
+      }
+      for (const study of page) if (isValidDicomUid(study.studyInstanceUid)) seen.add(study.studyInstanceUid);
+      studies.push(...page);
+      if (page.length < limit) return studies;
+    }
   }
 
   async testConnection(): Promise<{ ok: true; message: string }> {
