@@ -69,6 +69,9 @@ OHIF's toolbar commands and panels, provide touch series selection and use the
 existing Cornerstone gestures and resize service. See the
 [responsive implementation and validation](../../plans/completed/ohif-ios-responsive.md)
 for breakpoints, synthetic browser evidence, physical Safari limitations and rollback.
+The [responsive verification and series windowing follow-up](../../plans/completed/ohif-ios-responsive-windowing.md)
+records current-baseline checks and restoration of stored DICOM window/level when
+opening a different CT/MR stack, including revisits.
 
 The gateway applies lossless HTTP gzip compression to `/ohif-dicomweb/` responses when the browser accepts gzip. The browser restores the exact original pixel bytes before OHIF decodes them. Multipart boundary headers are preserved; partial-range responses retain their original byte ranges. Image responses remain private and are not stored in a shared cache.
 

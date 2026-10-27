@@ -25,7 +25,7 @@ useState(leftPanelClosed); useState(rightPanelClosed);
   write('extensions/default/src/ViewerLayout/ViewerHeader.tsx',"import { Button, Header, Icons, useModal } from '@ohif/ui-next';\nimport { Toolbar } from '../Toolbar/Toolbar';");
   write('extensions/default/src/Toolbar/Toolbar.tsx',"  buttonSection?: string;\nexport function Toolbar({ buttonSection = 'primary', viewportId, location }: ToolbarProps) {\n        if (!toolDef) { return null; }\n}");
   write('extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx','        onClickThumbnail={() => {}}\n        onDoubleClickThumbnail={onDoubleClickThumbnailHandler}');
-  write('platform/ui-next/src/components/Thumbnail/Thumbnail.tsx','      onTouchEnd={handleTouchEnd}');
+  write('platform/ui-next/src/components/Thumbnail/Thumbnail.tsx',"import React, { useState } from 'react';\n  const [lastTap, setLastTap] = useState(0);\n      onTouchEnd={handleTouchEnd}");
   write('platform/app/public/html-templates/index.html','width=device-width, initial-scale=1, shrink-to-fit=no, maximum-scale=1.0, user-scalable=no');
   const preserved=['modes/basic/src/initToolGroups.ts','extensions/cornerstone/src/Viewport/OHIFCornerstoneViewport.tsx','extensions/default/src/RisproLoading.tsx'];
   preserved.forEach(file=>write(file,'existing rendering, bindings and loading'));
@@ -41,6 +41,31 @@ test('responsive integration keeps the viewport and binding/loading sources and 
     assert.equal(layout.split('<ViewportGridComp />').length,2,'The original grid remains at the same mount location');
     assert.throws(()=>configureResponsive(root),/Pinned OHIF responsive anchor changed/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('thumbnail touch accepts one tap and rejects scrolling, multi-touch, cancellation and embedded menu controls', async()=>{
+  const {thumbnailTouchHandlers}=await import('./responsive/thumbnailTouch.js');
+  let calls=0,prevented=0,coarse=true;
+  const gesture={current:null};
+  const handler=()=>thumbnailTouchHandlers(gesture,()=>calls++,()=>coarse);
+  const event=(x=20,y=20,touches=1,menu=false)=>({
+    touches:Array.from({length:touches},(_,identifier)=>({identifier,clientX:x,clientY:y})),
+    changedTouches:[{identifier:0,clientX:x,clientY:y}],
+    target:{closest:()=>menu?{}:null},preventDefault:()=>prevented++,
+  });
+  handler().onTouchStart(event());
+  handler().onTouchEnd(event(20,20,0));
+  assert.equal(calls,1);assert.equal(prevented,1);
+  handler().onTouchStart(event());handler().onTouchMove(event(20,55));
+  handler().onTouchEnd(event(20,20,0));assert.equal(calls,1,'Moving away and back is a drag');
+  handler().onTouchStart(event());handler().onTouchMove(event(20,20,2));
+  handler().onTouchEnd(event(20,20,0));assert.equal(calls,1);
+  handler().onTouchStart(event());handler().onTouchCancel();
+  handler().onTouchEnd(event(20,20,0));assert.equal(calls,1);
+  handler().onTouchStart(event(20,20,1,true));
+  handler().onTouchEnd(event(20,20,0,true));assert.equal(calls,1);assert.equal(prevented,1);
+  coarse=false;handler().onTouchStart(event());
+  assert.equal(handler().onTouchEnd(event(20,20,0)),false,'Fine pointers retain the upstream handler');
 });
 
 test('touch series selection reuses the original selection and closes only after success; desktop retains double-click',async()=>{

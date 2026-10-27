@@ -42,12 +42,18 @@ function configureResponsive(root) {
   replace(study, '        onDoubleClickThumbnail={onDoubleClickThumbnailHandler}', `        onDoubleClickThumbnail={uid => {
           if (!window.matchMedia('(pointer: coarse)').matches) onDoubleClickThumbnailHandler(uid);
         }}`);
-  // Native click synthesis distinguishes a tap from scrolling. The upstream
-  // touchend shortcut also fires after a scroll and would select twice on a tap.
-  replace('platform/ui-next/src/components/Thumbnail/Thumbnail.tsx',
-    '      onTouchEnd={handleTouchEnd}', `      onTouchEnd={e => {
-        if (!window.matchMedia('(pointer: coarse)').matches) handleTouchEnd(e);
-      }}`);
+  const thumbnail = 'platform/ui-next/src/components/Thumbnail/Thumbnail.tsx';
+  replace(thumbnail, "import React, { useState } from 'react';",
+    "import React, { useState, useRef } from 'react';\nimport { thumbnailTouchHandlers } from './risproThumbnailTouch';");
+  replace(thumbnail, '  const [lastTap, setLastTap] = useState(0);', `  const [lastTap, setLastTap] = useState(0);
+  const touch = thumbnailTouchHandlers(useRef(null), onClick,
+    () => window.matchMedia('(pointer: coarse)').matches);`);
+  replace(thumbnail, '      onTouchEnd={handleTouchEnd}', `      onTouchStart={touch.onTouchStart}
+      onTouchMove={touch.onTouchMove}
+      onTouchCancel={touch.onTouchCancel}
+      onTouchEnd={e => { if (!touch.onTouchEnd(e)) handleTouchEnd(e); }}`);
+  fs.copyFileSync(path.join(__dirname, 'responsive', 'thumbnailTouch.js'),
+    path.join(root, 'platform/ui-next/src/components/Thumbnail/risproThumbnailTouch.js'));
   // Permit ordinary browser zoom and safe areas; touch-action is confined to image elements.
   replace('platform/app/public/html-templates/index.html',
     'width=device-width, initial-scale=1, shrink-to-fit=no, maximum-scale=1.0, user-scalable=no',

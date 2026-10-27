@@ -27,6 +27,7 @@ COPY frontend/public/assets/nccb-logo.png platform/app/public/assets/nccb-logo.p
 COPY docker/ohif/rispro-reporting extensions/rispro-reporting
 COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
 COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
+COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.cjs
 COPY docker/ohif/configure-responsive.cjs /tmp/configure-responsive.cjs
 COPY docker/ohif/responsive /tmp/responsive
 COPY docker/ohif/verify-browser-build.cjs /tmp/verify-browser-build.cjs

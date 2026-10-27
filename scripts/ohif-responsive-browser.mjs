@@ -14,8 +14,10 @@ const configurations=[
   ['desktop',null,1440,900],
 ];
 const selectedCase=process.env.OHIF_RESPONSIVE_CASE,selectedEngine=process.env.OHIF_RESPONSIVE_ENGINE;
+const selectedModality=process.env.OHIF_RESPONSIVE_MODALITY || 'CT';
 if(selectedCase&&!configurations.some(([name])=>name===selectedCase))throw Error('Unknown responsive test case');
 if(selectedEngine&&!['chromium','webkit'].includes(selectedEngine))throw Error('Unknown responsive test engine');
+if(!['CT','MR'].includes(selectedModality))throw Error('Unknown synthetic responsive modality');
 async function state(page){
   return page.evaluate(()=>{
     const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
@@ -35,6 +37,10 @@ async function pixels(page){
       return hi-lo>20;
     }catch{return false;}
   },null,{timeout:60000});
+}
+async function dicomWindow(page,series){
+  const expected=series===2?{lower:-30,upper:869}:{lower:-200,upper:1599};
+  assert.deepEqual((await state(page)).voi,expected,'Opening a series must use its stored DICOM window, including revisits');
 }
 async function geometry(page,compact){
   const errors=await page.evaluate(compact=>{
@@ -59,7 +65,7 @@ async function mouseDrag(page,dx,dy,button='left'){
   await page.mouse.move(x,y);await page.mouse.down({button});
   await page.mouse.move(x+dx,y+dy,{steps:12});await page.mouse.up({button});
 }
-async function touchDrag(page,engine,paths){
+async function touchDrag(page,engine,paths,selector='.cornerstone-viewport-element'){
   if(engine==='chromium'){
     const cdp=await page.context().newCDPSession(page);
     try{
@@ -71,8 +77,8 @@ async function touchDrag(page,engine,paths){
   }else{
     // Playwright has no WebKit multi-touch injection API. Dispatch DOM touch
     // sequences through Cornerstone's real listeners; never call tool callbacks.
-    await page.evaluate(async paths=>{
-      const target=document.querySelector('.cornerstone-viewport-element');
+    await page.evaluate(async({paths,selector})=>{
+      const target=document.querySelector(selector);
       for(let step=0;step<=13;step++){
         const points=paths.map(([from,to],identifier)=>({identifier,target,
           clientX:from[0]+(to[0]-from[0])*Math.min(step,12)/12,
@@ -83,7 +89,7 @@ async function touchDrag(page,engine,paths){
         Object.defineProperties(event,{touches:{value:step===13?[]:points},changedTouches:{value:points},targetTouches:{value:step===13?[]:points}});
         target.dispatchEvent(event);await new Promise(r=>setTimeout(r,18));
       }
-    },paths);
+    },{paths,selector});
   }
   await page.waitForTimeout(250);
 }
@@ -112,7 +118,8 @@ export async function runResponsiveAcceptance({context:sourceContext,cases,origi
       if(selectedCase&&name!==selectedCase)continue;
       const context=await browser.newContext({...device?devices[device]:{},viewport:{width,height},locale:'en-US',storageState:await sourceContext.storageState()});
       const page=await context.newPage(),errors=[],counts=new Map(),networkFailures=[];
-      const compact=width<1280,touch=!!device,c=cases[0];
+      const compact=width<1280,touch=!!device,c=cases.find(c=>c.modality===selectedModality);
+      assert.ok(c,'Required synthetic modality fixture is missing');
       page.on('pageerror',e=>errors.push(e.message));
       page.on('response',r=>{if(r.url().includes('/ohif-dicomweb/')){
         if(r.ok())counts.set(r.url(),(counts.get(r.url())||0)+1);
@@ -131,20 +138,45 @@ export async function runResponsiveAcceptance({context:sourceContext,cases,origi
         }
         await page.locator('.shepherd-modal-is-visible').waitFor({state:'hidden'});
         await geometry(page,compact);
+        await dicomWindow(page,1);
         await page.screenshot({path:join(temp,engine+'-'+name+'.png')});
         if(compact)await page.getByRole('button',{name:'Series',exact:true}).click();
         const left=page.locator('[data-rispro-panel="left"]');
         await left.locator('[data-cy="studyBrowser-panel"]').waitFor();
         await page.screenshot({path:join(temp,engine+'-'+name+'-series.png')});
         const thumbnail=left.locator('[data-cy="study-browser-thumbnail"][data-series="2"]');
+        if(touch){
+          const before=await state(page),box=await thumbnail.boundingBox();
+          const x=box.x+box.width/2,y=Math.min(box.y+box.height*.4,height-25);
+          await touchDrag(page,engine,[[[x,y],[x,y-45]]],'[data-cy="study-browser-thumbnail"][data-series="2"]');
+          assert.equal((await state(page)).image,before.image,'Dragging the series list must not select a series');
+        }
         if(touch)await thumbnail.tap();else await thumbnail.dblclick();
         await page.waitForFunction(series=>{
           const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
           return v?.getCurrentImageId()?.includes('/series/'+series+'/');
         },c.study+'.2');
         await pixels(page);
+        await dicomWindow(page,2);
         if(!touch||width>=1024)await closePanel(page,'left');
         else await left.waitFor({state:'hidden'});
+        // Deliberately window the second stack, switch away, then reopen it.
+        // This must restore its DICOM default rather than the edited cached VOI.
+        if(compact)await tool('WindowLevel').click();
+        await gesture(page,engine,touch,'window');
+        assert.notDeepEqual((await state(page)).voi,{lower:-30,upper:869});
+        for(const series of [1,2]){
+          if(compact)await page.getByRole('button',{name:'Series',exact:true}).click();
+          else await page.locator('[data-rispro-panel="left"] [data-cy="side-panel-header-left"]').first().click();
+          const item=left.locator(`[data-cy="study-browser-thumbnail"][data-series="${series}"]`);
+          if(touch)await item.tap();else await item.dblclick();
+          await page.waitForFunction(uid=>{
+            const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+            return v?.getCurrentImageId()?.includes('/series/'+uid+'/');
+          },c.study+'.'+series);
+          await pixels(page);await dicomWindow(page,series);
+          if(!touch||width>=1024)await closePanel(page,'left');else await left.waitFor({state:'hidden'});
+        }
         let before=await state(page);
         if(compact)await tool('StackScroll').click();
         await gesture(page,engine,touch,'scroll');
@@ -258,7 +290,7 @@ export async function runResponsiveAcceptance({context:sourceContext,cases,origi
         assert.ok(await page.evaluate(()=>window.__responsiveViewport===window.services.cornerstoneViewportService.getCornerstoneViewport(window.services.viewportGridService.getActiveViewportId())),'Rotation must not recreate the viewport');
         for(const [url,count] of requestsBefore)assert.equal(counts.get(url),count,'Responsive layout must not refetch existing DICOM requests');
         await geometry(page,compact);assert.deepEqual(errors,[]);assert.deepEqual(networkFailures,[]);
-        const result={engine,name,viewport:[width,height],touch,devicePixelRatio:await page.evaluate(()=>devicePixelRatio),gestureInput:touch?(engine==='chromium'?'CDP native touch':'DOM touch sequences'):'mouse',status:'PASS'};
+        const result={engine,name,modality:c.modality,viewport:[width,height],touch,devicePixelRatio:await page.evaluate(()=>devicePixelRatio),gestureInput:touch?(engine==='chromium'?'CDP native touch':'DOM touch sequences'):'mouse',status:'PASS'};
         results.push(result);console.log(JSON.stringify({responsive:result}));
       }catch(error){
         writeFileSync(join(temp,engine+'-'+name+'-failure.html'),await page.content());

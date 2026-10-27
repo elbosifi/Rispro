@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { configureResponsive } = require('./configure-responsive.cjs');
+const { configureSeriesWindowing } = require('./configure-series-windowing.cjs');
 
 async function getStudiesForPatientByMRN(dataSource, currentStudies) {
   if (!currentStudies?.length) return [];
@@ -351,6 +352,7 @@ function configureViewer(root) {
   configureUsability(root);
   configureLoading(root);
   configureResponsive(root);
+  configureSeriesWindowing(root);
   const webpack = path.join(root, '.webpack/webpack.base.js');
   const webpackSource = fs.readFileSync(webpack, 'utf8');
   const rulesAnchor = 'noParse: [/(dicomicc)/],\n      rules: [';
