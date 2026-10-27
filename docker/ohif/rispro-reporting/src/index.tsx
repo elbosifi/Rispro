@@ -10,7 +10,8 @@ function show(servicesManager) {
   const service=servicesManager.services.panelService;
   // v3.12.6's wrapper retains closedManually even for forceActive. Its layout
   // accepts this existing public PubSub event to reopen without resetting panels.
-  service._broadcastEvent(service.EVENTS.PANELS_CHANGED,{position:'right',options:{rightPanelClosed:false}});
+  service._broadcastEvent(service.EVENTS.PANELS_CHANGED,{position:'right',options:{rightPanelClosed:false,
+    ...(window.matchMedia('(max-width: 1023px)').matches?{leftPanelClosed:true}:{})}});
   service.activatePanel(panel,true);
 }
 const extension={

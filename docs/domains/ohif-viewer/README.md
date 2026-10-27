@@ -63,6 +63,13 @@ Repository defaults prove only the legacy DIMSE assumption (`OSIRIXR` and port 1
 
 ## Image Delivery
 
+The viewer's iPhone/iPad presentation is customized at source-build time, keeping
+the original desktop header at widths of 1280px and above. Compact layouts reuse
+OHIF's toolbar commands and panels, provide touch series selection and use the
+existing Cornerstone gestures and resize service. See the
+[responsive implementation and validation](../../plans/completed/ohif-ios-responsive.md)
+for breakpoints, synthetic browser evidence, physical Safari limitations and rollback.
+
 The gateway applies lossless HTTP gzip compression to `/ohif-dicomweb/` responses when the browser accepts gzip. The browser restores the exact original pixel bytes before OHIF decodes them. Multipart boundary headers are preserved; partial-range responses retain their original byte ranges. Image responses remain private and are not stored in a shared cache.
 
 OHIF limits simultaneous image loads to four interaction requests, one thumbnail, and one prefetch. This reduces competition from background images on slower connections while leaving room for multiple visible viewports.

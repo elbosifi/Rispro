@@ -1,0 +1,59 @@
+/* OHIF owns its desktop layout and all viewport lifetimes. */
+@media (max-width: 1279px) {
+  .rispro-viewer {
+    height: 100vh;
+    height: var(--rispro-visual-height, 100dvh);
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    overflow: hidden;
+  }
+  .rispro-workspace { flex: 1; min-height: 0; height: auto !important; }
+  .rispro-workspace [data-panel-id="viewerLayoutResizableViewportGridPanel"] { flex: 1 1 0% !important; min-width: 0; }
+  .rispro-workspace [data-rispro-panel="left"] { flex: 0 0 auto !important; }
+  .rispro-compact-header { flex: none; color: var(--color-foreground, #e3eaf5); background: #090c10; }
+  .rispro-header-context, .rispro-diagnostic-toolbar { display: flex; align-items: center; gap: 4px; padding: 2px 4px; min-width: 0; }
+  .rispro-header-context { border-bottom: 1px solid #263448; }
+  .rispro-header-report { margin-left: auto; }
+  .rispro-brand { flex: none; max-width: 96px; overflow: hidden; }
+  .rispro-diagnostic-toolbar { justify-content: center; }
+  .rispro-compact-header button, .rispro-overflow button { min-height: 44px; min-width: 44px; flex-shrink: 0; }
+  .rispro-overflow { width: min(440px, calc(100vw - 16px)); max-height: min(70dvh, 600px); overflow: auto; padding: 12px; }
+  .rispro-overflow-tools, .rispro-overflow-auxiliary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .rispro-overflow-auxiliary { border-top: 1px solid #263448; margin-top: 12px; padding-top: 8px; }
+  .rispro-overflow [data-tool] > button { width: auto; padding: 8px; gap: 6px; }
+  .rispro-overflow [data-tool] > button::after { content: attr(aria-label); }
+  .rispro-patient-info { width: min(440px, calc(100vw - 16px)); overflow-wrap: anywhere; }
+  .rispro-patient-info > div { min-height: 44px; }
+  body:has(.rispro-compact-header) [role="menu"] { max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; }
+  body:has(.rispro-compact-header) [role="menuitem"] { min-height: 44px; }
+  body:has(.rispro-compact-header) [data-radix-popper-content-wrapper]:has([role="tooltip"]) { pointer-events: none; }
+  .rispro-maximized .rispro-header-context { display: none; }
+  .rispro-workspace [data-rispro-panel="right"] {
+    position: absolute !important; right: 0; top: 0; bottom: 0; z-index: 30;
+    width: min(440px, 100%) !important; min-width: 0 !important; max-width: 100% !important;
+    background: #090c10;
+  }
+  .rispro-workspace [data-rispro-panel="right"][data-open="false"] { display: none; }
+  .rispro-workspace [data-rispro-panel="right"] > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+  .rispro-workspace [data-panel-resize-handle-id] { display: none; }
+  .rispro-workspace [data-cy^="side-panel-header-"] { min-height: 44px; min-width: 44px; z-index: 1; }
+  .rispro-workspace [data-rispro-panel] > div > div:first-child { min-height: 60px; }
+  .rispro-workspace [data-rispro-panel] [data-cy$="-btn"] { min-height: 44px; min-width: 44px; }
+  .rispro-workspace .cornerstone-viewport-element { touch-action: none; }
+  .rispro-viewer .rispro-report { min-width: 0; overscroll-behavior: contain; }
+  .rispro-viewer .rispro-report textarea, .rispro-viewer .rispro-report input { font-size: 16px; }
+  .rispro-viewer .rispro-report-identity { position: static; }
+  .rispro-viewer .rispro-report > * { flex-shrink: 0; }
+}
+@media (max-width: 1023px) {
+  .rispro-workspace [data-rispro-panel="left"] {
+    position: absolute !important; left: 0; top: 0; bottom: 0; z-index: 30;
+    width: min(340px, 100%) !important; min-width: 0 !important; max-width: 100% !important;
+    background: #090c10;
+  }
+  .rispro-workspace [data-rispro-panel="left"][data-open="false"] { display: none; }
+  .rispro-workspace [data-rispro-panel="left"] > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+  .rispro-workspace [data-panel-id="viewerLayoutResizableViewportGridPanel"] { flex: 1 1 100% !important; min-width: 0; }
+}

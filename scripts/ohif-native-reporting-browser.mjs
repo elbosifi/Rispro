@@ -12,6 +12,7 @@ import {createServer as createHttpsServer} from 'node:https';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {runRenderingStress} from './ohif-rendering-stress.mjs';
+import {runResponsiveAcceptance} from './ohif-responsive-browser.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const require=createRequire(join(root,'package.json'));
 const {chromium}=require('@playwright/test'),sharp=require('sharp'),dcmjs=require('dcmjs'),jwt=require('jsonwebtoken');
@@ -34,6 +35,7 @@ const {pool}=await module('src/db/pool.ts');const {env}=await module('src/config
 if(new URL(env.databaseUrl).href!==dbUrl.href)throw Error('Runtime database safety guard failed');
 const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
+const responsive=process.env.OHIF_RESPONSIVE==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
 const oldUploads=env.uploadsDir;const cases=[];let userId,doctorId,policySetId,appServer,tlsServer,browser,activePage,viewerPort;
@@ -90,7 +92,7 @@ try{
     }
   }
   const {createApp}=await module('src/app.ts');const app=createApp();const handleRequest=(req,res)=>{
-    if(renderingStress&&req.url?.startsWith('/ohif/')){
+    if((renderingStress||responsive)&&req.url?.startsWith('/ohif/')){
       // GPU stress uses the real host-run authenticated gateway directly. The
       // Linux edge -> Windows host connection hop reproduces connect-time 504s
       // under this workload; production gateway/app share a Docker network.
@@ -113,7 +115,7 @@ try{
   let nginx=readFileSync(join(root,'docker/reverse-proxy/nginx.conf'),'utf8').replace('server app:3000 resolve;',`server host.docker.internal:${appPort};`).replace('listen 8080;','listen 80;');
   writeFileSync(join(temp,'edge.conf'),nginx);
   const edgeOrigin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
-  let origin=renderingStress?'http://127.0.0.1:'+appPort:edgeOrigin;
+  let origin=renderingStress||responsive?'http://127.0.0.1:'+appPort:edgeOrigin;
   if(renderingStress&&process.env.OHIF_RENDER_HTTPS==='1'){
     const openssl=process.platform==='win32'?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl';
     if(process.platform==='win32'&&!existsSync(openssl))throw Error('Synthetic HTTPS requires existing Git OpenSSL');
@@ -129,7 +131,9 @@ try{
   browser=await chromium.launch({headless:true,channel:renderingStress&&process.env.OHIF_RENDER_BROWSER==='msedge'?'msedge':undefined,args:['--host-resolver-rules=MAP rispro-synthetic.invalid 127.0.0.1','--no-proxy-server']});const context=await browser.newContext({viewport:{width:1600,height:1000},ignoreHTTPSErrors:renderingStress});
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(renderingStress){
+  if(responsive){
+    await runResponsiveAcceptance({context,cases,origin,temp,launch:c=>launchReportingBoardCaseInOhif({userId,appRole:'doctor'},c.appointmentId,true)});
+  }else if(renderingStress){
     await runRenderingStress({browser,context,c:cases[0],origin:viewerOrigin,apiOrigin:origin,temp,launch:includePriors=>launchReportingBoardCaseInOhif({userId,appRole:'doctor'},cases[0].appointmentId,includePriors)});
   }else{
   const pages=[];
