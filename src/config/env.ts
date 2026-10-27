@@ -170,6 +170,8 @@ export interface EnvConfig {
   doctorPortalEnabled: boolean;
   doctorPortalAutoRedirect: boolean;
   ohifEnabled: boolean;
+  ohifNativeDeliveryEnabled: boolean;
+  ohifNativeAuthSecret: string;
   ohifPublicBaseUrl: string;
   ohifDicomWebProxyPath: string;
   ohifContainerUrl: string;
@@ -269,6 +271,8 @@ export const env: EnvConfig = {
   doctorPortalEnabled: readBoolean("DOCTOR_PORTAL_ENABLED", true),
   doctorPortalAutoRedirect: readBoolean("DOCTOR_PORTAL_AUTO_REDIRECT", true),
   ohifEnabled: readBoolean("OHIF_ENABLED", false),
+  ohifNativeDeliveryEnabled: readBoolean("OHIF_NATIVE_DELIVERY_ENABLED", false),
+  ohifNativeAuthSecret: String(process.env.OHIF_NATIVE_AUTH_SECRET || ""),
   ohifPublicBaseUrl: String(process.env.OHIF_PUBLIC_BASE_URL || "/ohif").trim(),
   ohifDicomWebProxyPath: String(process.env.OHIF_DICOMWEB_PROXY_PATH || "/ohif-dicomweb").trim(),
   ohifContainerUrl: String(process.env.OHIF_CONTAINER_URL || "http://ohif:80").trim(),
@@ -318,6 +322,10 @@ if (env.webPushEnabled) {
   if (!/^(mailto:.+@.+|https?:\/\/.+)/i.test(env.webPushVapidSubject)) {
     throw new Error("WEB_PUSH_VAPID_SUBJECT must be a mailto: address or absolute http(s) URL when WEB_PUSH_ENABLED=true.");
   }
+}
+
+if (env.ohifNativeDeliveryEnabled && !env.ohifNativeAuthSecret) {
+  throw new Error("OHIF_NATIVE_AUTH_SECRET is required when native OHIF delivery is enabled.");
 }
 
 for (const [name, value] of [["OHIF_PUBLIC_BASE_URL", env.ohifPublicBaseUrl], ["OHIF_DICOMWEB_PROXY_PATH", env.ohifDicomWebProxyPath]] as const) {

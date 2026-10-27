@@ -63,6 +63,25 @@ Repository defaults prove only the legacy DIMSE assumption (`OSIRIXR` and port 1
 
 ## Image Delivery
 
+An opt-in native Orthanc transport is available behind
+`OHIF_NATIVE_DELIVERY_ENABLED=false` (the default). Its GET-only nginx route
+streams WADO metadata, JPEG thumbnails and lossless diagnostic frames directly
+from the private authoritative archive. The official Authorization plugin calls
+RISpro's existing login/case/session checks and exact study allowlist, caching
+decisions for one second without exceeding login/session expiry. Current/prior
+discovery and the original Express transport remain available. The native
+thumbnail branch uses Orthanc's rendered endpoint through OHIF's existing
+bounded image-load pool; it does not add a generator or persistent image cache.
+The ordinary proxy still uses its established thumbnail path. See the
+[native pilot and rollback instructions](../../ohif-viewer-operations-runbook.md).
+
+Native pixel transfers do not add HTTP gzip: the local identity/gzip experiments
+found higher complete-frame latency with gzip for uncompressed, RLE, JPEG
+lossless, JPEG-LS and JPEG2000 fixtures. Stored compressed frame bytes and decoded
+pixels were identical. Reassess this transport choice with synthetic studies on
+the target LAN; startup assets retain their existing gzip compression and the
+viewer build now uses production minification.
+
 The viewer's iPhone/iPad presentation is customized at source-build time, keeping
 the original desktop header at widths of 1280px and above. Compact layouts reuse
 OHIF's toolbar commands and panels, provide touch series selection and use the
@@ -75,7 +94,7 @@ opening a different CT/MR stack, including revisits.
 
 The gateway applies lossless HTTP gzip compression to `/ohif-dicomweb/` responses when the browser accepts gzip. The browser restores the exact original pixel bytes before OHIF decodes them. Multipart boundary headers are preserved; partial-range responses retain their original byte ranges. Image responses remain private and are not stored in a shared cache.
 
-OHIF limits simultaneous image loads to four interaction requests, one thumbnail, and one prefetch. This reduces competition from background images on slower connections while leaving room for multiple visible viewports.
+The proxy retains four interaction requests, one thumbnail, and one prefetch. Native delivery uses four interaction requests, four thumbnails, and one prefetch, selected from isolated synthetic measurements. Hospital LAN verification remains pending.
 
 The OHIF origin compresses JavaScript, CSS, WASM, SVG and JSON startup assets with gzip level 1. A disconnected DICOMweb response aborts its upstream request while preserving the archive timeout and exact-study session checks. Normal completed responses keep their existing behavior.
 
@@ -87,7 +106,7 @@ Compression savings depend on the source transfer syntax. Already compressed ima
 
 - The doctor QR worklist remains a permanent public-token read surface with optional authentication. It does not receive `Open Images`; mandatory-auth QR launch needs a separate product/security task.
 - No automatic multi-PACS fallback exists.
-- No key-image, screenshot, measurement, DICOM SR/KOS, report text, signing, or report-finalization integration is included.
+- Native RISpro reporting, annotated key-image capture, signing and addenda retain their existing integration. This work adds no DICOM SR/KOS export.
 - Real OsiriX, LAN, domain/TLS, and image-frame behavior must be validated in the target hospital environment.
 
 See [OHIF operations runbook](../../ohif-viewer-operations-runbook.md), [troubleshooting](../../ohif-viewer-troubleshooting.md), and [rollback](../../ohif-viewer-rollback.md).

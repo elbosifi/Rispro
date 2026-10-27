@@ -32,4 +32,17 @@ describe("OHIF runtime configuration", () => {
     vm.runInNewContext(source,context);
     assert.deepEqual(Array.from(context.window.config.dataSources![0].configuration.risproStudyInstanceUIDs),['1.2.3','1.2.4']);
   });
+  it("uses native delivery only for WADO when selected and retains scoped proxy discovery and rollback", async () => {
+    const source = await fs.readFile(appConfigPath, "utf8");
+    const contextId = "00000000-0000-4000-8000-000000000001";
+    for (const [selector, native] of [["", false], ["&risproDelivery=native", true], ["&risproDelivery=proxy", false]] as const) {
+      const context = { window: { location: { search: `?risproContext=${contextId}${selector}` }, config: {} as { maxNumRequests: { thumbnail: number }; dataSources: { configuration: { qidoRoot: string; wadoRoot: string; imageRendering: string } }[] } }, URLSearchParams };
+      vm.runInNewContext(source, context);
+      const config = context.window.config.dataSources[0].configuration;
+      assert.equal(config.qidoRoot, `/ohif-dicomweb/context/${contextId}`);
+      assert.equal(config.wadoRoot, `${native ? "/ohif-native" : "/ohif-dicomweb"}/context/${contextId}`);
+      assert.equal(config.imageRendering, "wadors");
+      assert.equal(context.window.config.maxNumRequests.thumbnail, native ? 4 : 1);
+    }
+  });
 });

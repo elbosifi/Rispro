@@ -9,3 +9,12 @@
 7. The gateway remains a transparent proxy for RISpro even while OHIF is disabled. If the gateway container itself is the problem, temporarily publish app port 3000 only as an operator-controlled deployment rollback and restore the documented stack after diagnosis.
 
 Rollback never deletes studies from OsiriX or Orthanc automatically and never removes the existing viewer/report paths. Migration 124 is additive: leave its columns in place during rollback; no schema reversal is required for safe recovery.
+
+For the opt-in native Orthanc **transport**, use `risproDelivery=proxy` in the
+existing authorized viewer URL to return to Express immediately. Disable
+`OHIF_NATIVE_DELIVERY_ENABLED` and restart RISpro for future launches. Keep
+`OHIF_NATIVE_AUTH_SECRET` and the callback service available while the archive
+still uses its Authorization plugin; existing server-to-server Basic operations
+and the Express fallback depend on that callback. No database or archive changes
+are required for transport rollback. See the
+[native pilot instructions](ohif-viewer-operations-runbook.md).

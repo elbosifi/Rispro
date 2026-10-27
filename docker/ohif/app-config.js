@@ -7,6 +7,8 @@ const risproStudyInstanceUIDs = [...new Set([
 ].join(',').split(',').filter(uid => /^[0-9]+(?:\.[0-9]+)+$/.test(uid) && uid.length <= 64))];
 const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
   ? '/ohif-dicomweb/context/' + risproContext : '/ohif-dicomweb';
+const risproNativeDelivery = risproParams.get('risproDelivery') === 'native' && /^[a-f0-9-]{36}$/i.test(risproContext || '');
+const risproWadoRoot = risproNativeDelivery ? '/ohif-native/context/' + risproContext : risproDicomWebRoot;
 window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
@@ -19,10 +21,10 @@ window.config = {
       style: { height: '28px', maxWidth: '64px', objectFit: 'contain' },
     }), React.createElement('span', { style: { fontSize: '12px', color: 'white' } }, 'NCCB')),
   },
-  // Leave bandwidth available for visible images on slower connections.
+  // Bounded LAN thumbnails; retain the proxy's existing rollback settings.
   maxNumRequests: {
     interaction: 4,
-    thumbnail: 1,
+    thumbnail: risproNativeDelivery ? 4 : 1,
     prefetch: 1,
   },
   extensions: [],
@@ -37,12 +39,12 @@ window.config = {
         // Discovery selectors only; the server's per-tab allowlist remains authoritative.
         risproStudyInstanceUIDs,
         qidoRoot: risproDicomWebRoot,
-        wadoRoot: risproDicomWebRoot,
+        wadoRoot: risproWadoRoot,
         wadoUriRoot: risproDicomWebRoot,
         qidoSupportsIncludeField: true,
         supportsReject: false,
         imageRendering: 'wadors',
-        thumbnailRendering: 'wadors',
+        thumbnailRendering: risproNativeDelivery ? 'rendered' : 'wadors',
         enableStudyLazyLoad: true,
         supportsFuzzyMatching: false,
         supportsWildcard: false,

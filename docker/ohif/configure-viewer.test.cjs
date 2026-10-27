@@ -2,6 +2,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { getStudiesForPatientByMRN, diagnosticSeriesRules } = require('./configure-viewer.cjs');
 const { protectBootstrapHtml } = require('./verify-browser-build.cjs');
+const { verifyMinifiedOnnxGuard } = require('./verify-browser-build.cjs');
+
+test('minified ONNX initializer works in async chunks/workers and rejects a lost filename guard', () => {
+  const source = 'var t,n=(t=typeof document<"u"&&document.currentScript?document.currentScript.src:void 0,typeof __filename<"u"&&(t=t||__filename),function(e={}){return e});';
+  verifyMinifiedOnnxGuard(source, 'synthetic-minified.js');
+  assert.throws(() => verifyMinifiedOnnxGuard(source.replace('typeof __filename<"u"', 'true'), 'broken.js'), /__filename is not defined/);
+});
 const { configureLoading, trackCachedFrames, isDiagnosticReady } = require('./configure-viewer.cjs');
 const fs = require('node:fs');
 const os = require('node:os');

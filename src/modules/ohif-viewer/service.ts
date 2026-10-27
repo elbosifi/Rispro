@@ -351,12 +351,13 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   const priors = session.permittedStudyUids.filter(uid => uid !== session.studyInstanceUid).map(encodeURIComponent).join(",");
   // OHIF eagerly initializes every StudyInstanceUIDs entry. Keep priors in the
   // authorized study browser for explicit loading, without granting new access.
-  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${priors ? `&risproPriorStudyUIDs=${priors}` : ""}&risproContext=${session.reportContextId}`;
+  const delivery = env.ohifNativeDeliveryEnabled && session.accessStrategy === "authoritative_orthanc" ? "&risproDelivery=native" : "";
+  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${priors ? `&risproPriorStudyUIDs=${priors}` : ""}&risproContext=${session.reportContextId}${delivery}`;
 }
 
-export async function proxyAuthorizedDicomWebRequest(input: {
-  userId: UserId; launchToken: string; contextId?: string; appRole?: Actor["appRole"]; relativePathWithQuery: string; headers: Record<string, string>; signal?: AbortSignal;
-}): Promise<globalThis.Response> {
+export async function authorizeViewerDicomWebRequest(input: {
+  userId: UserId; launchToken: string; contextId?: string; appRole?: Actor["appRole"]; relativePathWithQuery: string;
+}) {
   if (!input.launchToken && !input.contextId) throw new HttpError(401, "Viewer session is required.");
   const session = input.contextId
     ? await findViewerContext(input.contextId, input.userId)
@@ -372,6 +373,13 @@ export async function proxyAuthorizedDicomWebRequest(input: {
     await logAuditEntry({ entityType: "ohif_dicomweb", entityId: session.appointmentId, actionType: "viewer_proxy_denied", newValues: { status: "rejected", reason: "study_not_permitted" }, changedByUserId: input.userId });
     throw new HttpError(403, "This DICOMweb request is outside the authorized viewer session.");
   }
+  return session;
+}
+
+export async function proxyAuthorizedDicomWebRequest(input: {
+  userId: UserId; launchToken: string; contextId?: string; appRole?: Actor["appRole"]; relativePathWithQuery: string; headers: Record<string, string>; signal?: AbortSignal;
+}): Promise<globalThis.Response> {
+  const session = await authorizeViewerDicomWebRequest(input);
   if (session.accessStrategy === "native_dicomweb") {
     const endpoint = session.sourcePacsNodeId == null ? null : await findPacsWebEndpoint(session.sourcePacsNodeId);
     if (!endpoint?.enabled) throw new HttpError(503, "DICOMweb source configuration is unavailable.");

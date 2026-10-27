@@ -31,15 +31,19 @@ COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.
 COPY docker/ohif/configure-responsive.cjs /tmp/configure-responsive.cjs
 COPY docker/ohif/configure-cornerstone-compat.cjs /tmp/configure-cornerstone-compat.cjs
 COPY docker/ohif/configure-viewport-reliability.cjs /tmp/configure-viewport-reliability.cjs
+COPY docker/ohif/configure-thumbnails.cjs /tmp/configure-thumbnails.cjs
 COPY docker/ohif/responsive /tmp/responsive
 COPY docker/ohif/verify-browser-build.cjs /tmp/verify-browser-build.cjs
 RUN node /tmp/register-reporting.cjs \
   && node /tmp/configure-cornerstone-compat.cjs \
   && node /tmp/configure-viewer.cjs \
   && node /tmp/configure-viewport-reliability.cjs \
+  && node /tmp/configure-thumbnails.cjs \
   && mkdir -p node_modules/@rispro \
   && ln -s ../../extensions/rispro-reporting node_modules/@rispro/extension-reporting
-ENV QUICK_BUILD=true
+# Production minification; QUICK_BUILD=true remains available for local diagnosis.
+ARG QUICK_BUILD=false
+ENV QUICK_BUILD=${QUICK_BUILD}
 ENV PUBLIC_URL=${PUBLIC_URL}
 RUN bun run show:config \
   && bun run build \

@@ -14,6 +14,52 @@
 7. Enable the database OHIF setting and verify `Open Images` for a controlled doctor/case. No `.env` or Docker change is required for ordinary enable/disable operations.
 8. Confirm the current study, bounded priors, LAN access, domain access, audit entries, and no credentials in browser network responses.
 
+## Native Orthanc delivery pilot (disabled by default)
+
+`OHIF_NATIVE_DELIVERY_ENABLED=false` is the default. Native delivery is separate
+from the existing `authoritative_orthanc` source strategy. It changes transport
+only: launch, case authorization, study selection, reporting and the Express
+fallback retain their existing authority.
+
+Before a future approved pilot, load the official Authorization and DICOMweb
+plugins on the **private** authoritative archive. Merge the
+[authorization example](../docker/ohif/orthanc-authorization.example.json) into
+its configuration, replacing the callback password with the same secret as
+`OHIF_NATIVE_AUTH_SECRET` on RISpro. Built-in Orthanc Basic authentication is
+replaced by the Authorization plugin; authentication is not disabled. Existing
+archive Basic credentials are checked by the callback's service-user profile.
+The browser receives neither those credentials nor the callback secret.
+
+Mount [native-location.conf](../docker/ohif/native-location.conf) read-only at
+`/etc/nginx/ohif-native/native.conf` in the gateway, adapting its internal
+upstream to that same authoritative archive. The ordinary stack does not mount
+this file. Expose only the GET-only native study path; administrative REST and
+STOW access must remain private. DICOMweb internally performs `POST /tools/find`,
+so the plugin callback accepts that study lookup; nginx remains the boundary
+that prevents browser writes.
+
+Only after archive/plugin and target-environment testing should an operator
+enable `OHIF_NATIVE_DELIVERY_ENABLED=true`. New authorized launches then select
+native WADO metadata, JPEG thumbnails and unchanged diagnostic frames. Exact-study
+discovery remains available through the scoped Express proxy. Authentication,
+case access, active user/auth version, exact study allowlist, expiration and
+revocation are checked by the existing RISpro code. The official plugin caches
+decisions for **one second**; revocation takes effect within that bound, and a
+grant is never issued past login/session expiry. Responses are private/no-store.
+
+For immediate transport rollback, set `risproDelivery=proxy` on the existing
+authorized viewer URL. For subsequent launches, turn off the native environment
+gate and restart the app. Retain the callback secret/profile service while the
+archive Authorization plugin remains configured, so existing backend Basic
+operations and the Express fallback keep working. No study deletion, migration
+rollback or change to reporting is involved.
+
+Local synthetic acceptance and measurements are recorded in the
+[native delivery results](plans/completed/ohif-native-delivery-results.md).
+Hospital LAN latency, actual iPad/Safari, production routing and
+production plugin configuration remain operator validation tasks. This work does
+not activate the production pathway.
+
 ## Monitoring
 
 System Diagnostics shows the environment/database gates, selected source/strategy, last QIDO/WADO states, active retrievals, and recent retrieval failures. Audit Log and System Diagnostics remain separate. Use the HTTP `X-Request-Id` to correlate a failed launch with structured logs.

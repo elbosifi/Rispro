@@ -7,6 +7,7 @@ import type { AuthenticatedUserContext } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { asUnknownRecord } from "../../utils/records.js";
+import { ohifNativeAuthorizationRouter } from "./native-authorization.js";
 import { readOhifViewerConfiguration } from "./repository.js";
 import {
   exchangeViewerLaunchToken,
@@ -38,6 +39,7 @@ function positiveInteger(value: unknown, field: string): number {
 }
 
 export const ohifViewerRouter = Router();
+ohifViewerRouter.use("/native", ohifNativeAuthorizationRouter);
 
 ohifViewerRouter.get(
   "/availability",

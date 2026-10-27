@@ -1,0 +1,18 @@
+{
+  "Plugins": [
+    "/usr/share/orthanc/plugins-available/libOrthancAuthorization.so",
+    "/usr/share/orthanc/plugins-available/libOrthancDicomWeb.so",
+    "/usr/share/orthanc/plugins-available/libOrthancOHIF.so"
+  ],
+  "AuthenticationEnabled": false,
+  "Authorization": {
+    "WebServiceTokenValidationUrl": "http://app:3000/api/ohif/native/tokens/validate",
+    "WebServiceUserProfileUrl": "http://app:3000/api/ohif/native/user/get-profile",
+    "WebServiceUsername": "rispro",
+    "WebServicePassword": "REPLACE_WITH_OHIF_NATIVE_AUTH_SECRET",
+    "TokenHttpHeaders": ["x-rispro-viewer", "authorization"],
+    "TokenGetArguments": [],
+    "CheckedLevel": "studies",
+    "UncheckedFolders": ["/ohif/"]
+  }
+}

@@ -632,7 +632,7 @@ async function createDoctorPortalTestApp() {
   const http = await import("node:http");
   const { createDoctorPortalRouter } = await import("./index.js");
   const { reportingBoardPublicRouter } = await import("./reporting-board-public-routes.js");
-  const { ohifDicomWebProxyRouter } = await import("../ohif-viewer/routes.js");
+  const { ohifDicomWebProxyRouter, ohifViewerRouter } = await import("../ohif-viewer/routes.js");
   const { nativeReportingRouter } = await import("../reporting/reporting-routes.js");
   const { env } = await import("../../config/env.js");
   const appInstance = express();
@@ -642,6 +642,7 @@ async function createDoctorPortalTestApp() {
   appInstance.use("/api/reporting", reportingBoardPublicRouter);
   appInstance.use("/api/native-reporting", nativeReportingRouter);
   appInstance.use("/api/doctor", createDoctorPortalRouter());
+  appInstance.use("/api/ohif", ohifViewerRouter);
   appInstance.use(env.ohifDicomWebProxyPath, ohifDicomWebProxyRouter);
   appInstance.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     res.status((err as { statusCode?: number }).statusCode ?? 500).json({ error: err.message });
@@ -1150,11 +1151,64 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
   });
 
+  it("authorizes native Orthanc callbacks with the existing login, case and exact-study session", async (t) => {
+    guard();
+    const { env } = await import("../../config/env.js");
+    const repository = await import("../ohif-viewer/repository.js");
+    const previous = { enabled: env.ohifNativeDeliveryEnabled, secret: env.ohifNativeAuthSecret };
+    env.ohifNativeDeliveryEnabled = true;
+    env.ohifNativeAuthSecret = "synthetic-plugin-callback";
+    t.after(() => { env.ohifNativeDeliveryEnabled = previous.enabled; env.ohifNativeAuthSecret = previous.secret; });
+    // Keep this session fixture outside the date-scoped SonicDICOM refresh cases.
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(800), patientName: "Native authorization" });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    const uid = "2.25.202610270001";
+    const tokenHash = createHash("sha256").update(randomUUID()).digest("hex");
+    await repository.createViewerLaunchSession({ userId: doctor.id, appointmentId, sourcePacsNodeId: null, accessStrategy: "authoritative_orthanc", currentStudyUid: uid, permittedStudyUids: [uid], tokenHash, expiresAt: new Date(Date.now() + 60_000) });
+    const session = await repository.consumeViewerLaunchToken(tokenHash, doctor.id, tokenHash, new Date(Date.now() + 60_000));
+    assert.ok(session);
+    const authorization = "Basic " + Buffer.from("rispro:" + env.ohifNativeAuthSecret).toString("base64");
+    const callback = async (overrides: Record<string, unknown> = {}, cookie = doctor.cookie, serviceAuth = authorization) => {
+      const response = await fetch(app.baseUrl + "/api/ohif/native/tokens/validate", { method: "POST", headers: { "Content-Type": "application/json", Authorization: serviceAuth }, body: JSON.stringify({ "token-key": "x-rispro-viewer", "token-value": session.reportContextId + "|" + cookie, method: "get", level: "study", "dicom-uid": uid, ...overrides }) });
+      return { status: response.status, body: await response.json() as { granted?: boolean; validity?: number } };
+    };
+    assert.deepEqual(await callback(), { status: 200, body: { granted: true, validity: 1 } });
+    assert.equal((await callback({}, doctor.cookie, "wrong")).status, 401);
+    assert.equal((await callback({ "dicom-uid": "9.9.9" })).body.granted, false);
+    assert.equal((await callback({ method: "delete" })).body.granted, false);
+    assert.equal((await callback({ level: "system", uri: "/studies" })).body.granted, false);
+    assert.equal((await callback({ "token-value": randomUUID() + "|" + doctor.cookie })).body.granted, false);
+    assert.equal((await callback({}, otherDoctor.cookie)).body.granted, false);
+    assert.equal((await callback({}, "")).body.granted, false);
+    const jwt = (await import("jsonwebtoken")).default;
+    assert.equal((await callback({}, `${env.cookieName}=${jwt.sign({ sub: doctor.id, role: "doctor" }, env.jwtSecret, { expiresIn: -1 })}`)).status, 401);
+    await pool.query("update viewer_launch_sessions set expires_at=now()-interval '1 second' where id=$1", [session.id]);
+    assert.equal((await callback()).body.granted, false);
+    await pool.query("update viewer_launch_sessions set expires_at=now()+interval '1 minute',revoked_at=now() where id=$1", [session.id]);
+    assert.equal((await callback()).body.granted, false);
+    await pool.query("update viewer_launch_sessions set revoked_at=null where id=$1", [session.id]);
+    env.ohifNativeDeliveryEnabled = false;
+    assert.equal((await callback()).body.granted, false);
+    const archiveSettings = (await pool.query("select setting_key,setting_value,updated_by_user_id from system_settings where category='authoritative_orthanc'")).rows;
+    t.after(async () => {
+      await pool.query("delete from system_settings where category='authoritative_orthanc'");
+      for (const row of archiveSettings) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values('authoritative_orthanc',$1,$2::jsonb,$3)", [row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
+    });
+    for (const [key, value] of Object.entries({ enabled: "enabled", username: "synthetic-service", password: "synthetic-service-password" })) await pool.query("insert into system_settings(category,setting_key,setting_value) values('authoritative_orthanc',$1,$2::jsonb) on conflict(category,setting_key) do update set setting_value=excluded.setting_value", [key, JSON.stringify({ value })]);
+    const serviceToken = { "token-key": "authorization", "token-value": "Basic " + Buffer.from("synthetic-service:synthetic-service-password").toString("base64") };
+    assert.equal((await callback(serviceToken)).body.granted, true, "Rollback retains authenticated backend archive operations");
+    assert.equal((await callback({ ...serviceToken, "token-value": "Basic wrong" })).body.granted, false);
+    const profile = await fetch(app.baseUrl + "/api/ohif/native/user/get-profile", { method: "POST", headers: { "Content-Type": "application/json", Authorization: authorization }, body: JSON.stringify(serviceToken) });
+    assert.equal(profile.status, 200);
+    assert.deepEqual((await profile.json() as { permissions: string[] }).permissions, ["all"]);
+  });
+
   it("refreshes a stale SonicDICOM cache entry through the protected board scope", async () => {
     guard();
     const date = addDays(80);
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date, patientName: "Manual Sonic refresh" });
-    statusByAppointmentId.set(appointmentId, "no_report");
+    // Change the upstream response without queuing a cache write over the stale fixture.
+    Map.prototype.set.call(statusByAppointmentId, appointmentId, "no_report");
     await seedSonicDicomCache(appointmentId, "final", "2026-05-01T08:00:00.000Z");
 
     const before = await api<{ cases: Array<{ appointmentId: number; reportStatus: string }> }>(
