@@ -35,6 +35,7 @@ import DoctorPage from "@/pages/doctor/doctor-page";
 import { ReportingBoardMobilePage } from "@/pages/doctor/reporting-board-mobile-page";
 import { ReportingWorklistDocumentsPage } from "@/pages/doctor/reporting-worklist-documents-page";
 import { NativeReportPage } from "@/pages/doctor/native-report-page";
+import { FastPreviewPage } from "@/pages/doctor/fast-preview-page";
 import PrintPage from "@/pages/print/print-page";
 import DayListPrintPage from "@/pages/print/day-list-print-page";
 import ReportingBoardPrintPage from "@/pages/print/reporting-board-print-page";
@@ -424,6 +425,7 @@ function RouterConfig() {
       <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
       <Route path="/reporting/worklist/:token/cases/:caseId/documents" element={<ProtectedRoute><EnglishOnlyRoute><ReportingWorklistDocumentsPage /></EnglishOnlyRoute></ProtectedRoute>} />
       <Route path="/reporting/native/:appointmentId" element={<ProtectedRoute><EnglishOnlyRoute><NativeReportPage /></EnglishOnlyRoute></ProtectedRoute>} />
+      <Route path="/reporting/fast-preview/:appointmentId" element={<ProtectedRoute><EnglishOnlyRoute><FastPreviewPage /></EnglishOnlyRoute></ProtectedRoute>} />
       <Route path="/mobile/reporting-view/:token" element={<LegacyReportingWorklistRedirect />} />
       <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route path="/print/reporting-board" element={<ProtectedRoute><ReportingBoardPrintPage /></ProtectedRoute>} />

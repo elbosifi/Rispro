@@ -106,6 +106,10 @@ import { reconcileDoctorWorklists, syncDoctorWorklistLifecycle } from "./doctor-
 import { median, minutesBetween, minutesSince, percentile, withTimelineMetrics } from "./reporting-board-metrics.js";
 import { getProtocolingHistoricalPacsCandidates, getProtocolingHistorySonicDicomRedirect, getProtocolingPatientHistory } from "./protocoling-repository.js";
 import { ensureComplementaryRecallFinalizedSideEffects, resolveComplementaryRecallReportFinality } from "../appointments-v2/recall/complementary-recall.service.js";
+import { createAuthoritativeOrthancClient } from "../../services/authoritative-orthanc-service.js";
+import { loadSettingsMap } from "../../services/settings-service.js";
+import { logAuditEntry } from "../../services/audit-service.js";
+import { normalizeRisproModalityCode } from "../../services/clinical-document-dicom.js";
 
 export interface Actor {
   userId: UserId;
@@ -942,6 +946,43 @@ export async function getAuthorizedReportingBoardAppointmentRead(
 ) {
   const me = await requireRosterDoctor(actor);
   return getAuthorizedReportingBoardAppointmentWithScope(actor, appointmentId, forbiddenMessage, requirePersonalReportingBoardAppointmentRead).then((row) => ({ me, row }));
+}
+
+async function fastPreviewContext(actor: Actor, appointmentId: number) {
+  const { row } = await getAuthorizedReportingBoardAppointmentRead(actor, appointmentId);
+  if (row.caseType !== "appointment" || !row.patientDicomId?.trim() || !row.accessionNumber?.trim()) throw new HttpError(409, "The appointment has insufficient patient or study identity for Fast Preview.");
+  const client = await createAuthoritativeOrthancClient();
+  const found = await client.findStudy(row.studyInstanceUid ? { studyInstanceUid: row.studyInstanceUid } : { accessionNumber: row.accessionNumber, expectedPatientIds: [row.patientDicomId], expectedModalityCode: normalizeRisproModalityCode(row.modalityCode), expectedStudyDate: row.bookingDate });
+  if (found.status !== "matched" || !found.study) throw new HttpError(found.status === "ambiguous" ? 409 : 404, "The appointment study could not be uniquely resolved.");
+  const study = found.study;
+  if (!study.patientId || study.patientId.trim() !== row.patientDicomId.trim() || !study.accessionNumber || study.accessionNumber.trim() !== row.accessionNumber.trim() || (row.studyInstanceUid && study.studyInstanceUid !== row.studyInstanceUid)) throw new HttpError(409, "The study patient or accession does not match the appointment.");
+  return { client, study };
+}
+
+async function fastPreviewSettings() {
+  const values = (await loadSettingsMap(["fast_preview"]))["fast_preview"] || {};
+  const quality = Number(values.jpeg_quality);
+  const width = Number(values.maximum_image_width);
+  return { quality: Number.isInteger(quality) && quality >= 30 && quality <= 95 ? quality : 75, maximumWidth: [256, 384, 512, 768, 1024].includes(width) ? width : 512 };
+}
+
+export async function getFastPreviewStudy(actor: Actor, appointmentId: number) {
+  const { client, study } = await fastPreviewContext(actor, appointmentId);
+  const [series, settings] = await Promise.all([client.previewSeries(study.orthancStudyId), fastPreviewSettings()]);
+  await logAuditEntry({ entityType: "appointment", entityId: appointmentId, actionType: "fast_preview_opened", newValues: { studyInstanceUid: study.studyInstanceUid }, changedByUserId: actor.userId });
+  return { study: { description: study.studyDescription, date: study.studyDate, accessionNumber: study.accessionNumber, patientName: study.patientName }, series, settings };
+}
+
+export async function getFastPreviewInstances(actor: Actor, appointmentId: number, seriesId: string) {
+  const { client, study } = await fastPreviewContext(actor, appointmentId);
+  return client.previewInstances(study.orthancStudyId, seriesId);
+}
+
+export async function getFastPreviewImage(actor: Actor, appointmentId: number, instanceId: string, window: { center: number; width: number } | null, signal?: AbortSignal) {
+  const { client, study } = await fastPreviewContext(actor, appointmentId);
+  const settings = await fastPreviewSettings();
+  const image = await client.previewImage(study, instanceId, settings.quality, settings.maximumWidth, window, signal);
+  return { image, settings };
 }
 
 async function getAuthorizedReportingBoardAppointmentWithScope(

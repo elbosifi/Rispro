@@ -119,6 +119,10 @@ exports[`settings page composition > preserves the ordered settings menu and gro
     "integrations",
   ],
   [
+    "fast_preview",
+    "integrations",
+  ],
+  [
     "documents_and_uploads",
     "system",
   ],

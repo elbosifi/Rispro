@@ -23,6 +23,7 @@ import ActionPinPolicySection from "./action-pin-policy-section";
 import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
+import FastPreviewSettingsSection from "./fast-preview-settings-section";
 import RequestScanAutomationSection from "./request-scan-automation-section";
 import EmailNotificationsSection from "./email-notifications-section";
 import MedGemmaSection from "./medgemma-section";
@@ -243,6 +244,7 @@ export default function SettingsPage() {
             {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "ohif_viewer" && <OhifViewerSection onReAuthRequired={requestReAuth} />}
+            {section === "fast_preview" && <FastPreviewSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

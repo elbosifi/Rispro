@@ -1441,6 +1441,7 @@ export const ar = {
   "settings.section.request_scan_automation": "أتمتة طلبات الفحص",
   "settings.section.email_notifications": "البريد الإلكتروني والإشعارات",
   "settings.section.authoritative_orthanc": "Orthanc المرجعي",
+  "settings.section.fast_preview": "المعاينة السريعة",
   "settings.pacs.connectionSuccessful": "تم الاتصال بنجاح",
   "settings.pacs.nodes": "عقد PACS",
   "settings.pacs.addNode": "إضافة عقدة PACS",

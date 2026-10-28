@@ -1399,6 +1399,7 @@ export const en = {
   "settings.section.request_scan_automation": "Request Scan Automation",
   "settings.section.email_notifications": "Email & Notifications",
   "settings.section.authoritative_orthanc": "Authoritative Orthanc",
+  "settings.section.fast_preview": "Fast Preview",
   "settings.pacs.connectionSuccessful": "Connection successful",
   "settings.pacs.nodes": "PACS nodes",
   "settings.pacs.addNode": "Add PACS Node",

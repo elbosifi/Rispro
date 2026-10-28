@@ -176,10 +176,13 @@ export class AuthoritativeOrthancClient {
       request.end();
     });
   }
-  private async request(path: string, init: RequestInit = {}, options: { allowDisabled?: boolean; acceptableStatuses?: number[]; responseType?: "json" | "text" } = {}): Promise<unknown> {
+  private async request(path: string, init: RequestInit = {}, options: { allowDisabled?: boolean; acceptableStatuses?: number[]; responseType?: "json" | "text" | "bytes" } = {}): Promise<unknown> {
     if (!this.settings.enabled && !options.allowDisabled) throw new HttpError(503, "Authoritative Orthanc is disabled.", { code: "orthanc_disabled" });
     if (!this.settings.baseUrl) throw new HttpError(503, "Authoritative Orthanc base URL is not configured.");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), this.settings.timeoutSeconds * 1000);
+    const abort = () => controller.abort();
+    if (init.signal?.aborted) abort();
+    init.signal?.addEventListener("abort", abort, { once: true });
     try {
       const headers: Record<string, string> = { Accept: "application/json", ...(init.headers as Record<string, string> || {}) };
       if (this.settings.username) headers.Authorization = `Basic ${Buffer.from(`${this.settings.username}:${this.settings.password}`).toString("base64")}`;
@@ -188,12 +191,47 @@ export class AuthoritativeOrthancClient {
       const response = !this.settings.verifyTls && this.settings.baseUrl.startsWith("https://") ? await this.insecureTlsRequest(url, request) : await fetchForTests(url, request);
       if (response.status === 401 || response.status === 403) throw new HttpError(502, "Authoritative Orthanc authentication failed.", { code: "orthanc_auth_failed" });
       if (options.acceptableStatuses?.includes(response.status)) return null;
+      if (response.status === 415 && options.responseType === "bytes") throw new HttpError(415, "This image is not supported by Orthanc.");
       if (!response.ok) throw new HttpError(502, `Authoritative Orthanc request failed (status=${response.status}).`);
+      if (options.responseType === "bytes") return Buffer.from(await response.arrayBuffer());
       const body = await response.text();
       if (!body) return null;
       if (options.responseType === "text") return body;
       try { return JSON.parse(body) as unknown; } catch { throw new HttpError(502, "Authoritative Orthanc returned an invalid JSON response.", { code: "orthanc_invalid_response" }); }
-    } catch (error) { if ((error as Error).name === "AbortError") throw new HttpError(502, "Authoritative Orthanc request timed out.", { code: "orthanc_timeout" }); if (error instanceof HttpError) throw error; if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|ENOTFOUND/i.test(String(error))) throw new HttpError(502, "Authoritative Orthanc is unavailable.", { code: "orthanc_unavailable" }); throw error; } finally { clearTimeout(timeout); }
+    } catch (error) { if ((error as Error).name === "AbortError") throw new HttpError(502, "Authoritative Orthanc request timed out or was cancelled.", { code: "orthanc_timeout" }); if (error instanceof HttpError) throw error; if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|ENOTFOUND/i.test(String(error))) throw new HttpError(502, "Authoritative Orthanc is unavailable.", { code: "orthanc_unavailable" }); throw error; } finally { clearTimeout(timeout); init.signal?.removeEventListener("abort", abort); }
+  }
+  async previewSeries(studyId: string) {
+    const data = await this.request(`/studies/${encodeURIComponent(studyId)}/series`);
+    if (!Array.isArray(data)) throw new HttpError(502, "Invalid Orthanc series list.");
+    return data.map((item) => { const row = record(item); const dicom = tags(row); return { id: first(row.ID), description: first(dicom.SeriesDescription) || "Series", number: first(dicom.SeriesNumber), modality: first(dicom.Modality), count: Array.isArray(row.Instances) ? row.Instances.length : 0 }; }).filter((item) => item.id);
+  }
+  async previewInstances(studyId: string, seriesId: string) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(seriesId)) throw new HttpError(400, "Invalid series ID.");
+    const series = record(await this.request(`/series/${encodeURIComponent(seriesId)}`));
+    if (first(series.ParentStudy) !== studyId) throw new HttpError(404, "Series is not in this study.");
+    const dicom = tags(series);
+    if (!["CT", "MR"].includes((first(dicom.Modality) || "").toUpperCase())) throw new HttpError(415, "Only conventional single-frame CT and MRI are supported.");
+    const data = await this.request(`/series/${encodeURIComponent(seriesId)}/instances`);
+    if (!Array.isArray(data)) throw new HttpError(502, "Invalid Orthanc instance list.");
+    return data.map((item) => { const row = record(item); const dicom = tags(row); return { id: first(row.ID), number: Number(first(dicom.InstanceNumber) || 0) }; }).filter((item): item is { id: string; number: number } => Boolean(item.id)).sort((a, b) => a.number - b.number || a.id.localeCompare(b.id));
+  }
+  async previewImage(study: OrthancStudyDetails, instanceId: string, quality: number, maximumWidth: number, window: { center: number; width: number } | null, signal?: AbortSignal) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(instanceId)) throw new HttpError(400, "Invalid instance ID.");
+    const detail = record(await this.request(`/instances/${encodeURIComponent(instanceId)}`, { signal }));
+    const seriesId = first(detail.ParentSeries);
+    if (!seriesId) throw new HttpError(415, "Unsupported image.");
+    const series = record(await this.request(`/series/${encodeURIComponent(seriesId)}`, { signal }));
+    if (first(series.ParentStudy) !== study.orthancStudyId) throw new HttpError(404, "Image is not in this study.");
+    const dicom = record(await this.request(`/instances/${encodeURIComponent(instanceId)}/simplified-tags`, { signal }));
+    if (!study.studyInstanceUid || first(dicom.StudyInstanceUID) !== study.studyInstanceUid || first(dicom.PatientID) !== study.patientId || first(dicom.AccessionNumber) !== study.accessionNumber) throw new HttpError(409, "Image identity does not match the appointment study.");
+    const sop = first(dicom.SOPClassUID);
+    const modality = first(dicom.Modality);
+    const columns = Number(first(dicom.Columns));
+    const rows = Number(first(dicom.Rows));
+    if (!((modality === "CT" && sop === "1.2.840.10008.5.1.4.1.1.2") || (modality === "MR" && sop === "1.2.840.10008.5.1.4.1.1.4")) || Number(first(dicom.NumberOfFrames) || 1) !== 1 || Number(first(dicom.SamplesPerPixel) || 1) !== 1 || !["MONOCHROME1", "MONOCHROME2"].includes(first(dicom.PhotometricInterpretation) || "") || !Number.isInteger(columns) || columns < 1 || !Number.isInteger(rows) || rows < 1) throw new HttpError(415, "Only conventional single-frame CT and MRI images are supported.");
+    const query = new URLSearchParams({ quality: String(quality), width: String(Math.min(columns, maximumWidth)) });
+    if (window) { query.set("window-center", String(window.center)); query.set("window-width", String(window.width)); }
+    return await this.request(`/instances/${encodeURIComponent(instanceId)}/frames/0/rendered?${query}`, { headers: { Accept: "image/jpeg" }, signal }, { responseType: "bytes" }) as Buffer;
   }
   async getSystem(): Promise<OrthancSystemInfo> { const row = record(await this.request("/system")); const version = first(row.Version, row.version); if (!version && !first(row.Name, row.name)) throw new HttpError(502, "Authoritative Orthanc returned an invalid system response."); return { name: first(row.Name, row.name, this.settings.displayName), version, apiVersion: first(row.ApiVersion, row.API_VERSION, row.apiVersion) }; }
   async listStudyIds(): Promise<string[]> {

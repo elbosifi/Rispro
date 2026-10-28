@@ -45,6 +45,12 @@ const DOCUMENT_HA_RETENTION_MIN_HOURS = 24;
 const DOCUMENT_HA_RETENTION_MAX_HOURS = 168;
 
 function validateSettingValue(category: string, key: string, value: unknown): void {
+  if (category === "fast_preview") {
+    const scalar = extractSettingScalar(value).trim();
+    if (key === "jpeg_quality" && /^(?:[3-8][0-9]|9[0-5])$/.test(scalar)) return;
+    if (key === "maximum_image_width" && ["256", "384", "512", "768", "1024"].includes(scalar)) return;
+    throw new HttpError(400, "Invalid Fast Preview setting.");
+  }
   if (category === "documents_and_uploads") {
     const scalar = extractSettingScalar(value).trim();
     try {

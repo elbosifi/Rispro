@@ -860,6 +860,149 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     installDefaultSonicDicomReadersForTest();
   });
 
+  it("Fast Preview enforces appointment and image identity and applies current settings", async (t) => {
+    guard();
+    const orthanc = await import("../../services/authoritative-orthanc-service.js");
+    const settingsService = await import("../../services/settings-service.js");
+    const old = (await pool.query("select setting_key, setting_value, updated_by_user_id from system_settings where category='fast_preview'")).rows;
+    t.after(async () => {
+      orthanc.__resetAuthoritativeOrthancForTests();
+      await pool.query("delete from system_settings where category='fast_preview'");
+      for (const row of old) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values('fast_preview',$1,$2::jsonb,$3)", [row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
+    });
+    const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(1), patientName: "Fast preview" });
+    await assignDirectly(appointmentId, doctor.doctorId);
+    const uid = "2.25.20261027123456";
+    await pool.query("update appointments_v2.bookings set study_instance_uid=$2 where id=$1", [appointmentId, uid]);
+    const patient = (await pool.query<{ identifier_value: string }>("select p.identifier_value from patients p join appointments_v2.bookings b on b.patient_id=p.id where b.id=$1", [appointmentId])).rows[0]!.identifier_value;
+    const accession = `V2-${String(appointmentId).padStart(6, "0")}`;
+    let patientId = patient;
+    let ids = ["study"];
+    let studyDate = addDays(1).replace(/-/g, "");
+    let renderedUrl = "";
+    orthanc.__setAuthoritativeOrthancSettingsForTests({ enabled: true, autoExportClinicalDocuments: false, autoRouteEnabled: false, autoRouteDestinationKey: "", autoRouteDestinationKeys: [], baseUrl: "http://orthanc.test", username: "", password: "", timeoutSeconds: 5, verifyTls: true, displayName: "" });
+    orthanc.__setAuthoritativeOrthancFetchForTests(async (input) => {
+      const url = new URL(String(input));
+      const body = (value: unknown) => new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+      if (url.pathname === "/tools/find") return body(ids);
+      if (url.pathname.endsWith("/statistics")) return body({ CountSeries: 1, CountInstances: 1 });
+      if (url.pathname === "/studies/study") return body({ MainDicomTags: { StudyInstanceUID: uid, AccessionNumber: accession, StudyDate: studyDate, ModalitiesInStudy: "CT" }, PatientMainDicomTags: { PatientID: patientId } });
+      if (url.pathname === "/studies/study/series") return body([{ ID: "series", MainDicomTags: { Modality: "CT" }, Instances: ["image"] }]);
+      if (url.pathname === "/series/series") return body({ ParentStudy: "study", MainDicomTags: { Modality: "CT" } });
+      if (url.pathname === "/series/series/instances") return body([{ ID: "image", MainDicomTags: { InstanceNumber: "1" } }]);
+      if (url.pathname === "/instances/image") return body({ ParentSeries: "series" });
+      if (url.pathname === "/instances/image/simplified-tags") return body({ StudyInstanceUID: uid, PatientID: patientId, AccessionNumber: accession, Modality: "CT", SOPClassUID: "1.2.840.10008.5.1.4.1.1.2", Rows: "512", Columns: "512", PhotometricInterpretation: "MONOCHROME2" });
+      if (url.pathname === "/instances/image/frames/0/rendered") { renderedUrl = url.toString(); return new Response(new Uint8Array([255, 216, 255, 217])); }
+      throw new Error(`Unexpected Orthanc path ${url.pathname}`);
+    });
+    const path = `/api/doctor/reporting-board/cases/${appointmentId}/fast-preview`;
+    assert.equal((await rawApi("", path)).status, 401);
+    assert.equal((await rawApi(otherDoctor.cookie, path)).status, 403);
+    assert.equal((await rawApi(receptionistCookie, path)).status, 403);
+    assert.equal((await rawApi(doctor.cookie, path)).status, 200);
+    assert.equal((await rawApi(doctor.cookie, `${path}/series/series`)).status, 200);
+    await settingsService.upsertSettings("fast_preview", [{ key: "jpeg_quality", value: 40 }, { key: "maximum_image_width", value: 256 }], admin.id);
+    assert.equal((await rawApi(doctor.cookie, `${path}/images/image?center=40&width=80`)).status, 200);
+    assert.equal(new URL(renderedUrl).searchParams.get("quality"), "40");
+    assert.equal(new URL(renderedUrl).searchParams.get("width"), "256");
+    await assert.rejects(() => settingsService.upsertSettings("fast_preview", [{ key: "jpeg_quality", value: 29 }], admin.id));
+    patientId = "OTHER";
+    assert.equal((await rawApi(doctor.cookie, path)).status, 409);
+    patientId = patient; ids = ["study", "study"];
+    assert.equal((await rawApi(doctor.cookie, path)).status, 409);
+    ids = ["study"];
+    await pool.query("update appointments_v2.bookings set study_instance_uid=null where id=$1", [appointmentId]);
+    assert.equal((await rawApi(doctor.cookie, path)).status, 200);
+    studyDate = "19990101";
+    assert.equal((await rawApi(doctor.cookie, path)).status, 409);
+    await pool.query("update appointments_v2.bookings set study_instance_uid=$2 where id=$1", [appointmentId, uid]);
+
+    // Opt-in only: the target must be an explicitly marked, disposable Orthanc.
+    const syntheticOrigin = process.env.RISPRO_FAST_PREVIEW_TEST_ORTHANC;
+    if (syntheticOrigin) {
+      const target = new URL(syntheticOrigin);
+      assert.ok(["127.0.0.1", "localhost"].includes(target.hostname) && target.protocol === "http:" && target.pathname === "/");
+      const systemResponse = await fetch(`${target.origin}/system`);
+      assert.equal((await systemResponse.json() as { Name: string }).Name, "RISPRO_FAST_PREVIEW_SYNTHETIC_TEST");
+      let syntheticStudyId: string | null = null;
+      t.after(async () => { if (syntheticStudyId) await fetch(`${target.origin}/studies/${encodeURIComponent(syntheticStudyId)}`, { method: "DELETE" }); });
+      orthanc.__resetAuthoritativeOrthancForTests();
+      orthanc.__setAuthoritativeOrthancSettingsForTests({ enabled: true, autoExportClinicalDocuments: false, autoRouteEnabled: false, autoRouteDestinationKey: "", autoRouteDestinationKeys: [], baseUrl: target.origin, username: "", password: "", timeoutSeconds: 10, verifyTls: true, displayName: "" });
+      const { default: dcmjs } = await import("dcmjs");
+      const { datasetToBuffer } = dcmjs.data;
+      const newUid = () => `2.25.${BigInt(`0x${randomUUID().replace(/-/g, "")}`).toString()}`;
+      for (const modality of ["CT", "MR"] as const) {
+        const seriesUid = newUid();
+        const sopClass = `1.2.840.10008.5.1.4.1.1.${modality === "CT" ? "2" : "4"}`;
+        const rows = modality === "CT" ? 512 : 256;
+        const columns = modality === "CT" ? 512 : 384;
+        for (let i = 1; i <= 2; i++) {
+          const sopUid = newUid();
+          const pixels = new Uint16Array(rows * columns);
+          for (let p = 0; p < pixels.length; p++) pixels[p] = (p * 97 + Math.floor(p / columns) * 53 + i * 31) % 2048;
+          const dicom = Buffer.from(datasetToBuffer({ _meta: { FileMetaInformationVersion: new Uint8Array([0, 1]), MediaStorageSOPClassUID: sopClass, MediaStorageSOPInstanceUID: sopUid, TransferSyntaxUID: "1.2.840.10008.1.2.1", ImplementationClassUID: "2.25.12345" }, SOPClassUID: sopClass, SOPInstanceUID: sopUid, StudyInstanceUID: uid, SeriesInstanceUID: seriesUid, PatientID: patient, PatientName: "Synthetic^Preview", AccessionNumber: accession, Modality: modality, SeriesDescription: `Synthetic ${modality}`, SeriesNumber: modality === "CT" ? 1 : 2, InstanceNumber: i, Rows: rows, Columns: columns, SamplesPerPixel: 1, PhotometricInterpretation: "MONOCHROME2", BitsAllocated: 16, BitsStored: 12, HighBit: 11, PixelRepresentation: 0, WindowCenter: 1024, WindowWidth: 2048, PixelData: pixels }));
+          const upload = await fetch(`${target.origin}/instances`, { method: "POST", headers: { "Content-Type": "application/dicom" }, body: dicom as unknown as BodyInit });
+          const uploaded = await upload.text();
+          assert.equal(upload.status, 200, uploaded);
+          syntheticStudyId = (JSON.parse(uploaded) as { ParentStudy: string }).ParentStudy;
+        }
+      }
+      const live = await api<{ series: Array<{ id: string; modality: string }> }>(doctor.cookie, path);
+      assert.equal(live.status, 200);
+      assert.deepEqual(live.data.series.map((item) => item.modality).sort(), ["CT", "MR"]);
+      const ct = live.data.series.find((item) => item.modality === "CT")!;
+      const mr = live.data.series.find((item) => item.modality === "MR")!;
+      const ctSlices = await api<{ instances: Array<{ id: string }> }>(doctor.cookie, `${path}/series/${ct.id}`);
+      const mrSlices = await api<{ instances: Array<{ id: string }> }>(doctor.cookie, `${path}/series/${mr.id}`);
+      assert.equal(ctSlices.data.instances.length, 2); assert.equal(mrSlices.data.instances.length, 2);
+      function jpegDimensions(bytes: Buffer): { width: number; height: number } {
+        for (let i = 2; i + 8 < bytes.length;) { if (bytes[i] !== 255) { i++; continue; } const marker = bytes[i + 1]!; i += 2; if (marker === 0xd8 || marker === 0xd9) continue; const length = bytes.readUInt16BE(i); if ([0xc0, 0xc1, 0xc2].includes(marker)) return { width: bytes.readUInt16BE(i + 5), height: bytes.readUInt16BE(i + 3) }; i += length; }
+        throw new Error("JPEG dimensions not found");
+      }
+      for (const [modality, slice, originalWidth, originalHeight] of [["CT", ctSlices.data.instances[0]!.id, 512, 512], ["MR", mrSlices.data.instances[0]!.id, 384, 256]] as const) {
+        const measurements: number[] = [];
+        for (const [quality, width] of [[30, 512], [75, 512], [95, 512], [75, 256]] as const) {
+          await settingsService.upsertSettings("fast_preview", [{ key: "jpeg_quality", value: quality }, { key: "maximum_image_width", value: width }], admin.id);
+          const started = performance.now();
+          const response = await rawApi(doctor.cookie, `${path}/images/${slice}?center=1024&width=2048`);
+          assert.equal(response.status, 200);
+          const bytes = Buffer.from(await response.arrayBuffer());
+          const dimensions = jpegDimensions(bytes);
+          assert.equal(dimensions.width, Math.min(width, originalWidth));
+          assert.ok(Math.abs(dimensions.height - dimensions.width * originalHeight / originalWidth) <= 1);
+          measurements.push(bytes.length);
+          console.log(`SYNTHETIC_FAST_PREVIEW ${modality} quality=${quality} width=${width} actual=${dimensions.width}x${dimensions.height} bytes=${bytes.length} elapsed_ms=${Math.round(performance.now() - started)}`);
+        }
+        assert.notEqual(measurements[0], measurements[2]);
+      }
+      if (process.env.RISPRO_FAST_PREVIEW_TEST_VITE) {
+        const vite = new URL(process.env.RISPRO_FAST_PREVIEW_TEST_VITE);
+        assert.ok(["127.0.0.1", "localhost"].includes(vite.hostname) && vite.protocol === "http:");
+        const { chromium } = await import("@playwright/test");
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          await page.route(`${vite.origin}/api/**`, async (route) => {
+            const url = new URL(route.request().url());
+            if (url.pathname === "/api/auth/me") return route.fulfill({ json: { user: { id: doctor.id, username: "synthetic", fullName: "Synthetic Doctor", role: "doctor" } } });
+            if (!url.pathname.startsWith(path)) return route.fulfill({ json: {} });
+            const response = await fetch(`${app.baseUrl}${url.pathname}${url.search}`, { headers: { Cookie: doctor.cookie } });
+            const headers: Record<string, string> = { "content-type": response.headers.get("content-type") || "application/json" };
+            for (const header of ["x-fast-preview-quality", "x-fast-preview-width"]) { const value = response.headers.get(header); if (value) headers[header] = value; }
+            return route.fulfill({ status: response.status, headers, body: Buffer.from(await response.arrayBuffer()) });
+          });
+          await page.goto(`${vite.origin}/reporting/fast-preview/${appointmentId}`, { waitUntil: "domcontentloaded" });
+          await page.getByRole("img", { name: "Non-diagnostic study preview" }).waitFor({ state: "visible" });
+          await page.getByRole("combobox", { name: "Series" }).selectOption(mr.id);
+          await page.getByRole("img", { name: "Non-diagnostic study preview" }).waitFor({ state: "visible" });
+          await page.getByRole("button", { name: "Next" }).click();
+          await page.getByText("2 / 2").waitFor({ state: "visible" });
+          console.log("SYNTHETIC_FAST_PREVIEW protected RISpro-to-Orthanc browser path passed for CT and MR");
+        } finally { await browser.close(); }
+      }
+    }
+  });
+
   it("native reporting enforces case context, permissions, concurrency, signatures and worklist authority", async (t) => {
     guard();
     const native = await import("../reporting/reporting-service.js");

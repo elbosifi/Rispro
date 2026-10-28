@@ -109,10 +109,11 @@ export function PersonalReportingViewerActions({
     }
   };
 
-  if (!authorized || row.caseType !== "appointment" || (!showSonicDicom && !showOhif && !showRadiant)) return null;
+  if (!authorized || row.caseType !== "appointment") return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="personal-reporting-viewer-actions">
+      <a href={`/reporting/fast-preview/${row.appointmentId}`} target="_blank" rel="noopener noreferrer" aria-label="Open in Fast Preview" className={actionClasses(isMobile)}><ExternalLink size={15} aria-hidden="true" />Fast Preview</a>
       {showSonicDicom ? (
         <a
           href={`/api/doctor/reporting-board/cases/${row.appointmentId}/open-sonicdicom?scope=study`}

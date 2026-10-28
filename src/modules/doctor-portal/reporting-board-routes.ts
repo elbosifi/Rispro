@@ -23,6 +23,9 @@ import {
   dismissMyReportingBoardNotification,
   getReportingBoardCases,
   getAuthorizedReportingBoardAppointmentRead,
+  getFastPreviewStudy,
+  getFastPreviewInstances,
+  getFastPreviewImage,
   getReportingBoardPushConfig,
   getReportingBoardSonicDicomStudyRedirect,
   getReportingBoardHistorySonicDicomRedirect,
@@ -284,6 +287,33 @@ router.post(
     ));
   })
 );
+
+router.get("/cases/:appointmentId/fast-preview", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  res.set("Cache-Control", "private, no-store");
+  res.json(await getFastPreviewStudy(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId")));
+}));
+
+router.get("/cases/:appointmentId/fast-preview/series/:seriesId", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  res.set("Cache-Control", "private, no-store");
+  res.json({ instances: await getFastPreviewInstances(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId"), String(req.params.seriesId)) });
+}));
+
+router.get("/cases/:appointmentId/fast-preview/images/:instanceId", asyncRoute(async (req: DoctorRequest, res: Response) => {
+  const center = req.query.center;
+  const width = req.query.width;
+  let window: { center: number; width: number } | null = null;
+  if (center != null || width != null) {
+    if (typeof center !== "string" || typeof width !== "string" || !center.trim() || !width.trim()) throw new HttpError(400, "Both window center and width are required.");
+    const c = Number(center), w = Number(width);
+    if (!Number.isFinite(c) || !Number.isFinite(w) || Math.abs(c) > 10000000 || w <= 0 || w > 10000000) throw new HttpError(400, "Invalid window settings.");
+    window = { center: c, width: w };
+  }
+  const controller = new AbortController();
+  res.on("close", () => { if (!res.writableFinished) controller.abort(); });
+  const result = await getFastPreviewImage(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId"), String(req.params.instanceId), window, controller.signal);
+  res.set({ "Cache-Control": "private, no-store", "Content-Type": "image/jpeg", "X-Fast-Preview-Quality": String(result.settings.quality), "X-Fast-Preview-Width": String(result.settings.maximumWidth) });
+  res.send(result.image);
+}));
 
 router.post(
   "/cases/:appointmentId/discontinue",

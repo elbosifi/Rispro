@@ -936,6 +936,7 @@ function RowActionMenu({
   const menuContent = (
     <>
       {row.caseType === "appointment" && row.reportStatusSource === "rispro" && <a role="menuitem" href={`/reporting/native/${row.appointmentId}`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">Open Report</a>}
+      {row.caseType === "appointment" && <a role="menuitem" href={`/reporting/fast-preview/${row.appointmentId}`} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 text-xs font-semibold text-foreground hover:bg-slate-50">Fast Preview</a>}
       {ohifAvailability?.enabled && row.caseType === "appointment" && (
         <button type="button" role="menuitem" disabled={viewerState === "resolving" || viewerState === "retrieving"} onClick={() => void openImages()} className="block w-full rounded-md px-2 py-1.5 text-left text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:cursor-wait disabled:opacity-60">
           {viewerState === "resolving" ? "Resolving images…" : viewerState === "retrieving" ? "Retrieving study…" : "Open Images"}

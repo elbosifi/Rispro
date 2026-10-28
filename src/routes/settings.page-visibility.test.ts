@@ -132,6 +132,7 @@ test("settings page visibility route permissions", async () => {
     createTestUser("super_admin"),
   ]);
   const originalSetting = originalSettingRows[0] ?? null;
+  const originalFastPreview = (await pool.query("select setting_key, setting_value, updated_by_user_id from system_settings where category='fast_preview'")).rows;
   const modalityStaffCookie = modalityStaff.cookie;
   const superAdminCookie = superAdmin.cookie;
   const superAdminReauthCookie = `${superAdminCookie}; ${createSupervisorReauthCookie(
@@ -144,6 +145,16 @@ test("settings page visibility route permissions", async () => {
   const server = await startTestServer(appModule.createApp);
   let originalMatrix: Record<string, unknown> | null = null;
   try {
+    const previewBody = { entries: [{ key: "jpeg_quality", value: 45 }, { key: "maximum_image_width", value: 384 }] };
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", body: previewBody })).status, 401);
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", cookie: modalityStaffCookie, body: previewBody })).status, 403);
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", cookie: superAdminCookie, body: previewBody })).status, 403);
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", cookie: superAdminReauthCookie, body: { entries: [{ key: "jpeg_quality", value: 96 }] } })).status, 400);
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", cookie: superAdminReauthCookie, body: { entries: [{ key: "maximum_image_width", value: 300 }] } })).status, 400);
+    assert.equal((await requestJson(server.baseUrl, "/api/settings/fast_preview", { method: "PUT", cookie: superAdminReauthCookie, body: previewBody })).status, 200);
+    const persistedPreview = await requestJson<{ settings: Array<{ setting_key: string; setting_value: { value: number } }> }>(server.baseUrl, "/api/settings/fast_preview", { cookie: superAdminReauthCookie });
+    assert.equal(persistedPreview.data.settings.find((row) => row.setting_key === "jpeg_quality")?.setting_value.value, 45);
+    assert.equal(persistedPreview.data.settings.find((row) => row.setting_key === "maximum_image_width")?.setting_value.value, 384);
     const initial = await requestJson<{ matrix: Record<string, unknown> }>(
       server.baseUrl,
       "/api/settings/users-and-roles/page-visibility",
@@ -251,6 +262,8 @@ test("settings page visibility route permissions", async () => {
 
     assert.equal(restored.status, 200);
   } finally {
+    await pool.query("delete from system_settings where category='fast_preview'");
+    for (const row of originalFastPreview) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values('fast_preview',$1,$2::jsonb,$3)", [row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
     if (originalMatrix) {
       await requestJson<{ matrix: Record<string, unknown> }>(
         server.baseUrl,
@@ -285,6 +298,7 @@ test("settings page visibility route permissions", async () => {
       ]);
     }
     if (createdUsernames.length > 0) {
+      await pool.query("delete from audit_log where changed_by_user_id = any($1::bigint[])", [[modalityStaff.id, superAdmin.id]]);
       await pool.query("delete from users where username = any($1::text[]) and username like $2", [
         createdUsernames,
         `${TEST_PREFIX.toLowerCase()}%`,
