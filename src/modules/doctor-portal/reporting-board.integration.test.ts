@@ -995,8 +995,8 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
           await page.getByRole("img", { name: "Non-diagnostic study preview" }).waitFor({ state: "visible" });
           await page.getByRole("combobox", { name: "Series" }).selectOption(mr.id);
           await page.getByRole("img", { name: "Non-diagnostic study preview" }).waitFor({ state: "visible" });
-          await page.getByRole("button", { name: "Next" }).click();
-          await page.getByText("2 / 2").waitFor({ state: "visible" });
+          await page.getByRole("region", { name: "Image viewer" }).press("ArrowDown");
+          await page.getByRole("status").filter({ hasText: "2 / 2" }).waitFor({ state: "visible" });
           console.log("SYNTHETIC_FAST_PREVIEW protected RISpro-to-Orthanc browser path passed for CT and MR");
         } finally { await browser.close(); }
       }

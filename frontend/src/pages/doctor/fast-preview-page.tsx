@@ -1,106 +1,196 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Input } from "@/components/shared";
 import { api } from "@/lib/api-client";
 
 type Series = { id: string; description: string; number: string | null; modality: string | null; count: number };
 type Study = { description: string | null; date: string | null; accessionNumber: string; patientName: string | null };
 type Preview = { study: Study; series: Series[]; settings: { quality: number; maximumWidth: number } };
 type Slice = { id: string; number: number };
-type WindowLevel = { center: number; width: number };
-const presets: Record<string, WindowLevel> = { Brain: { center: 40, width: 80 }, Lung: { center: -600, width: 1500 }, "Soft Tissue": { center: 40, width: 400 }, Bone: { center: 300, width: 1500 } };
+type Frame = { url: string; error?: never } | { url?: never; error: string };
+const emptySlices: Slice[] = [];
+const presets: Record<string, { center: number; width: number }> = {
+  Brain: { center: 40, width: 80 }, Lung: { center: -600, width: 1500 },
+  "Soft Tissue": { center: 40, width: 400 }, Bone: { center: 300, width: 1500 },
+};
 
 export function FastPreviewPage() {
   const { appointmentId = "" } = useParams();
   const base = `/doctor/reporting-board/cases/${encodeURIComponent(appointmentId)}/fast-preview`;
   const [preview, setPreview] = useState<Preview | null>(null);
   const [seriesId, setSeriesId] = useState("");
-  const [slices, setSlices] = useState<Slice[]>([]);
+  const [stack, setStack] = useState<{ key: string; slices: Slice[] } | null>(null);
   const [index, setIndex] = useState(0);
-  const [displayedIndex, setDisplayedIndex] = useState<number | null>(null);
-  const [windowLevel, setWindowLevel] = useState<WindowLevel | null>(null);
-  const [image, setImage] = useState("");
+  const [windowName, setWindowName] = useState("dicom");
+  const [batch, setBatch] = useState<{ key: string; frames: (Frame | undefined)[] } | null>(null);
+  const [displayed, setDisplayed] = useState<{ key: string; index: number; url: string } | null>(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [activeSettings, setActiveSettings] = useState<{ quality: number; maximumWidth: number } | null>(null);
-  const cache = useRef(new Map<string, { url: string; settings: { quality: number; maximumWidth: number } | null }>());
-  const currentImage = useRef("");
-  const pointer = useRef<{ x: number; y: number; type: string } | null>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const pointer = useRef<{ id: number; y: number } | null>(null);
+  const stackKey = `${base}/series/${encodeURIComponent(seriesId)}`;
+  const imageKey = `${stackKey}/${windowName}`;
+  const slices = stack?.key === stackKey ? stack.slices : emptySlices;
+  const frame = batch?.key === imageKey ? batch.frames[index] : undefined;
+  const image = frame?.url ? { index, url: frame.url } : displayed?.key === imageKey ? displayed : null;
+  const loaded = batch?.key === imageKey ? batch.frames.filter((item) => item?.url).length : 0;
+  const failed = batch?.key === imageKey ? batch.frames.filter((item) => item?.error).length : 0;
+  const selectedSeries = preview?.series.find((item) => item.id === seriesId);
+
+  useEffect(() => {
+    const elements = [document.documentElement, document.body];
+    const previous = elements.map((element) => element.style.overflow);
+    elements.forEach((element) => { element.style.overflow = "hidden"; });
+    return () => elements.forEach((element, i) => { element.style.overflow = previous[i]; });
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    api<Preview>(base, { signal: controller.signal }).then((data) => { setPreview(data); setActiveSettings(data.settings); setSeriesId(data.series.find((item) => item.modality === "CT" || item.modality === "MR")?.id ?? ""); }).catch((err: Error) => { if (!controller.signal.aborted) setError(err.message); });
+    api<Preview>(base, { signal: controller.signal }).then((data) => {
+      if (controller.signal.aborted) return;
+      setPreview(data);
+      setSeriesId(data.series.find((item) => item.modality === "CT" || item.modality === "MR")?.id ?? "");
+      setIndex(0);
+      setDisplayed(null);
+      setWindowName("dicom");
+    }).catch((err: Error) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
   }, [base]);
 
   useEffect(() => {
     if (!seriesId) return;
     const controller = new AbortController();
-    setSlices([]); setIndex(0); setDisplayedIndex(null); setImage(""); currentImage.current = ""; setLoading(false); setError("");
-    for (const entry of cache.current.values()) URL.revokeObjectURL(entry.url);
-    cache.current.clear();
-    api<{ instances: Slice[] }>(`${base}/series/${encodeURIComponent(seriesId)}`, { signal: controller.signal }).then((result) => { setSlices(result.instances); if (!result.instances.length) setError("This series contains no images."); }).catch((err: Error) => { if (!controller.signal.aborted) setError(err.message); });
+    setError("");
+    api<{ instances: Slice[] }>(stackKey, { signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted) return;
+      setStack({ key: stackKey, slices: result.instances });
+      if (!result.instances.length) setError("This series contains no images.");
+    }).catch((err: Error) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
-  }, [base, seriesId]);
+  }, [stackKey, seriesId]);
 
   useEffect(() => {
-    const selected = slices[index];
-    if (!selected) return;
+    if (!slices.length) return;
     const controller = new AbortController();
-    const suffix = windowLevel ? `?center=${encodeURIComponent(windowLevel.center)}&width=${encodeURIComponent(windowLevel.width)}` : "";
-    const key = (slice: Slice) => `${slice.id}${suffix}`;
-    async function load(slice: Slice) {
-      const existing = cache.current.get(key(slice));
-      if (existing) return existing;
-      const response = await fetch(`/api${base}/images/${encodeURIComponent(slice.id)}${suffix}`, { credentials: "include", cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error(response.status === 415 ? "This image is unsupported. Fast Preview supports conventional single-frame CT and MRI only." : `Could not load image (${response.status}).`);
-      const blob = await response.blob();
-      if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const decoded = new Image();
-        decoded.src = objectUrl;
-        await decoded.decode();
-        if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
-      } catch (error) { URL.revokeObjectURL(objectUrl); throw error; }
-      const q = Number(response.headers.get("X-Fast-Preview-Quality"));
-      const w = Number(response.headers.get("X-Fast-Preview-Width"));
-      const entry = { url: objectUrl, settings: q && w ? { quality: q, maximumWidth: w } : null };
-      cache.current.set(key(slice), entry);
-      return entry;
-    }
-    setLoading(true); setError("");
-    void load(selected).then((entry) => {
-      if (controller.signal.aborted) return;
-      const previousImage = currentImage.current;
-      currentImage.current = entry.url; setImage(entry.url); setDisplayedIndex(index); if (entry.settings) setActiveSettings(entry.settings); setLoading(false);
-      const keep = new Set([key(selected), ...[slices[index - 1], slices[index + 1]].filter((slice): slice is Slice => Boolean(slice)).map(key)]);
-      for (const [cachedKey, cached] of cache.current) if (!keep.has(cachedKey) && cached.url !== entry.url && cached.url !== previousImage) { URL.revokeObjectURL(cached.url); cache.current.delete(cachedKey); }
-      for (const slice of [slices[index - 1], slices[index + 1]]) if (slice) void load(slice).catch(() => undefined);
-    }).catch((err: Error) => { if (!controller.signal.aborted) { setLoading(false); setError(`${currentImage.current ? "Showing the previous image. " : ""}${err.message}`); } });
-    return () => controller.abort();
-  }, [base, slices, index, windowLevel]);
+    const urls: string[] = [];
+    const windowLevel = presets[windowName];
+    const suffix = windowLevel ? `?center=${windowLevel.center}&width=${windowLevel.width}` : "";
+    const frames: (Frame | undefined)[] = Array(slices.length);
+    let next = 0;
+    setBatch({ key: imageKey, frames: [...frames] });
 
-  useEffect(() => () => { for (const entry of cache.current.values()) URL.revokeObjectURL(entry.url); cache.current.clear(); }, []);
-  const step = (delta: number) => setIndex((value) => Math.max(0, Math.min(slices.length - 1, value + delta)));
-  const selectedSeries = preview?.series.find((item) => item.id === seriesId);
-  const currentWindow = windowLevel ?? { center: 40, width: 400 };
-  return <main className="min-h-screen bg-slate-950 text-white p-3 md:p-5 space-y-3">
-    <header className="flex flex-wrap items-center justify-between gap-2"><div><h1 className="text-xl font-semibold">Fast Preview <span className="text-amber-300 text-sm">Non-diagnostic preview</span></h1>{preview && <p className="text-sm text-slate-300">{preview.study.patientName} · {preview.study.accessionNumber} · {preview.study.description || "Study"} · {preview.study.date || ""}</p>}</div>{activeSettings && <p className="text-xs text-slate-400">JPEG quality {activeSettings.quality} · max width {activeSettings.maximumWidth} px</p>}</header>
-    <div className="rounded bg-slate-100 p-3 text-slate-900 space-y-3"><div className="flex flex-wrap items-end gap-2">
-      <label className="grid gap-1 text-sm">Series<select aria-label="Series" className="rounded bg-slate-800 p-2 text-white" value={seriesId} onChange={(event) => { setSeriesId(event.target.value); setWindowLevel(null); setZoom(1); setPan({ x: 0, y: 0 }); }}><option value="">Select series</option>{preview?.series.map((item) => <option key={item.id} value={item.id}>{item.number ? `${item.number} · ` : ""}{item.description} ({item.modality || "unknown"}, {item.count}){item.modality !== "CT" && item.modality !== "MR" ? " — unsupported" : ""}</option>)}</select></label>
-      <Button variant="secondary" size="sm" onClick={() => setZoom((value) => Math.max(.25, value / 1.25))}>−</Button><span className="text-sm">{Math.round(zoom * 100)}%</span><Button variant="secondary" size="sm" onClick={() => setZoom((value) => Math.min(8, value * 1.25))}>+</Button><Button variant="secondary" size="sm" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>Fit</Button>
-      {selectedSeries?.modality === "CT" && Object.entries(presets).map(([name, value]) => <Button key={name} variant="secondary" size="sm" onClick={() => setWindowLevel(value)}>{name}</Button>)}
-      <Button variant="secondary" size="sm" onClick={() => setWindowLevel(null)}>DICOM window</Button>
+    // Keep the full selected series decoded, with four requests at a time.
+    // Navigating images never cancels the batch or discards loaded images.
+    async function loadSeries() {
+      while (!controller.signal.aborted && next < slices.length) {
+        const position = next++;
+        let url = "";
+        try {
+          const response = await fetch(`/api${base}/images/${encodeURIComponent(slices[position].id)}${suffix}`, {
+            credentials: "include", cache: "no-store", signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(response.status === 415
+            ? "This image is unsupported. Fast Preview supports conventional single-frame CT and MRI only."
+            : `Could not load image (${response.status}).`);
+          const blob = await response.blob();
+          if (controller.signal.aborted) return;
+          url = URL.createObjectURL(blob);
+          const decoded = new Image();
+          decoded.src = url;
+          await decoded.decode();
+          if (controller.signal.aborted) { URL.revokeObjectURL(url); return; }
+          urls.push(url);
+          frames[position] = { url };
+        } catch (err) {
+          if (url) URL.revokeObjectURL(url);
+          if (controller.signal.aborted) return;
+          frames[position] = { error: err instanceof Error ? err.message : "Could not load image." };
+        }
+        setBatch({ key: imageKey, frames: [...frames] });
+      }
+    }
+    for (let worker = 0; worker < Math.min(4, slices.length); worker++) void loadSeries();
+    return () => {
+      controller.abort();
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [base, slices, imageKey, windowName]);
+
+  useEffect(() => {
+    if (frame?.url) setDisplayed({ key: imageKey, index, url: frame.url });
+  }, [frame, imageKey, index]);
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    // React delegates wheel events passively. A native listener prevents the
+    // same gesture from also scrolling the page, even at either series boundary.
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      event.preventDefault();
+      if (event.deltaY) setIndex((value) => Math.max(0, Math.min(Math.max(0, slices.length - 1), value + (event.deltaY > 0 ? 1 : -1))));
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [slices.length]);
+
+  const step = (delta: number) => setIndex((value) => Math.max(0, Math.min(Math.max(0, slices.length - 1), value + delta)));
+  const message = error || (frame?.error ? `${image ? "Showing the previous image. " : ""}${frame.error}` : "");
+
+  return <main className="fixed inset-0 flex h-dvh flex-col overflow-hidden overscroll-none bg-slate-950 text-white">
+    <header className="shrink-0 space-y-2 border-b border-slate-800 bg-slate-950 px-3 py-2 sm:px-5 sm:py-3">
+      <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
+        <h1 className="shrink-0 text-sm font-semibold tracking-wide">Fast Preview</h1>
+        <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">Non-diagnostic preview</span>
+      </div>
+      <div className="flex min-w-0 gap-2">
+        <label className="grid min-w-0 flex-1 gap-1 text-xs text-slate-300">Series
+          <select aria-label="Series" className="h-11 w-full min-w-0 rounded border border-slate-700 bg-slate-800 px-2 text-sm text-white" value={seriesId} onChange={(event) => { setSeriesId(event.target.value); setWindowName("dicom"); setIndex(0); setDisplayed(null); }}>
+            <option value="">Select series</option>
+            {preview?.series.map((item) => <option key={item.id} value={item.id} disabled={item.modality !== "CT" && item.modality !== "MR"}>
+              {item.number ? `${item.number} · ` : ""}{item.description} ({item.modality || "unknown"}, {item.count}){item.modality !== "CT" && item.modality !== "MR" ? " — unsupported" : ""}
+            </option>)}
+          </select>
+        </label>
+        <label className="grid w-32 shrink-0 gap-1 text-xs text-slate-300 sm:w-40">Window
+          <select aria-label="Window" className="h-11 w-full rounded border border-slate-700 bg-slate-800 px-2 text-sm text-white" value={windowName} onChange={(event) => { setWindowName(event.target.value); setDisplayed(null); }}>
+            <option value="dicom">Original</option>
+            {selectedSeries?.modality === "CT" && Object.keys(presets).map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+      </div>
+    </header>
+    <div ref={viewport} role="region" aria-label="Image viewer" aria-describedby="preview-navigation" tabIndex={0}
+      className="relative min-h-0 flex-1 overflow-hidden overscroll-none bg-black touch-none outline-offset-[-2px]"
+      onKeyDown={(event) => {
+        if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          if (event.key === "Home") setIndex(0);
+          else if (event.key === "End") setIndex(Math.max(0, slices.length - 1));
+          else step(event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1);
+        }
+      }}
+      onPointerDown={(event) => {
+        if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+        pointer.current = { id: event.pointerId, y: event.clientY };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        event.currentTarget.focus({ preventScroll: true });
+      }}
+      onPointerMove={(event) => {
+        const last = pointer.current;
+        if (!last || last.id !== event.pointerId) return;
+        const distance = event.clientY - last.y;
+        if (Math.abs(distance) >= 20) {
+          step(-Math.trunc(distance / 20));
+          pointer.current = { ...last, y: event.clientY - distance % 20 };
+        }
+      }}
+      onPointerUp={() => { pointer.current = null; }} onPointerCancel={() => { pointer.current = null; }} onLostPointerCapture={() => { pointer.current = null; }}>
+      {image ? <img src={image.url} alt="Non-diagnostic study preview" draggable={false} className="absolute inset-0 h-full w-full select-none object-contain" />
+        : <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-slate-400">{error ? "Preview unavailable" : seriesId ? "Loading images…" : preview ? "Select a supported series" : "Loading study…"}</div>}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 space-y-1 bg-gradient-to-t from-black/90 to-transparent p-3 pt-8 text-center text-xs text-slate-300">
+        {message && <p role="alert" className="text-amber-300">{message}</p>}
+        <p role="status">{image ? image.index + 1 : 0} / {slices.length}{slices.length > 0 && (loaded + failed < slices.length ? ` · Loading series ${loaded} / ${slices.length}` : failed ? ` · ${failed} image${failed === 1 ? "" : "s"} unavailable` : " · Series loaded")}{image && !frame && " · Loading image…"}</p>
+        <p id="preview-navigation">Scroll, swipe up/down, or use arrow keys to browse</p>
+      </div>
     </div>
-    <div className="flex flex-wrap gap-3 text-sm"><label>Window center <Input className="w-28 text-slate-900" type="number" value={currentWindow.center} onChange={(event) => setWindowLevel({ ...currentWindow, center: Number(event.target.value) })} /><input aria-label="Adjust window center" type="range" min={-2000} max={2000} value={Math.max(-2000, Math.min(2000, currentWindow.center))} onChange={(event) => setWindowLevel({ ...currentWindow, center: Number(event.target.value) })} /></label><label>Window width <Input className="w-28 text-slate-900" type="number" min={1} value={currentWindow.width} onChange={(event) => setWindowLevel({ ...currentWindow, width: Math.max(1, Number(event.target.value)) })} /><input aria-label="Adjust window width" type="range" min={1} max={4000} value={Math.min(4000, currentWindow.width)} onChange={(event) => setWindowLevel({ ...currentWindow, width: Number(event.target.value) })} /></label><span className="self-center text-slate-700">Wheel or swipe: slices · drag with mouse: pan</span></div></div>
-    {error && <p role="alert" className="text-amber-300">{error}</p>}
-    <div className="relative flex h-[65vh] min-h-72 items-center justify-center overflow-hidden bg-black touch-none" onWheel={(event) => { event.preventDefault(); step(event.deltaY > 0 ? 1 : -1); }} onPointerDown={(event) => { pointer.current = { x: event.clientX, y: event.clientY, type: event.pointerType }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { const last = pointer.current; if (!last) return; const dx = event.clientX - last.x, dy = event.clientY - last.y; if (last.type === "touch") { if (Math.abs(dy) >= 20) { step(dy > 0 ? 1 : -1); pointer.current = { ...last, x: event.clientX, y: event.clientY }; } } else { setPan((value) => ({ x: value.x + dx, y: value.y + dy })); pointer.current = { ...last, x: event.clientX, y: event.clientY }; } }} onPointerUp={() => { pointer.current = null; }} onPointerCancel={() => { pointer.current = null; }}>
-      {image ? <img src={image} alt="Non-diagnostic study preview" draggable={false} className="max-h-full max-w-full object-contain select-none" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }} /> : <span className="text-slate-400">{loading ? "Loading image…" : "Select a supported series"}</span>}
-      {loading && image && <span className="absolute top-2 right-2 bg-slate-800 px-2 text-sm">Loading…</span>}
-    </div>
-    <div className="flex items-center gap-3 rounded bg-slate-100 p-2 text-slate-900"><Button variant="secondary" size="sm" onClick={() => step(-1)} disabled={index <= 0}>Previous</Button><span className="text-sm whitespace-nowrap">{displayedIndex === null ? 0 : displayedIndex + 1} / {slices.length}</span><Button variant="secondary" size="sm" onClick={() => step(1)} disabled={index >= slices.length - 1}>Next</Button><input aria-label="Slice" className="min-w-0 flex-1" type="range" min={0} max={Math.max(0, slices.length - 1)} value={index} onChange={(event) => setIndex(Number(event.target.value))} disabled={!slices.length} /></div>
   </main>;
 }
