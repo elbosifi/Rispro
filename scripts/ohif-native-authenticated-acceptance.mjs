@@ -152,7 +152,9 @@ export async function runAuthenticatedNativeAcceptance(h) {
       await page.locator('[data-cy="study-browser-thumbnail"][data-series="2"]').first().dblclick();
       const unloadedSliceMs = await waitPixels(page, c.study + '.2', switchAt) - switchAt;
       const config = await page.evaluate(() => ({ limits: window.config.maxNumRequests, root: window.config.dataSources[0].configuration.wadoRoot }));
-      assert.deepEqual(config.limits, { interaction: 4, thumbnail: 4, prefetch: 1 });
+      assert.deepEqual(config.limits, { interaction: 100, thumbnail: 4, prefetch: 25 });
+      const poolLimits = await page.evaluate(() => window.cornerstone.imageLoadPoolManager.maxNumRequests);
+      for (const [kind, limit] of Object.entries(config.limits)) assert.equal(poolLimits[kind], limit);
       assert.ok(config.root.startsWith(mode === 'native' ? '/ohif-native/' : '/ohif-dicomweb/'));
       await page.screenshot({ path: join(temp, `authenticated-${mode}-${c.modality}-${repeat}.png`) });
       const backend = await (await fetch(backendOrigin + '/__benchmark/metrics')).json();
@@ -179,6 +181,35 @@ export async function runAuthenticatedNativeAcceptance(h) {
       security.push({ check: `native ${c.modality} Chromium rendering at ${viewport.width}x${viewport.height}`, status: 'PASS' });
     } finally { await ctx.close(); }
   }
+  // Exercise ordinary CT and MR launches together, without loading selectors.
+  const simultaneous = await Promise.all(cases.map(async c => {
+    const ctx = await context();
+    try {
+      const url = await exchange(c, ctx);
+      assert.equal(url.searchParams.has('risproLoadingProfile'), false);
+      assert.equal(url.searchParams.has('risproThumbnailProfile'), false);
+      await ctx.addInitScript(installProbe);
+      return { c, ctx, url, page: await ctx.newPage() };
+    } catch (error) { await ctx.close(); throw error; }
+  }));
+  try {
+    await Promise.all(simultaneous.map(async ({ c, url, page }) => {
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(url.href, { waitUntil: 'domcontentloaded' }); await waitPixels(page);
+      assert.deepEqual(await page.evaluate(() => window.config.maxNumRequests), { interaction: 100, thumbnail: 4, prefetch: 25 });
+      const before = await page.evaluate(() => window.__nativeBench.renders.at(-1).imageId);
+      await page.locator('.viewport-element canvas').first().hover(); await page.mouse.wheel(0, 200);
+      await page.waitForFunction(id => window.__nativeBench.renders.at(-1).imageId !== id, before);
+      await page.locator('[data-cy="study-browser-thumbnail"][data-series="2"]').first().dblclick();
+      await waitPixels(page, c.study + '.2');
+      await page.screenshot({ path: join(temp, `simultaneous-default-${c.modality}.png`) });
+      assert.deepEqual(errors, []);
+      results.push({ mode: 'native', modality: c.modality, simultaneous: true, profile: 'default', rendering: 'PASS', scrolling: 'PASS', switching: 'PASS' });
+    }));
+    assert.notEqual(simultaneous[0].url.searchParams.get('risproContext'), simultaneous[1].url.searchParams.get('risproContext'));
+    save();
+  } finally { await Promise.all(simultaneous.map(({ ctx }) => ctx.close())); }
   // Verify the actual explicit rollback URL separately from the controlled
   // benchmark profile, retaining the application's ordinary proxy limits.
   const fallback = await context(), fallbackUrl = await exchange(c, fallback);
@@ -188,10 +219,25 @@ export async function runAuthenticatedNativeAcceptance(h) {
     const page = await fallback.newPage();
     await fetch(backendOrigin + '/__benchmark/metrics?reset=1');
     await page.goto(fallbackUrl.href, { waitUntil: 'domcontentloaded' }); await waitPixels(page);
+    assert.deepEqual(await page.evaluate(() => window.config.maxNumRequests), { interaction: 4, thumbnail: 1, prefetch: 1 });
     assert.ok((await (await fetch(backendOrigin + '/__benchmark/metrics')).json()).proxyFrames > 0);
     await page.screenshot({ path: join(temp, 'authenticated-explicit-proxy-rollback.png') });
     security.push({ check: 'explicit risproDelivery=proxy rollback renders diagnostic CT pixels', status: 'PASS' });
   } finally { await fallback.close(); }
+  const rollbackCtx = await context(), rollbackUrl = await exchange(c, rollbackCtx);
+  await rollbackCtx.addInitScript(installProbe);
+  try {
+    const page = await rollbackCtx.newPage();
+    await page.goto(rollbackUrl.href, { waitUntil: 'domcontentloaded' }); await waitPixels(page);
+    rollbackUrl.searchParams.set('risproLoadingProfile', 'current');
+    await page.goto(rollbackUrl.href, { waitUntil: 'domcontentloaded' }); await waitPixels(page);
+    assert.deepEqual(await page.evaluate(() => window.config.maxNumRequests), { interaction: 4, thumbnail: 4, prefetch: 1 });
+    rollbackUrl.searchParams.set('risproLoadingProfile', 'upstream');
+    rollbackUrl.searchParams.set('risproThumbnailProfile', 'current');
+    await page.goto(rollbackUrl.href, { waitUntil: 'domcontentloaded' }); await waitPixels(page);
+    assert.deepEqual(await page.evaluate(() => window.config.maxNumRequests), { interaction: 100, thumbnail: 4, prefetch: 25 });
+    security.push({ check: 'same-tab URL rollback and upstream/current compatibility render diagnostic CT pixels', status: 'PASS' });
+  } finally { await rollbackCtx.close(); }
   noSecrets(h.logs());
   security.push({ check: 'no credentials in gateway/backend/archive logs', status: 'PASS' }); save();
   console.log('PASS: authenticated native transport, security, byte equality, CT/MR pixels, scrolling and proxy rollback');

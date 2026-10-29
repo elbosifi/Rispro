@@ -46,16 +46,26 @@ describe("OHIF runtime configuration", () => {
       assert.equal(context.window.config.maxNumRequests.thumbnail, native ? 4 : 1);
     }
   });
-  it("selects upstream limits only for an explicit native experiment and isolates thumbnail scheduling", async () => {
+  it("defaults native to 100/4/25, retains per-tab rollback and upstream selectors, and leaves proxy limits unchanged", async () => {
     const source = await fs.readFile(appConfigPath, "utf8");
     const id = "00000000-0000-4000-8000-000000000001";
     for (const [query, limits] of [
-      [`risproContext=${id}&risproDelivery=native`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native`, [100, 4, 25]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=current`, [4, 4, 1]],
-      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=unknown`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=current&risproThumbnailProfile=unknown`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=unknown`, [100, 4, 25]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=&risproThumbnailProfile=unknown`, [100, 4, 25]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=100/75/25&risproThumbnailProfile=75`, [100, 4, 25]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream`, [100, 75, 25]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream&risproThumbnailProfile=current`, [100, 4, 25]],
+      [`risproContext=${id}&risproDelivery=proxy`, [4, 1, 1]],
+      [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=current`, [4, 1, 1]],
       [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=upstream`, [4, 1, 1]],
+      [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=upstream&risproThumbnailProfile=current`, [4, 1, 1]],
+      [`risproContext=${id}&risproDelivery=unknown&risproLoadingProfile=unknown`, [4, 1, 1]],
+      [`risproContext=${id}&risproLoadingProfile=upstream`, [4, 1, 1]],
+      ["risproDelivery=native", [4, 1, 1]],
+      ["risproContext=invalid&risproDelivery=native", [4, 1, 1]],
       ["risproContext=invalid&risproDelivery=native&risproLoadingProfile=upstream", [4, 1, 1]],
     ] as const) {
       const context = { window: { location: { search: `?${query}` }, config: {} as {
@@ -67,6 +77,27 @@ describe("OHIF runtime configuration", () => {
       assert.deepEqual([interaction, thumbnail, prefetch], limits);
       assert.equal(context.window.config.dataSources[0].configuration.enableStudyLazyLoad, true);
       assert.equal(context.window.config.dataSources[0].configuration.thumbnailRendering, thumbnail === 1 ? "wadors" : "rendered");
+    }
+  });
+  it("keeps scoped multi-study discovery and transport selection identical across loading profiles", async () => {
+    const source = await fs.readFile(appConfigPath, "utf8");
+    const id = "00000000-0000-4000-8000-000000000001";
+    for (const delivery of ["native", "proxy"]) {
+      let baseline;
+      for (const selector of ["", "&risproLoadingProfile=current", "&risproLoadingProfile=upstream&risproThumbnailProfile=current", "&risproLoadingProfile=unknown&risproThumbnailProfile=unknown"]) {
+        const context = { window: { location: { search: `?risproContext=${id}&risproDelivery=${delivery}&StudyInstanceUIDs=1.2.3&risproPriorStudyUIDs=1.2.4,invalid&risproSessionStudies=1${selector}` }, config: {} as {
+          dataSources: { configuration: { qidoRoot: string; wadoRoot: string; wadoUriRoot: string; risproStudyInstanceUIDs: string[]; risproStudyListUrl: string } }[];
+        } }, URLSearchParams };
+        vm.runInNewContext(source, context);
+        const config = JSON.parse(JSON.stringify(context.window.config.dataSources[0].configuration));
+        assert.equal(config.qidoRoot, `/ohif-dicomweb/context/${id}`);
+        assert.equal(config.wadoUriRoot, config.qidoRoot);
+        assert.equal(config.wadoRoot, `${delivery === "native" ? "/ohif-native" : "/ohif-dicomweb"}/context/${id}`);
+        assert.equal(config.risproStudyListUrl, `/api/ohif/contexts/${id}/studies`);
+        assert.deepEqual(config.risproStudyInstanceUIDs, ["1.2.3", "1.2.4"]);
+        baseline ??= config;
+        assert.deepEqual(config, baseline);
+      }
     }
   });
 });

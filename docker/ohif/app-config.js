@@ -9,10 +9,12 @@ const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
   ? '/ohif-dicomweb/context/' + risproContext : '/ohif-dicomweb';
 const risproNativeDelivery = risproParams.get('risproDelivery') === 'native' && /^[a-f0-9-]{36}$/i.test(risproContext || '');
 const risproWadoRoot = risproNativeDelivery ? '/ohif-native/context/' + risproContext : risproDicomWebRoot;
-// Test-only, per-tab experiment after an authorized native launch. These selectors
-// change request limits only; server-side study authorization is unchanged.
-const risproUpstreamLoading = risproNativeDelivery && risproParams.get('risproLoadingProfile') === 'upstream';
-const risproBoundedThumbnails = risproParams.get('risproThumbnailProfile') === 'current';
+// Native defaults to the hospital-tested 100/4/25 profile; current restores 4/4/1.
+// Per-tab selectors change request limits only; server-side study authorization is unchanged.
+const risproFastLoading = risproNativeDelivery && risproParams.get('risproLoadingProfile') !== 'current';
+// Retain the explicit upstream experiment, including its optional thumbnail bound.
+const risproBoundedThumbnails = risproParams.get('risproLoadingProfile') !== 'upstream'
+  || risproParams.get('risproThumbnailProfile') === 'current';
 window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
@@ -28,7 +30,7 @@ window.config = {
   },
   // v3.12.6 platform/app/public/config/default.js (not init.tsx's fallbacks).
   // Stack context prefetch and the retrieval pool remain entirely upstream.
-  maxNumRequests: risproUpstreamLoading ? {
+  maxNumRequests: risproFastLoading ? {
     interaction: 100,
     thumbnail: risproBoundedThumbnails ? 4 : 75,
     prefetch: 25,
