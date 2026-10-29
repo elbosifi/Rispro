@@ -142,6 +142,7 @@ interface HistoricalPacsSyncClient {
   listStudiesForIndexPage(since: number, limit?: number): Promise<OrthancStudiesIndexPage>;
   getStudyForIndex(id: string): Promise<OrthancStudyDetails | null>;
   getChanges(since: number, limit?: number): Promise<OrthancChangesPage>;
+  getLastChangeSequenceFromMetrics?(): Promise<number | null>;
   getStatistics?(): Promise<OrthancResourceStatistics>;
 }
 
@@ -852,17 +853,38 @@ async function recordSyncFailure(error: unknown, db: Queryable = pool): Promise<
   console.warn(JSON.stringify({ type: "historical_pacs_sync_failed", error: message, worker: `${os.hostname()}:${process.pid}` }));
 }
 
-async function readChangesTail(client: HistoricalPacsSyncClient): Promise<number> {
+async function updateSyncProgress(db: Queryable, processed: number | null = null): Promise<void> {
+  await db.query(`update historical_pacs_sync_state set sync_processed=coalesce($1,sync_processed),
+    sync_progress_at=clock_timestamp(),updated_at=clock_timestamp() where singleton_key=true`, [processed]);
+}
+
+async function verifySyncArchive(archiveKey?: string): Promise<void> {
+  if (archiveKey != null && archiveKey !== authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings())) {
+    throw new Error("Archive configuration changed during synchronization.");
+  }
+}
+
+async function readChangesTail(client: HistoricalPacsSyncClient, db: Queryable): Promise<number> {
+  await updateSyncProgress(db);
+  // This is an inventory baseline only, never a committed incremental cursor.
+  const metricTail = await client.getLastChangeSequenceFromMetrics?.();
+  if (metricTail != null && Number.isSafeInteger(metricTail) && metricTail >= 0) {
+    console.info(JSON.stringify({ type: "historical_pacs_sync_baseline", source: "metrics", sequence: metricTail, worker: `${os.hostname()}:${process.pid}` }));
+    return metricTail;
+  }
   let since = 0;
   for (;;) {
+    await updateSyncProgress(db);
     const page = await client.getChanges(since, 1000);
-    if (!page.done && page.lastSequence <= since) throw new Error("Authoritative Orthanc changes cursor did not advance.");
+    if (page.lastSequence < since || (!page.done && page.lastSequence <= since)) throw new Error("Authoritative Orthanc changes cursor did not advance.");
     since = page.lastSequence;
+    await updateSyncProgress(db);
+    console.info(JSON.stringify({ type: "historical_pacs_sync_baseline", source: "changes", sequence: since, done: page.done, worker: `${os.hostname()}:${process.pid}` }));
     if (page.done) return since;
   }
 }
 
-export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncClient, db: Queryable = pool): Promise<{ indexed: number; removed: number; lastSequence: number }> {
+export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncClient, db: Queryable = pool, archiveKey?: string): Promise<{ indexed: number; removed: number; lastSequence: number }> {
   const marker = await db.query<{ reconciliation_marker: string }>(`select clock_timestamp()::text reconciliation_marker`);
   const reconciliationMarker = marker.rows[0]?.reconciliation_marker;
   if (!reconciliationMarker) throw new Error("Could not establish the historical PACS reconciliation marker.");
@@ -878,35 +900,38 @@ export async function reconcileHistoricalPacsIndex(client: HistoricalPacsSyncCli
     [observedStudyCount],
   );
   const state = await db.query<{ last_change_sequence: string | null }>(`select last_change_sequence::text from historical_pacs_sync_state where singleton_key=true`);
-  const baselineSequence = state.rows[0]?.last_change_sequence == null ? await readChangesTail(client) : Number(state.rows[0].last_change_sequence);
+  const baselineSequence = state.rows[0]?.last_change_sequence == null ? await readChangesTail(client, db) : Number(state.rows[0].last_change_sequence);
   let indexed = 0;
   let processed = 0;
   let since = 0;
   for (;;) {
     const pageStartedAt = Date.now();
-    await db.query(`update historical_pacs_sync_state set sync_progress_at=now(),updated_at=now() where singleton_key=true`);
+    await updateSyncProgress(db);
     console.info(JSON.stringify({ type: "historical_pacs_sync_page_started", mode: "full", processed, pageOffset: since, pageSize: FULL_STUDY_PAGE_SIZE, worker: `${os.hostname()}:${process.pid}` }));
     const page = await client.listStudiesForIndexPage(since, FULL_STUDY_PAGE_SIZE);
     indexed += await upsertHistoricalPacsStudies(page.studies, db, reconciliationMarker);
     processed += page.resourceCount;
-    await db.query(`update historical_pacs_sync_state set sync_processed=$1,sync_progress_at=now(),updated_at=now() where singleton_key=true`, [processed]);
+    await updateSyncProgress(db, processed);
     console.info(JSON.stringify({ type: "historical_pacs_sync_page_completed", mode: "full", processed, pageOffset: since, pageSize: FULL_STUDY_PAGE_SIZE, durationMs: Date.now() - pageStartedAt, worker: `${os.hostname()}:${process.pid}` }));
     if (page.resourceCount < FULL_STUDY_PAGE_SIZE) break;
     if (page.resourceCount <= 0) throw new Error("Authoritative Orthanc study inventory cursor did not advance.");
     since += page.resourceCount;
   }
   const removed = await db.query(`delete from historical_pacs_studies where synchronized_at < $1::timestamptz`, [reconciliationMarker]);
-  const catchup = await drainChanges(client, baselineSequence, db);
+  // Inventory percentage is complete; catch-up has no known study total.
+  await db.query(`update historical_pacs_sync_state set sync_total=null where singleton_key=true`);
+  const catchup = await drainChanges(client, baselineSequence, db, processed);
+  await verifySyncArchive(archiveKey);
   await db.query(
-    `update historical_pacs_sync_state set last_change_sequence=$1,last_full_sync_at=now(),last_success_at=now(),last_attempt_at=now(),last_error=null,
+    `update historical_pacs_sync_state set last_change_sequence=$1,source_archive_key=coalesce($2,source_archive_key),last_full_sync_at=now(),last_success_at=now(),last_attempt_at=now(),last_error=null,
        sync_run_status='idle',sync_mode=null,sync_started_at=null,sync_progress_at=now(),sync_processed=0,sync_total=null,updated_at=now()
      where singleton_key=true`,
-    [catchup.lastSequence],
+    [catchup.lastSequence, archiveKey ?? null],
   );
   return { indexed: indexed + catchup.upserted, removed: (removed.rowCount || 0) + catchup.removed, lastSequence: catchup.lastSequence };
 }
 
-async function applyChangePage(client: HistoricalPacsSyncClient, page: OrthancChangesPage, db: Queryable): Promise<{ upserted: number; removed: number }> {
+async function applyChangePage(client: HistoricalPacsSyncClient, page: OrthancChangesPage, db: Queryable, processed: number): Promise<{ upserted: number; removed: number }> {
   const latestStudyChanges = new Map<string, "upsert" | "delete">();
   for (const change of page.changes) {
     if (!change.resourceId) continue;
@@ -922,29 +947,37 @@ async function applyChangePage(client: HistoricalPacsSyncClient, page: OrthancCh
   }
   const upsertIds = [...latestStudyChanges].filter(([, operation]) => operation === "upsert").map(([id]) => id);
   for (let offset = 0; offset < upsertIds.length; offset += STUDY_BATCH_SIZE) {
+    await updateSyncProgress(db, processed + upserted + removed);
     const details = (await Promise.all(upsertIds.slice(offset, offset + STUDY_BATCH_SIZE).map((id) => client.getStudyForIndex(id)))).filter((study): study is OrthancStudyDetails => study !== null);
     upserted += await upsertHistoricalPacsStudies(details, db);
+    await updateSyncProgress(db, processed + upserted + removed);
   }
   return { upserted, removed };
 }
 
-async function drainChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable): Promise<{ upserted: number; removed: number; lastSequence: number }> {
+async function drainChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable, processed = 0): Promise<{ upserted: number; removed: number; lastSequence: number }> {
   let cursor = since;
   let upserted = 0;
   let removed = 0;
   for (;;) {
+    await updateSyncProgress(db, processed + upserted + removed);
+    const pageStartedAt = Date.now();
+    console.info(JSON.stringify({ type: "historical_pacs_sync_changes_started", sequence: cursor, worker: `${os.hostname()}:${process.pid}` }));
     const page = await client.getChanges(cursor, CHANGE_BATCH_SIZE);
-    if (!page.done && page.lastSequence <= cursor) throw new Error("Authoritative Orthanc changes cursor did not advance.");
-    const applied = await applyChangePage(client, page, db);
+    if (page.lastSequence < cursor || (!page.done && page.lastSequence <= cursor)) throw new Error("Authoritative Orthanc changes cursor did not advance.");
+    const applied = await applyChangePage(client, page, db, processed + upserted + removed);
     upserted += applied.upserted;
     removed += applied.removed;
     cursor = page.lastSequence;
+    await updateSyncProgress(db, processed + upserted + removed);
+    console.info(JSON.stringify({ type: "historical_pacs_sync_changes_completed", sequence: cursor, changes: page.changes.length, upserted: applied.upserted, removed: applied.removed, done: page.done, durationMs: Date.now() - pageStartedAt, worker: `${os.hostname()}:${process.pid}` }));
     if (page.done) return { upserted, removed, lastSequence: cursor };
   }
 }
 
-async function applyChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable): Promise<{ upserted: number; removed: number; lastSequence: number }> {
+async function applyChanges(client: HistoricalPacsSyncClient, since: number, db: Queryable, archiveKey: string): Promise<{ upserted: number; removed: number; lastSequence: number }> {
   const result = await drainChanges(client, since, db);
+  await verifySyncArchive(archiveKey);
   await db.query(`update historical_pacs_sync_state set last_change_sequence=$1,last_success_at=now(),last_attempt_at=now(),last_error=null,
     sync_run_status='idle',sync_mode=null,sync_started_at=null,sync_progress_at=now(),sync_processed=0,sync_total=null,updated_at=now() where singleton_key=true`, [result.lastSequence]);
   return result;
@@ -953,9 +986,11 @@ async function applyChanges(client: HistoricalPacsSyncClient, since: number, db:
 type SyncCycleResult = { lockAcquired: boolean; mode: "full" | "incremental" | "failed"; indexed: number; removed: number };
 
 async function prepareHistoricalPacsSync(db: PoolClient, forceFull: boolean): Promise<"full" | "incremental"> {
-  const state = await db.query<{ last_full_sync_at: string | null }>(`select last_full_sync_at::text from historical_pacs_sync_state where singleton_key=true`);
+  const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+  const state = await db.query<{ last_full_sync_at: string | null; last_change_sequence: string | null; source_archive_key: string | null }>(`select last_full_sync_at::text,last_change_sequence::text,source_archive_key from historical_pacs_sync_state where singleton_key=true`);
   const lastFull = state.rows[0]?.last_full_sync_at ? new Date(state.rows[0].last_full_sync_at).getTime() : 0;
-  const mode = forceFull || !lastFull || Date.now() - lastFull >= FULL_RECONCILIATION_INTERVAL_MS ? "full" : "incremental";
+  const mode = forceFull || !lastFull || state.rows[0]?.last_change_sequence == null || state.rows[0]?.source_archive_key !== archiveKey
+    || Date.now() - lastFull >= FULL_RECONCILIATION_INTERVAL_MS ? "full" : "incremental";
   await db.query(
     `update historical_pacs_sync_state set sync_run_status='running',sync_mode=$1,sync_started_at=now(),sync_progress_at=now(),
        sync_processed=0,sync_total=null,last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`,
@@ -967,20 +1002,20 @@ async function prepareHistoricalPacsSync(db: PoolClient, forceFull: boolean): Pr
 async function executePreparedHistoricalPacsSync(db: PoolClient, mode: "full" | "incremental", clientFactory: () => Promise<HistoricalPacsSyncClient>): Promise<SyncCycleResult> {
   try {
     const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
-    const previous = (await db.query<{source_archive_key:string|null}>('select source_archive_key from historical_pacs_sync_state where singleton_key=true')).rows[0];
+    const previous = (await db.query<{source_archive_key:string|null;last_change_sequence:string|null}>('select source_archive_key,last_change_sequence::text from historical_pacs_sync_state where singleton_key=true')).rows[0];
     if (previous?.source_archive_key !== archiveKey) {
       mode = 'full';
-      await db.query("update historical_pacs_sync_state set source_archive_key=null,last_change_sequence=null where singleton_key=true");
+      await db.query("update historical_pacs_sync_state set source_archive_key=null,last_change_sequence=null,sync_mode='full',sync_processed=0,sync_total=null,sync_progress_at=clock_timestamp(),updated_at=clock_timestamp() where singleton_key=true");
+    } else if (previous.last_change_sequence == null) {
+      mode = 'full';
+      await db.query("update historical_pacs_sync_state set sync_mode='full',sync_progress_at=clock_timestamp(),updated_at=clock_timestamp() where singleton_key=true");
     }
     const client = await clientFactory();
     if (mode === "full") {
-      const result = await reconcileHistoricalPacsIndex(client, db);
-      if (archiveKey !== authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings())) throw new Error('Archive configuration changed during synchronization.');
-      await db.query('update historical_pacs_sync_state set source_archive_key=$1 where singleton_key=true',[archiveKey]);
+      const result = await reconcileHistoricalPacsIndex(client, db, archiveKey);
       return { lockAcquired: true, mode, indexed: result.indexed, removed: result.removed };
     }
-    const state = await db.query<{ last_change_sequence: string | null }>(`select last_change_sequence::text from historical_pacs_sync_state where singleton_key=true`);
-    const result = await applyChanges(client, Number(state.rows[0]?.last_change_sequence || 0), db);
+    const result = await applyChanges(client, Number(previous.last_change_sequence), db, archiveKey);
     return { lockAcquired: true, mode, indexed: result.upserted, removed: result.removed };
   } catch (error) {
     await recordSyncFailure(error, db);
@@ -1007,9 +1042,11 @@ export async function runHistoricalPacsSyncCycle(clientFactory: () => Promise<Hi
 export async function triggerHistoricalPacsSync(options: { forceFull?: boolean } = {}): Promise<{ accepted: true; mode: "full" | "incremental" } | { accepted: false }> {
   const db = await pool.connect();
   let retained = false;
+  let locked = false;
   try {
     const lock = await db.query<{ acquired: boolean }>(`select pg_try_advisory_lock($1) acquired`, [SYNC_LOCK_KEY]);
     if (!lock.rows[0]?.acquired) return { accepted: false };
+    locked = true;
     const mode = await prepareHistoricalPacsSync(db, Boolean(options.forceFull));
     retained = true;
     setImmediate(() => {
@@ -1022,7 +1059,10 @@ export async function triggerHistoricalPacsSync(options: { forceFull?: boolean }
     });
     return { accepted: true, mode };
   } finally {
-    if (!retained) db.release();
+    if (!retained) {
+      if (locked) await db.query(`select pg_advisory_unlock($1)`, [SYNC_LOCK_KEY]).catch(() => null);
+      db.release();
+    }
   }
 }
 
@@ -1039,19 +1079,20 @@ export async function recoverStalledHistoricalPacsSync(clientFactory: () => Prom
   }
   const db = await pool.connect();
   let retained = false;
+  let locked = false;
   try {
     const lock = await db.query<{ acquired: boolean }>(`select pg_try_advisory_lock($1) acquired`, [SYNC_LOCK_KEY]);
     if (!lock.rows[0]?.acquired) {
       console.warn(JSON.stringify({ type: "historical_pacs_sync_recovery_rejected", reason: "active_run", mode: status.mode, processed: status.processed, worker: `${os.hostname()}:${process.pid}` }));
       return { accepted: false, reason: "active_run" };
     }
+    locked = true;
     const current = await db.query<{ sync_run_status: string; sync_progress_at: string | null; sync_processed: number }>(
       `select sync_run_status,sync_progress_at::text,sync_processed from historical_pacs_sync_state where singleton_key=true`,
     );
     const progressAt = current.rows[0]?.sync_progress_at ? new Date(current.rows[0].sync_progress_at).getTime() : NaN;
     const stillStalled = current.rows[0]?.sync_run_status === "running" && Number.isFinite(progressAt) && Date.now() - progressAt >= HISTORICAL_PACS_SYNC_STALLED_AFTER_MS;
     if (!stillStalled) {
-      await db.query(`select pg_advisory_unlock($1)`, [SYNC_LOCK_KEY]);
       console.info(JSON.stringify({ type: "historical_pacs_sync_recovery_rejected", reason: "not_stalled", worker: `${os.hostname()}:${process.pid}` }));
       return { accepted: false, reason: "not_stalled" };
     }
@@ -1069,7 +1110,10 @@ export async function recoverStalledHistoricalPacsSync(clientFactory: () => Prom
     });
     return { accepted: true, mode: "full" };
   } finally {
-    if (!retained) db.release();
+    if (!retained) {
+      if (locked) await db.query(`select pg_advisory_unlock($1)`, [SYNC_LOCK_KEY]).catch(() => null);
+      db.release();
+    }
   }
 }
 

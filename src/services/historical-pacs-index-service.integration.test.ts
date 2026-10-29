@@ -3,7 +3,7 @@ import test from "node:test";
 import { pool } from "../db/pool.js";
 import { invalidateCache } from "../utils/cache.js";
 import type { OrthancStudyDetails } from "./authoritative-orthanc-service.js";
-import {authoritativeOrthancArchiveKey,readAuthoritativeOrthancSettings} from './authoritative-orthanc-service.js';
+import {authoritativeOrthancArchiveKey,readAuthoritativeOrthancSettings,__setAuthoritativeOrthancSettingsForTests} from './authoritative-orthanc-service.js';
 import { reconcileProtocolingPatientHistory } from "../modules/doctor-portal/protocoling-history.js";
 import {
   dicomPatientNameVariants,
@@ -15,6 +15,7 @@ import {
   recoverStalledHistoricalPacsSync,
   reconcileHistoricalPacsIndex,
   runHistoricalPacsSyncCycle,
+  triggerHistoricalPacsSync,
   upsertHistoricalPacsStudies,
 } from "./historical-pacs-index-service.js";
 
@@ -738,6 +739,211 @@ test("historical PACS index discovery and synchronization", async (t) => {
     await pool.query(`delete from historical_pacs_studies where orthanc_study_id='full-catchup-new'`);
   });
 
+  await t.test("a missing incremental cursor requires inventory before catching up from the metrics baseline", async () => {
+    const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+    await pool.query(`update historical_pacs_sync_state set source_archive_key=$1,last_full_sync_at=now(),last_change_sequence=null,last_success_at='2002-01-01' where singleton_key=true`, [archiveKey]);
+    const inventory = study({ orthancStudyId: "missing-cursor-inventory", patientId: "CURSOR-OLD", patientName: "CURSOR^INVENTORY" });
+    const concurrent = study({ orthancStudyId: "missing-cursor-concurrent", patientId: "CURSOR-NEW", patientName: "CURSOR^CONCURRENT" });
+    let inventoryRead = false;
+    const calls: string[] = [];
+    try {
+      const result = await runHistoricalPacsSyncCycle(async () => ({
+        async getLastChangeSequenceFromMetrics() { calls.push("metrics"); return 9_000_000; },
+        async getChanges(since: number) {
+          calls.push(`changes:${since}`);
+          assert.equal(inventoryRead, true);
+          assert.equal(since, 9_000_000);
+          const status = await getHistoricalPacsAdminStatus();
+          assert.equal(status.total, null, "catch-up has no inventory percentage");
+          assert.match(status.lastSuccessAt || "", /^2002-01-01/);
+          assert.equal(status.lastChangeSequence, null, "the baseline is not a committed cursor");
+          return { changes: [{ sequence: 9_000_001, changeType: "StableStudy", resourceType: "Study", resourceId: concurrent.orthancStudyId }], lastSequence: 9_000_001, done: true };
+        },
+        async listStudiesForIndexPage() {
+          calls.push("inventory");
+          inventoryRead = true;
+          assert.equal((await getHistoricalPacsAdminStatus()).mode, "full");
+          return { studies: [inventory], resourceCount: 1 };
+        },
+        async getStudyForIndex() { return concurrent; },
+      }));
+      assert.equal(result.mode, "full");
+      assert.deepEqual(calls, ["metrics", "inventory", "changes:9000000"]);
+      const rows = await pool.query(`select orthanc_study_id from historical_pacs_studies where orthanc_study_id like 'missing-cursor-%' order by orthanc_study_id`);
+      assert.deepEqual(rows.rows.map((row) => row.orthanc_study_id), [concurrent.orthancStudyId, inventory.orthancStudyId]);
+      assert.equal((await getHistoricalPacsAdminStatus()).lastChangeSequence, 9_000_001);
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id like 'missing-cursor-%'`);
+    }
+  });
+
+  await t.test("unavailable metrics fall back to every changes page with a heartbeat and no false study progress", async () => {
+    await pool.query(`update historical_pacs_sync_state set last_full_sync_at=null,last_change_sequence=null where singleton_key=true`);
+    const calls: number[] = [];
+    const result = await runHistoricalPacsSyncCycle(async () => ({
+      async getLastChangeSequenceFromMetrics() { return null; },
+      async getChanges(since: number, limit?: number) {
+        calls.push(since);
+        const status = await getHistoricalPacsAdminStatus();
+        assert.equal(status.isStalled, false);
+        assert.equal(status.processed, 0);
+        if (limit === 1000 && since === 0) {
+          await pool.query(`update historical_pacs_sync_state set sync_progress_at=now()-interval '10 minutes' where singleton_key=true`);
+          return { changes: [], lastSequence: 1000, done: false };
+        }
+        return { changes: [], lastSequence: 2000, done: true };
+      },
+      async listStudiesForIndexPage() { return { studies: [], resourceCount: 0 }; },
+      async getStudyForIndex() { return null; },
+    }), { forceFull: true });
+    assert.equal(result.mode, "full");
+    assert.deepEqual(calls, [0, 1000, 2000]);
+  });
+
+  await t.test("archive mismatch updates the displayed full mode and only publishes identity after catch-up", async () => {
+    const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+    await pool.query(`update historical_pacs_sync_state set source_archive_key='other-archive',last_full_sync_at=now(),last_change_sequence=42 where singleton_key=true`);
+    let metricRead = false;
+    const result = await runHistoricalPacsSyncCycle(async () => {
+      assert.equal((await getHistoricalPacsAdminStatus()).mode, "full");
+      return {
+        async getLastChangeSequenceFromMetrics() { metricRead = true; return 100; },
+        async getChanges(since: number) {
+          assert.equal(since, 100);
+          assert.equal((await pool.query(`select source_archive_key from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.source_archive_key, null);
+          return { changes: [], lastSequence: 100, done: true };
+        },
+        async listStudiesForIndexPage() { assert.equal(metricRead, true); return { studies: [], resourceCount: 0 }; },
+        async getStudyForIndex() { return null; },
+      };
+    });
+    assert.equal(result.mode, "full");
+    assert.equal((await pool.query(`select source_archive_key from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.source_archive_key, archiveKey);
+  });
+
+  await t.test("inventory or catch-up failure after metrics baselining never commits a missing cursor or archive identity", async () => {
+    const retained = study({ orthancStudyId: "baseline-failure-retained", patientId: "BASELINE-OLD", patientName: "BASELINE^RETAINED" });
+    try {
+      for (const failureStage of ["inventory", "catch-up"]) {
+        await pool.query(`update historical_pacs_sync_state set source_archive_key=null,last_full_sync_at=now(),last_change_sequence=null,last_success_at='2003-01-01' where singleton_key=true`);
+        await upsertHistoricalPacsStudies([retained]);
+        const result = await runHistoricalPacsSyncCycle(async () => ({
+          async getLastChangeSequenceFromMetrics() { return 9_000_000; },
+          async getChanges(since: number) {
+            assert.equal(since, 9_000_000);
+            throw new Error("catch-up interrupted after baseline");
+          },
+          async listStudiesForIndexPage() {
+            if (failureStage === "inventory") throw new Error("inventory interrupted after baseline");
+            return { studies: [retained], resourceCount: 1 };
+          },
+          async getStudyForIndex() { return null; },
+        }));
+        assert.equal(result.mode, "failed");
+        const status = await getHistoricalPacsAdminStatus();
+        assert.equal(status.lastChangeSequence, null);
+        assert.match(status.lastSuccessAt || "", /^2003-01-01/);
+        assert.equal(status.lastError, `${failureStage} interrupted after baseline`);
+        assert.equal((await pool.query(`select source_archive_key from historical_pacs_sync_state where singleton_key=true`)).rows[0]?.source_archive_key, null);
+        assert.equal((await pool.query(`select count(*)::int count from historical_pacs_studies where orthanc_study_id=$1`, [retained.orthancStudyId])).rows[0]?.count, 1);
+      }
+    } finally {
+      await pool.query(`delete from historical_pacs_studies where orthanc_study_id=$1`, [retained.orthancStudyId]);
+    }
+  });
+
+  await t.test("incremental change enumeration heartbeats count studies rather than unrelated changes", async () => {
+    const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+    await pool.query(`update historical_pacs_sync_state set source_archive_key=$1,last_full_sync_at=now(),last_change_sequence=10 where singleton_key=true`, [archiveKey]);
+    const incoming = study({ orthancStudyId: "heartbeat-new", patientId: "HEARTBEAT", patientName: "HEARTBEAT^STUDY" });
+    const result = await runHistoricalPacsSyncCycle(async () => ({
+      async getChanges(since: number) {
+        const status = await getHistoricalPacsAdminStatus();
+        assert.equal(status.isStalled, false);
+        assert.equal(status.processed, since === 10 ? 0 : 1);
+        await pool.query(`update historical_pacs_sync_state set sync_progress_at=now()-interval '10 minutes' where singleton_key=true`);
+        if (since === 10) return { changes: [{ sequence: 11, changeType: "StableStudy", resourceType: "Study", resourceId: incoming.orthancStudyId }], lastSequence: 11, done: false };
+        if (since === 11) return { changes: [{ sequence: 12, changeType: "NewInstance", resourceType: "Instance", resourceId: "unrelated-instance" }], lastSequence: 12, done: false };
+        return { changes: [], lastSequence: 12, done: true };
+      },
+      async listStudiesForIndexPage() { throw new Error("unexpected full inventory"); },
+      async getStudyForIndex() { return incoming; },
+    }));
+    assert.equal(result.mode, "incremental");
+    await pool.query(`delete from historical_pacs_studies where orthanc_study_id=$1`, [incoming.orthancStudyId]);
+  });
+
+  await t.test("configuration changes during either mode cannot publish a successful synchronization", async () => {
+    const settings = await readAuthoritativeOrthancSettings();
+    const archiveKey = authoritativeOrthancArchiveKey(settings);
+    try {
+      for (const forceFull of [false, true]) {
+        await pool.query(`update historical_pacs_sync_state set source_archive_key=$1,last_full_sync_at=now(),last_change_sequence=10,last_success_at='2004-01-01' where singleton_key=true`, [archiveKey]);
+        __setAuthoritativeOrthancSettingsForTests(settings);
+        const result = await runHistoricalPacsSyncCycle(async () => ({
+          async getChanges() {
+            __setAuthoritativeOrthancSettingsForTests({ ...settings, baseUrl: "http://changed-archive.test:8042" });
+            return { changes: [], lastSequence: 11, done: true };
+          },
+          async listStudiesForIndexPage() { return { studies: [], resourceCount: 0 }; },
+          async getStudyForIndex() { return null; },
+        }), { forceFull });
+        assert.equal(result.mode, "failed");
+        const status = await getHistoricalPacsAdminStatus();
+        assert.equal(status.lastChangeSequence, 10);
+        assert.match(status.lastSuccessAt || "", /^2004-01-01/);
+        assert.match(status.lastError || "", /Archive configuration changed/);
+      }
+    } finally {
+      __setAuthoritativeOrthancSettingsForTests(null);
+    }
+  });
+
+  await t.test("a backwards final changes page fails without advancing the cursor or success", async () => {
+    const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+    await pool.query(`update historical_pacs_sync_state set source_archive_key=$1,last_full_sync_at=now(),last_change_sequence=500,last_success_at='2005-01-01' where singleton_key=true`, [archiveKey]);
+    const result = await runHistoricalPacsSyncCycle(async () => ({
+      async getChanges() { return { changes: [], lastSequence: 10, done: true }; },
+      async listStudiesForIndexPage() { throw new Error("unexpected inventory"); },
+      async getStudyForIndex() { return null; },
+    }));
+    assert.equal(result.mode, "failed");
+    const status = await getHistoricalPacsAdminStatus();
+    assert.equal(status.lastChangeSequence, 500);
+    assert.match(status.lastSuccessAt || "", /^2005-01-01/);
+    assert.match(status.lastError || "", /cursor did not advance/);
+  });
+
+  await t.test("manual and recovery preparation failures release the session advisory lock", async (subtest) => {
+    const db = await pool.connect();
+    const witness = await pool.connect();
+    const query = db.query.bind(db);
+    const originalConnect = pool.connect.bind(pool);
+    const release = subtest.mock.method(db, "release", () => {});
+    const connect = subtest.mock.method(pool, "connect", (callback?: Parameters<typeof pool.connect>[0]) => callback ? originalConnect(callback) : Promise.resolve(db));
+    const injected = subtest.mock.method(db, "query", async (sql: string, values?: unknown[]) => {
+      if (sql.includes("set sync_run_status='running'")) throw new Error("sync preparation failed");
+      return query(sql, values);
+    });
+    try {
+      for (const start of [() => triggerHistoricalPacsSync(), () => recoverStalledHistoricalPacsSync()]) {
+        await pool.query(`update historical_pacs_sync_state set sync_run_status='running',sync_progress_at=now()-interval '10 minutes' where singleton_key=true`);
+        await assert.rejects(start, /sync preparation failed/);
+        const lock = await witness.query(`select pg_try_advisory_lock(712364092) acquired`);
+        assert.equal(lock.rows[0]?.acquired, true);
+        await witness.query(`select pg_advisory_unlock(712364092)`);
+      }
+    } finally {
+      await query(`select pg_advisory_unlock_all()`);
+      injected.mock.restore();
+      connect.mock.restore();
+      release.mock.restore();
+      db.release();
+      witness.release();
+      await readyIndex();
+    }
+  });
+
   await t.test("Orthanc unavailability preserves indexed studies and records a stale synchronization state", async () => {
     await upsertHistoricalPacsStudies([study({ orthancStudyId: "offline-retained", patientId: "OFFLINE-1", patientName: "OFFLINE^PATIENT" })]);
     await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),last_change_sequence=77,last_error=null where singleton_key=true`);
@@ -831,6 +1037,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
 
   await t.test("forced full reconciliation records statistics and page progress, then clears active run state", async () => {
     await readyIndex();
+    await pool.query(`update historical_pacs_sync_state set last_change_sequence=90 where singleton_key=true`);
     let pages = 0;
     let progressAfterFirstPage = 0;
     const client = {
@@ -871,6 +1078,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
 
   await t.test("full reconciliation continues without statistics and advisory locking prevents overlap", async () => {
     await readyIndex();
+    await pool.query(`update historical_pacs_sync_state set last_change_sequence=91 where singleton_key=true`);
     const client = {
       async getStatistics() { throw new Error("statistics unavailable"); },
       async getChanges() { return { changes: [], lastSequence: 92, done: true }; },
