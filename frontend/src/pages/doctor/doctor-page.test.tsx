@@ -2092,7 +2092,7 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByRole("button", { name: /Bulk assign next cases/i })).toBeNull();
   });
 
-  it("shows Reporting Board notification badge, marks read, and navigates to action URL", async () => {
+  it("marks an ordinary doctor's notification read and safely redirects a supervisor-board bookmark to personal work", async () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     fetchReportingBoardNotificationsMock.mockResolvedValue([{
       id: 22,
@@ -2115,7 +2115,8 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByText(/V2-/)).toBeNull();
     fireEvent.click(screen.getByText("New reporting case assigned"));
     await waitFor(() => expect(markReportingBoardNotificationReadMock.mock.calls[0]?.[0]).toBe(22));
-    await waitFor(() => expect(fetchReportingBoardSavedViewByTokenMock).toHaveBeenCalledWith("tok"));
+    expect(await screen.findByRole('heading',{name:'My Reporting Worklist'})).toBeTruthy();
+    expect(fetchReportingBoardSavedViewByTokenMock).not.toHaveBeenCalled();
   });
 
   it("dismisses Reporting Board notifications for the current user", async () => {

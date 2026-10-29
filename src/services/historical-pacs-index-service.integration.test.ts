@@ -3,6 +3,7 @@ import test from "node:test";
 import { pool } from "../db/pool.js";
 import { invalidateCache } from "../utils/cache.js";
 import type { OrthancStudyDetails } from "./authoritative-orthanc-service.js";
+import {authoritativeOrthancArchiveKey,readAuthoritativeOrthancSettings} from './authoritative-orthanc-service.js';
 import { reconcileProtocolingPatientHistory } from "../modules/doctor-portal/protocoling-history.js";
 import {
   dicomPatientNameVariants,
@@ -642,6 +643,7 @@ test("historical PACS index discovery and synchronization", async (t) => {
   });
 
   await t.test("incremental stable and deleted study changes update the index idempotently", async () => {
+    await pool.query('update historical_pacs_sync_state set source_archive_key=$1 where singleton_key=true',[authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings())]);
     await upsertHistoricalPacsStudies([study({ orthancStudyId: "incremental-delete", patientId: "INC-OLD", patientName: "OLD^INDEX" })]);
     await pool.query(`update historical_pacs_sync_state set last_full_sync_at=now(),last_change_sequence=10,last_error=null where singleton_key=true`);
     const incoming = study({ orthancStudyId: "incremental-new", patientId: "INC-NEW", patientName: "NEW^INDEX" });

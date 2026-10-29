@@ -16,6 +16,7 @@ import {
   getRosterWeekDetails,
   insertAssignment,
   listMyRoster,
+  nextPublishedRosterDuty,
   publishWeek,
   removeMember,
   updateRosterWeekDates,
@@ -81,6 +82,14 @@ export async function getMyRosterForDoctor(
 ) {
   const me = await requireRosterDoctor(actor);
   return listMyRoster(me.profile!.id, weekStart);
+}
+
+export async function getMyPublishedRosterForDoctor(actor:Actor,weekStart:string|null) {
+  const me=await requireRosterDoctor(actor);
+  return listMyRoster(me.profile!.id,weekStart,true);
+}
+export async function getNextPublishedDutyForDoctor(actor:Actor) {
+  const me=await requireRosterDoctor(actor);return nextPublishedRosterDuty(me.profile!.id);
 }
 
 export async function listRosterDoctors(

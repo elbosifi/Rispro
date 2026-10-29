@@ -12,9 +12,9 @@ import {
 describe("settings page composition", () => {
   it("preserves the ordered settings menu and group assignment matrix", () => {
     expect(SETTINGS_GROUPS).toEqual(["all", "clinical", "scheduling", "integrations", "admin", "system"]);
-    expect(SETTINGS_MENU_SECTIONS).toHaveLength(38);
+    expect(SETTINGS_MENU_SECTIONS).toHaveLength(39);
     expect(SETTINGS_MENU_SECTIONS).toEqual([
-      "mobile_widget",
+      "doctor_workspace", "mobile_widget",
       "patient_registration", "patient_import", "patient_duplicate_resolver",
       "scheduling_and_capacity", "queue_and_arrival", "scheduling_engine_config",
       "pacs_connection", "dicom_gateway_config",

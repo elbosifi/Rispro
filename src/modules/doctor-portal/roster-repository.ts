@@ -123,7 +123,7 @@ export async function listAssignmentsForWeek(db: Db, weekId: number): Promise<Ro
   return assignments;
 }
 
-export async function listMyRoster(doctorId: number, weekStart: string | null): Promise<RosterWeekDetails> {
+export async function listMyRoster(doctorId: number, weekStart: string | null, publishedOnly=false): Promise<RosterWeekDetails> {
   const params: unknown[] = [doctorId];
   const weekFilter = weekStart ? "and w.week_start_date <= $2::date + 6 and w.week_end_date >= $2::date" : "";
   if (weekStart) params.push(weekStart);
@@ -131,7 +131,8 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
   const weekResult = await pool.query<RosterWeekRow>(
     `
       ${WEEK_SELECT} w
-      where w.status in ('draft', 'published')
+        where w.status in ('draft', 'published')
+          ${publishedOnly ? "and w.status='published'" : ''}
         ${weekFilter}
         and exists (
           select 1
@@ -153,6 +154,7 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
     `
       ${ASSIGNMENT_SELECT}
       where a.roster_week_id = $1
+        ${publishedOnly ? "and a.status='active'" : ''}
         and ($3::date is null or a.date between $3::date and $3::date + 6)
         and exists (
           select 1
@@ -170,6 +172,16 @@ export async function listMyRoster(doctorId: number, weekStart: string | null): 
     assignment.members = await listMembersForAssignment(pool, assignment.id);
   }
   return { week, assignments };
+}
+
+export async function nextPublishedRosterDuty(doctorId:number) {
+  const row=(await pool.query<Omit<RosterAssignmentRow,'members'>>(`${ASSIGNMENT_SELECT}
+    join doctor_portal.doctor_roster_weeks w on w.id=a.roster_week_id
+    where w.status='published' and a.status='active' and a.date >= $2::date
+      and (a.date>$2::date or a.end_time is null or a.end_time >= (now() at time zone 'Africa/Tripoli')::time)
+      and exists(select 1 from doctor_portal.doctor_roster_members rm where rm.roster_assignment_id=a.id and rm.doctor_id=$1)
+    order by a.date,a.start_time nulls first,a.id limit 1`,[doctorId,getTripoliToday()])).rows[0];
+  return row?{...row,members:await listMembersForAssignment(pool,row.id)}:null;
 }
 
 export async function createRosterWeek(input: { weekStartDate: string; weekEndDate: string; actorUserId: UserId; actorDoctorId: number }, db: Db = pool): Promise<RosterWeekRow> {

@@ -1016,6 +1016,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       const db = await pool.connect();
       try {
         await db.query("begin"); await db.query("set local session_replication_role=replica");
+        await db.query('delete from native_report_contributors where report_id in (select id from native_reports where appointment_id=any($1::bigint[]))',[createdIds]);
         await db.query("delete from native_report_versions where report_id in (select id from native_reports where appointment_id=any($1::bigint[]))", [createdIds]);
         await db.query("delete from native_report_key_images where report_id in (select id from native_reports where appointment_id=any($1::bigint[]))", [createdIds]);
         await db.query("delete from native_reports where appointment_id=any($1::bigint[])",[createdIds]);

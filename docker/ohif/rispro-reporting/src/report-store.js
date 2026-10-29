@@ -3,10 +3,10 @@
 export function createReportStore({ contextId, captureViewport, locateSource, fetcher = fetch }) {
   let state = { context: null, report: null, text: null, dirty: false, saving: false, busy: false, error: '', conflict: false, history: null, pendingCapture: null, captionEdits: {}, addendumText: '' };
   let chain = Promise.resolve(), timer, generation = 0;
-  const finalizeId=newId();let addendumId=newId();
+  let finalizeId=newId(),addendumId=newId(),creationId=newId();
   const listeners = new Set();
   const patch = update => { state = { ...state, ...update }; listeners.forEach(fn => fn()); };
-  const base = () => '/api/native-reporting/appointments/' + state.context.appointmentId;
+  const base = () => state.context?.v2 && state.report ? '/api/native-reporting/reports/'+state.report.id : '/api/native-reporting/appointments/' + state.context.appointmentId;
   const request = async (url, method = 'GET', body, extra = {}) => {
     const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),body instanceof Blob?90000:15000);
     try{const response = await fetcher(url, { method, credentials: 'same-origin', cache: 'no-store', signal:controller.signal,
@@ -80,10 +80,19 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
       patch({ context, report: context.report, text: context.report?.sections ?? null, dirty: false, conflict: false, error: '', captionEdits: {}, pendingCapture: null });
       return context;
     },
-    async create() {
+    async create(options={}) {
       return busy(async () => {
-        const report = await request(base(), 'POST', {});
-        patch({report,text:report.sections,error:''});
+        const report = await request(state.context.v2?'/api/native-reporting/workspace/studies/'+encodeURIComponent(state.context.studyKey)+'/reports':base(), 'POST', state.context.v2?{mode:options.mode||'independent',reportType:options.reportType||'primary',requestId:creationId}:{});
+        creationId=newId();finalizeId=newId();
+        patch({report,text:report.sections,error:'',...(state.context.v2?{context:{...state.context,reports:[...(state.context.reports||[]),report],canEdit:report.canEdit,canFinalize:report.canFinalize}}:{})});
+      });
+    },
+    async selectReport(id) {
+      return busy(async()=>{
+        await flush();
+        const report=await request('/api/native-reporting/reports/'+id);
+        generation++;finalizeId=newId();addendumId=newId();
+        patch({report,text:report.sections,dirty:false,error:'',conflict:false,history:null,captionEdits:{},addendumText:'',context:{...state.context,canEdit:report.canEdit,canFinalize:report.canFinalize}});
       });
     },
     edit(name, value) {
@@ -96,7 +105,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     finalize(requestId=finalizeId) {
       return busy(async () => {
         if (state.pendingCapture) throw new Error('Retry or discard the pending key-image upload before signing.');
-        return mutate('/finalize', { requestId, confirmed: true });
+        return mutate('/finalize', { requestId, confirmed: true,...(state.context.v2?{signerUserId:state.context.signerUserId}:{}) });
       });
     },
     addendum: (text, requestId=addendumId) => busy(async () => {const result=await mutate('/addenda', { text, requestId, confirmed: true });addendumId=newId();if(state.addendumText===text)patch({addendumText:''});return result;}),
@@ -104,7 +113,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     editCaption: (id,text) => patch({captionEdits:{...state.captionEdits,[id]:text}}),
     async capture() {
       return busy(async () => {
-        if (!state.context?.canEdit || state.report?.status !== 'draft') throw new Error('Create an editable report draft before adding a key image.');
+        if (!state.context?.canEdit || !['draft','in_review'].includes(state.report?.status)) throw new Error('Create an editable report draft before adding a key image.');
         if (state.pendingCapture) throw new Error('Retry or discard the pending upload first.');
         await flush();
         const captured = await captureViewport();
@@ -125,7 +134,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     },
     discardCapture() { patch({pendingCapture:null}); },
     images: selected => busy(() => mutate('/images', () => ({ images: selected.map(i=>({id:i.id,caption:state.report.keyImages.find(current=>current.id===i.id)?.caption || ''})) }), 'PUT')),
-    async history() { const history = await request(base() + '/history'); patch({history}); },
+    async history() { const history = await request(base() + '/history'); patch({history:Array.isArray(history)?history:history.versions}); },
     locate: image => locateSource(image.provenance),
     imageUrl: image => base() + '/images/' + image.id,
     printUrl: () => base() + '/print',

@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 export const SERVER_PRINT_FONT_FAMILY = "Noto Naskh Arabic";
 
 export function buildNativeReportHtml(report: {
-  appointmentId: number; status: string; identity: { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string };
+  id?: number; studyKey?:string; appointmentId: number | null; status: string; identity: { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string };
   sections: Record<string,string>; author: string; finalizer: string | null; finalizedAt: Date | null;
   keyImages: { id: string; caption: string; provenance: Record<string,unknown> }[];
   addenda: { text?: string; author?: string; signedAt?: string }[];
@@ -18,8 +18,8 @@ export function buildNativeReportHtml(report: {
     ${report.status!=="final"?'<div class="draft">DRAFT — UNSIGNED</div>':""}<header><h1>Radiology report</h1>
     <p dir="auto">${e(report.identity.patientName)} · ${e(report.identity.patientIdentifier)}<br>Accession: ${e(report.identity.accession)}<br>${e(report.identity.examination)} · ${e(report.identity.studyDate)}</p></header>
     ${Object.entries(labels).filter(([k])=>report.sections[k]).map(([k,label])=>`<section><h2>${label}</h2><p dir="auto">${e(report.sections[k])}</p></section>`).join("")}
-    <p>Author: ${e(report.author)}${report.finalizer?`<br>Signed by ${e(report.finalizer)} · ${e(report.finalizedAt)}`:""}</p>
-    ${report.keyImages.map((image,index)=>`<figure><img alt="Report illustration ${index+1}" src="/api/native-reporting/appointments/${report.appointmentId}/images/${e(image.id)}"><figcaption>${index+1}. ${e(image.caption)}<br>${e(image.provenance.sourceStudyDate)} ${image.provenance.prior?"(prior study)":""} · ${e(image.provenance.sourceSeriesDescription)}<br>Rendered report illustration</figcaption></figure>`).join("")}
+    <p>${report.status==="final"?"":"Author: "+e(report.author)}${report.finalizer?`<br>Signed by ${e(report.finalizer)} · ${e(report.finalizedAt)}`:""}</p>
+    ${report.keyImages.map((image,index)=>`<figure><img alt="Report illustration ${index+1}" src="/api/native-reporting/${report.studyKey && report.id ? "reports/"+report.id : "appointments/"+report.appointmentId}/images/${e(image.id)}"><figcaption>${index+1}. ${e(image.caption)}<br>${e(image.provenance.sourceStudyDate)} ${image.provenance.prior?"(prior study)":""} · ${e(image.provenance.sourceSeriesDescription)}<br>Rendered report illustration</figcaption></figure>`).join("")}
     ${report.addenda.map(a=>`<section><h2>Signed addendum</h2><p dir="auto">${e(a.text)}</p><p>${e(a.author)} · ${e(a.signedAt)}</p></section>`).join("")}</body></html>`;
 }
 

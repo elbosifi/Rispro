@@ -1,22 +1,25 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import { Button, Input, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@ohif/ui-next';
 import './reporting.css';
+import DictationAdapter from './dictation-adapter';
 
 const labels={clinicalHistory:'Clinical history',comparison:'Comparison',technique:'Technique',findings:'Findings',impression:'Impression'};
 export default function ReportPanel({store}) {
   const s=useSyncExternalStore(store.subscribe,store.getSnapshot);
   const [confirm,setConfirm]=useState(null),[tab,setTab]=useState('report');
+  const [mode,setMode]=useState('independent'),[reportType,setReportType]=useState('primary');
   const addendum=s.addendumText;
   const run=work=>Promise.resolve().then(work).catch(store.setError);
   const report=s.report,identity=report?.identity || s.context?.identity;
-  const editable=s.context?.canEdit && report?.status==='draft' && !s.busy && !s.conflict;
+  const editable=s.context?.canEdit && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
   const selection=report?.keyImages || [];
   const confirmAction=()=>run(async()=>{
     if(confirm==='finalize') await store.finalize();
     else await store.addendum(addendum);
     setConfirm(null);
   });
-  return <section className="rispro-report" aria-label="RISpro report" onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()}>
+  return <section className="rispro-report" data-dictation-context={`native-report:${report?.id}:${report?.status}`} aria-label="RISpro report" onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()}>
+    {s.context?.v2&&<><label>Report<select aria-label="Report selection" value={report?.id||''} disabled={s.busy||s.conflict} onChange={e=>{const selectedId=Number(e.target.value);run(()=>store.selectReport(selectedId));}}><option value="" disabled>Select report</option>{s.context.reports?.map(r=><option key={r.id} value={r.id}>{r.author} · {r.reportType} · {r.status} · #{r.id}</option>)}</select></label><a href={'/doctor/reporting/studies/'+s.context.studyKey} target="_blank" rel="noopener noreferrer">All reports / Create independent report</a></>}
     <header className="rispro-report-identity">
       <strong dir="auto">{identity?.patientName}</strong><div>{identity?.patientIdentifier}</div>
       <div>Accession: {identity?.accession}</div><div>{identity?.examination} · {identity?.studyDate}</div>
@@ -28,16 +31,18 @@ export default function ReportPanel({store}) {
     {!s.context && <p>Loading authorized report context…</p>}
     {s.context && !report && <>
       <p>Creating a RISpro report explicitly selects native reporting for this case. Existing external drafts/final reports and manual final overrides cannot be taken over.</p>
-      <Button disabled={!s.context.canEdit || s.busy} onClick={()=>run(store.create)}>Create RISpro Report</Button>
+      {s.context.v2&&<><label>Mode<select value={s.context.policy.collaboration==='both'?mode:s.context.policy.collaboration} onChange={e=>setMode(e.target.value)} disabled={s.context.policy.collaboration!=='both'}><option value="independent">Independent</option><option value="shared">Shared draft</option></select></label><label>Report type<select value={reportType} onChange={e=>setReportType(e.target.value)}>{s.context.policy.allowedTypes.map(t=><option key={t}>{t}</option>)}</select></label></>}
+      <Button disabled={!s.context.canEdit || s.busy} onClick={()=>run(()=>store.create({mode:s.context?.policy?.collaboration==='both'?mode:s.context?.policy?.collaboration||mode,reportType}))}>Create RISpro Report</Button>
     </>}
     {report && <>
+      <DictationAdapter report={report} enabled={editable} onError={store.setError}/>
       <nav className="rispro-report-actions">
         <Button variant="outline" onClick={()=>setTab('report')}>Report</Button>
         <Button variant="outline" onClick={()=>setTab('images')}>Key Images ({selection.length})</Button>
         <Button variant="outline" onClick={()=>run(async()=>{await store.history();setTab('history');})}>History</Button>
         <Button variant="outline" onClick={()=>window.open(store.printUrl(),'_blank','noopener')}>Print</Button>
       </nav>
-      {report.status==='draft' && <div className="rispro-report-actions">
+      {['draft','in_review'].includes(report.status) && <div className="rispro-report-actions">
         <Button disabled={!editable || s.saving} onClick={()=>run(store.save)}>Save</Button>
         <Button disabled={!s.context?.canFinalize || s.busy || s.conflict || !!s.pendingCapture} onClick={()=>setConfirm('finalize')}>Finalize</Button>
         <span role="status">{s.saving?'Saving…':s.error && (s.dirty || Object.keys(s.captionEdits).length)?'Save failed':s.dirty || Object.keys(s.captionEdits).length?'Unsaved changes':'Saved'}</span>

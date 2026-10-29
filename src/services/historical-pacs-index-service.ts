@@ -5,6 +5,8 @@ import { normalizeArabicName, normalizeArabicNameCompact } from "../utils/normal
 import { HttpError } from "../utils/http-error.js";
 import {
   createAuthoritativeOrthancClient,
+  readAuthoritativeOrthancSettings,
+  authoritativeOrthancArchiveKey,
   type OrthancChangesPage,
   type OrthancResourceStatistics,
   type OrthancStudiesIndexPage,
@@ -964,9 +966,17 @@ async function prepareHistoricalPacsSync(db: PoolClient, forceFull: boolean): Pr
 
 async function executePreparedHistoricalPacsSync(db: PoolClient, mode: "full" | "incremental", clientFactory: () => Promise<HistoricalPacsSyncClient>): Promise<SyncCycleResult> {
   try {
+    const archiveKey = authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+    const previous = (await db.query<{source_archive_key:string|null}>('select source_archive_key from historical_pacs_sync_state where singleton_key=true')).rows[0];
+    if (previous?.source_archive_key !== archiveKey) {
+      mode = 'full';
+      await db.query("update historical_pacs_sync_state set source_archive_key=null,last_change_sequence=null where singleton_key=true");
+    }
     const client = await clientFactory();
     if (mode === "full") {
       const result = await reconcileHistoricalPacsIndex(client, db);
+      if (archiveKey !== authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings())) throw new Error('Archive configuration changed during synchronization.');
+      await db.query('update historical_pacs_sync_state set source_archive_key=$1 where singleton_key=true',[archiveKey]);
       return { lockAcquired: true, mode, indexed: result.indexed, removed: result.removed };
     }
     const state = await db.query<{ last_change_sequence: string | null }>(`select last_change_sequence::text from historical_pacs_sync_state where singleton_key=true`);

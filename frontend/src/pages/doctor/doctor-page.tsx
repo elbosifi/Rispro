@@ -1,5 +1,5 @@
 import "./doctor-workspace.css";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -53,6 +53,12 @@ import {
 } from "@/lib/navigation/doctor-advanced-setup-navigation";
 import { resolveModuleNavigationTarget, saveModuleLastLocation } from "@/lib/navigation/module-last-location";
 import { useTeachingIdentity } from "@/teaching/api/use-teaching-identity";
+import { api } from '@/lib/api-client';
+import { DoctorHomeV2,DoctorScheduleV2 } from './doctor-home-v2';
+import { ReportingWorkspacePage,AssignedWorklistPage } from './reporting-workspace-page';
+import { ReportingStudyPage } from './reporting-study-page';
+import { StandaloneReportPage } from './standalone-report-editor';
+import { requestNavigationWithUnsavedGuard } from '@/lib/unsaved-navigation-guard';
 
 type DoctorPortalNavItem = {
   path: string;
@@ -272,7 +278,7 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
   );
 }
 
-function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
+function DoctorPortalRoutes({ me,v2=false }: { me: DoctorMe;v2?:boolean }) {
   const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
   const canManageRoster = canManageClinicalRoster(me);
   const canManageDoctors = canAccessDoctorAdmin(me);
@@ -280,10 +286,15 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
 
   return (
     <Routes>
-      <Route index element={<Navigate to="/doctor/my-work" replace />} />
+      <Route index element={<Navigate to={v2?'/doctor/home':'/doctor/my-work'} replace />} />
       <Route path="" element={<Navigate to="/doctor/my-work" replace />} />
-      <Route path="dashboard" element={<Navigate to="/doctor/my-work" replace />} />
-      <Route path="my-work" element={<DoctorPortalHome me={me} />} />
+      <Route path="dashboard" element={<Navigate to={v2?"/doctor/home":"/doctor/my-work"} replace />} />
+      <Route path="my-work" element={v2&&canAccessClinical?<AssignedWorklistPage/>:<DoctorPortalHome me={me} />} />
+      <Route path="home" element={v2&&canAccessClinical?<DoctorHomeV2/>:<DoctorPortalHome me={me}/>} />
+      <Route path="reporting" element={v2&&canAccessClinical?<ReportingWorkspacePage/>:<Navigate to="/doctor/my-work" replace/>}/>
+      <Route path="reporting/studies/:studyKey" element={canAccessClinical?<ReportingStudyPage/>:<Navigate to="/doctor/my-work" replace/>}/>
+      <Route path="reporting/reports/:reportId" element={canAccessClinical?<StandaloneReportPage/>:<Navigate to="/doctor/my-work" replace/>}/>
+      <Route path="schedule" element={canAccessClinical?<DoctorScheduleV2/>:<Navigate to="/doctor/my-work" replace/>}/>
       <Route
         path="today-cases"
         element={canAccessClinical ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
@@ -294,7 +305,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="dictation-controls" element={canAccessClinical ? <DictationControlsPage /> : <Navigate to="/doctor/my-work" replace />} />
       <Route
         path="reporting-board"
-        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : canAccessClinical ? <MyReportingWorklistCard /> : <Navigate to="/doctor/my-work" replace />}
+        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="doctor-worklists"
@@ -302,7 +313,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route
         path="reporting-board/saved/:token"
-        element={canAccessClinical ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+        element={canManageRoster ? <DoctorReportingBoardPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="roster-planner"
@@ -426,7 +437,8 @@ function ReportingBoardNotificationsButton() {
   );
 }
 
-function DoctorMobileDrawer({ isOpen, currentPath, navItems, onNavigate, onClose }: {
+function DoctorMobileDrawer({ isOpen, currentPath, navItems, onNavigate, onClose, v2=false }: {
+  v2?:boolean;
   isOpen: boolean;
   currentPath: string;
   navItems: DoctorPortalNavItem[];
@@ -449,11 +461,11 @@ function DoctorMobileDrawer({ isOpen, currentPath, navItems, onNavigate, onClose
           </button>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {navItems.map((item) => {
+          {navItems.map((item,index) => {
             const Icon = item.icon;
-            const active = currentPath === item.path;
+            const active = currentPath === item.path || item.path==='/doctor/reporting'&&currentPath.startsWith('/doctor/reporting/');
             return (
-              <button
+              <Fragment key={item.path}>{v2&&index===4&&<p className="px-3 pt-4 text-xs font-semibold text-muted-foreground">Tools</p>}<button aria-current={active?'page':undefined}
                 key={`${item.path}-${item.label}`}
                 type="button"
                 onClick={() => { onNavigate(item.path); onClose(); }}
@@ -467,7 +479,7 @@ function DoctorMobileDrawer({ isOpen, currentPath, navItems, onNavigate, onClose
                 <Icon size={16} />
                 <span>{item.label}</span>
                 {item.management && <Settings size={13} className="ml-auto opacity-60" />}
-              </button>
+              </button></Fragment>
             );
           })}
         </nav>
@@ -481,6 +493,8 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchSelection, setSearchSelection] = useState<DoctorSearchSelection>(null);
+  const {data:workspaceConfig}=useQuery({queryKey:['doctor-workspace-v2'],queryFn:()=>api<{enabled:boolean}>('/native-reporting/workspace/config'),staleTime:30_000,retry:false});
+  const v2=workspaceConfig?.enabled===true;
   const { data: me, isLoading } = useQuery({
     queryKey: ["doctor", "me"],
     queryFn: fetchDoctorMe,
@@ -502,12 +516,17 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
   }, [location.pathname, location.search, user.role]);
 
   const navigateDoctor = (path: string) => {
-    navigate(resolveModuleNavigationTarget(path, undefined, user.role));
+    requestNavigationWithUnsavedGuard(()=>navigate(resolveModuleNavigationTarget(path, undefined, user.role)));
   };
 
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
-    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV.filter((item) => (item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) && (item.path !== "/doctor/additional-imaging" || me.canAssignProtocols)) : [];
+    const primary:DoctorPortalNavItem[]=v2?[
+      {path:'/doctor/home',label:'Home',icon:LayoutDashboard},{path:'/doctor/my-work',label:'My Worklist',icon:BriefcaseMedical},
+      {path:'/doctor/reporting',label:'Reporting',icon:ClipboardList},{path:'/doctor/schedule',label:'My Schedule',icon:CalendarDays},
+      ...DOCTOR_NAV.filter(i=>!['/doctor/my-work','/doctor/today-cases','/doctor/reporting-board'].includes(i.path)),
+    ]:DOCTOR_NAV;
+    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? primary.filter((item) => (item.path !== '/doctor/reporting-board' || canManageClinicalRoster(me)) && (item.path !== "/doctor/protocols" || canAccessProtocolsPage(me)) && (item.path !== "/doctor/additional-imaging" || me.canAssignProtocols)) : [];
     const byPath = new Map<string, DoctorPortalNavItem>();
     baseNav.forEach((item) => byPath.set(item.path, item));
     if (canManageClinicalRoster(me)) {
@@ -523,7 +542,7 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
       if (item) byPath.set(item.path, item);
     }
     return [...byPath.values()];
-  }, [me]);
+  }, [me,v2]);
 
   if (isLoading) return <LoadingShell />;
 
@@ -590,11 +609,11 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
       <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:grid-cols-[240px_1fr] lg:overflow-hidden">
         <aside className="hidden border-b p-3 lg:block lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
           <nav className="flex flex-col gap-2">
-            {navItems.map((item) => {
+            {navItems.map((item,index) => {
               const Icon = item.icon;
-              const active = location.pathname === item.path;
+              const active = location.pathname === item.path || item.path==='/doctor/reporting'&&location.pathname.startsWith('/doctor/reporting/');
               return (
-                <button
+                <Fragment key={item.path}>{v2&&index===4&&<p className="px-3 pt-4 text-xs font-semibold text-muted-foreground">Tools</p>}<button aria-current={active?'page':undefined}
                   key={`${item.path}-${item.label}`}
                   type="button"
                   onClick={() => navigateDoctor(item.path)}
@@ -608,16 +627,16 @@ export default function DoctorPage({ user, onLogout }: { user: User; onLogout: (
                   <Icon size={16} />
                   <span>{item.label}</span>
                   {item.management && <Settings size={13} className="ml-auto opacity-60" />}
-                </button>
+                </button></Fragment>
               );
             })}
           </nav>
         </aside>
         <main className={`min-w-0 p-4 lg:h-full lg:min-h-0 lg:min-w-0 lg:p-6 ${isReportingBoardRoute ? "lg:overflow-hidden" : "lg:overflow-y-auto lg:overscroll-contain"}`}>
-          <DoctorPortalRoutes me={me} />
+          <DoctorPortalRoutes me={me} v2={v2} />
         </main>
       </div>
-      <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} onNavigate={navigateDoctor} onClose={() => setMobileNavOpen(false)} />
+      <DoctorMobileDrawer isOpen={mobileNavOpen} currentPath={location.pathname} navItems={navItems} v2={v2} onNavigate={navigateDoctor} onClose={() => setMobileNavOpen(false)} />
       {searchSelection ? <DoctorReadOnlyDetailsDrawer
         patientId={searchSelection.patientId}
         appointmentId={searchSelection.kind === "registration" ? searchSelection.appointmentId : null}

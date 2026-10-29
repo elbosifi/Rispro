@@ -24,6 +24,7 @@ import AuditLogSection from "./audit-log-section";
 import SystemDiagnosticsSection from "./system-diagnostics-section";
 import OhifViewerSection from "./ohif-viewer-section";
 import FastPreviewSettingsSection from "./fast-preview-settings-section";
+import ReportingPoliciesSection from './reporting-policies-section';
 import RequestScanAutomationSection from "./request-scan-automation-section";
 import EmailNotificationsSection from "./email-notifications-section";
 import MedGemmaSection from "./medgemma-section";
@@ -56,6 +57,7 @@ import {
   type SettingsSection,
 } from "./settings-page.composition";
 function sectionLabel(t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
+  if(section==='doctor_workspace')return 'Doctor Workspace';
   return t(`settings.section.${section}` as TranslationKey);
 }
 
@@ -245,6 +247,7 @@ export default function SettingsPage() {
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "ohif_viewer" && <OhifViewerSection onReAuthRequired={requestReAuth} />}
             {section === "fast_preview" && <FastPreviewSettingsSection onReAuthRequired={requestReAuth} />}
+            {section === 'doctor_workspace' && <ReportingPoliciesSection onReAuthRequired={requestReAuth}/>}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

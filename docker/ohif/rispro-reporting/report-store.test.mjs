@@ -50,3 +50,19 @@ test('signing an addendum does not erase new text entered while its request is p
   assert.equal(calls.at(-1).body.text,'first signed correction');
   assert.equal(store.getSnapshot().addendumText,'next unsaved correction');assert.equal(store.hasUnsaved(),true);store.destroy();
 });
+
+test('V2 selects shared backend reports, flushes the old report before selection, and signs the selected ID',async()=>{
+  const calls=[],first={...initial,id:42,canEdit:true,canFinalize:true},second={...initial,id:43,canEdit:true,canFinalize:true};
+  const store=createReportStore({contextId:'verified-context',captureViewport:()=>{},locateSource:()=>{},fetcher:async(url,options)=>{
+    const body=options.body?JSON.parse(options.body):null;calls.push({url,body});
+    if(url.includes('/contexts/'))return Response.json({v2:true,appointmentId:null,studyKey:'study',signerUserId:7,canEdit:true,canFinalize:true,report:first,reports:[first,second]});
+    if(url.endsWith('/draft'))return Response.json({...first,revision:2,sections:body.sections});
+    if(url.endsWith('/finalize'))return Response.json({...second,revision:2,status:'final'});
+    return Response.json(second);
+  }});
+  await store.load();assert.equal(calls.length,1);
+  store.edit('findings','saved on first report');await store.selectReport(43);
+  assert.equal(calls[1].url,'/api/native-reporting/reports/42/draft');assert.equal(calls[2].url,'/api/native-reporting/reports/43');
+  await store.finalize();assert.equal(calls.at(-1).url,'/api/native-reporting/reports/43/finalize');assert.equal(calls.at(-1).body.signerUserId,7);
+  assert.equal(calls.some(c=>c.url.includes('/appointments/')),false);store.destroy();
+});

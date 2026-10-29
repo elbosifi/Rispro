@@ -1,5 +1,9 @@
 // Build-time source registration, never a generated-bundle patch.
 const fs = require('fs');
+const shortcutsPath='extensions/rispro-reporting/src/dictation-shared/use-dictation-shortcuts.ts';
+const shortcuts=fs.readFileSync(shortcutsPath,'utf8');
+if(!shortcuts.includes('@/lib/dictation-preferences'))throw Error('RISpro dictation shortcut import changed');
+fs.writeFileSync(shortcutsPath,shortcuts.replace('@/lib/dictation-preferences','./dictation-preferences'));
 const pluginPath = 'platform/app/pluginConfig.json';
 const plugins = JSON.parse(fs.readFileSync(pluginPath));
 plugins.extensions.push({ packageName: '@rispro/extension-reporting' });

@@ -1,4 +1,5 @@
 export type SettingsSection =
+  | "doctor_workspace"
   | "mobile_widget"
   | "menu"
   | "patient_registration"
@@ -43,6 +44,7 @@ export type SettingsMenuSection = Exclude<SettingsSection, "menu">;
 export type SettingsGroup = "all" | "clinical" | "scheduling" | "integrations" | "admin" | "system";
 
 export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
+  "doctor_workspace",
   "mobile_widget",
   "patient_registration",
   "patient_import",
@@ -84,6 +86,7 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
 ];
 
 export const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">> = {
+  doctor_workspace: "clinical",
   mobile_widget: "admin",
   patient_registration: "clinical",
   patient_import: "clinical",
@@ -138,6 +141,7 @@ export function initialSettingsSection(search: string): SettingsSection {
 }
 
 export function isSettingsMenuSectionVisible(section: SettingsMenuSection, role?: string): boolean {
+  if(section==='doctor_workspace'&&role!=='supervisor'&&role!=='super_admin')return false;
   if ((section === "mobile_widget" || section === "fast_preview") && role !== "supervisor" && role !== "super_admin") return false;
   if ((section === "system_diagnostics" || section === "passkey_configuration" || section === "email_notifications" || section === "medical_dictation" || section === "medgemma" || section === "deployment_identity") && role !== "super_admin") {
     return false;

@@ -68,6 +68,8 @@ import {
   updateDoctorReportingWorklist,
 } from "./reporting-board-service.js";
 import { queueDoctorReportingWorklistLinkEmail } from "./doctor-worklist-email-service.js";
+import {requireRosterManager} from './roster-service.js';
+import {readReportingPolicy} from '../reporting/reporting-policy.js';
 
 const router = Router();
 const REPORTING_BOARD_SORT_BY = new Set([
@@ -227,6 +229,7 @@ router.put(
 router.get(
   "/cases",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
+    if((await readReportingPolicy()).enabled)await requireRosterManager(actor(req));
     res.json(await getReportingBoardCases(actor(req), filtersFromQuery(req.query)));
   })
 );
@@ -354,6 +357,7 @@ router.post(
 router.get(
   "/stats",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
+    if((await readReportingPolicy()).enabled)await requireRosterManager(actor(req));
     res.json(await getReportingBoardStats(actor(req), filtersFromQuery(req.query)));
   })
 );

@@ -1235,7 +1235,7 @@ export async function listReportingBoardCaseCandidates(
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
-      left join native_reports native_report on native_report.appointment_id = b.id
+      left join lateral (select nr.* from native_reports nr where nr.appointment_id=b.id and nr.deleted_at is null and (nr.status<>'final' or nr.is_primary) order by (nr.status='final' and nr.is_primary) desc,nr.legacy_primary desc,nr.id limit 1) native_report on true
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)
       left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
@@ -1419,7 +1419,7 @@ export async function listReportingBoardStatsRows(
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
-      left join native_reports native_report on native_report.appointment_id = b.id
+      left join lateral (select nr.* from native_reports nr where nr.appointment_id=b.id and nr.deleted_at is null and (nr.status<>'final' or nr.is_primary) order by (nr.status='final' and nr.is_primary) desc,nr.legacy_primary desc,nr.id limit 1) native_report on true
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join lateral (
         select recall.id, recall.reporting_disposition, recall.original_report_dependency
@@ -1560,7 +1560,7 @@ export async function listReportingBoardCasesByAppointmentIds(appointmentIds: nu
       left join doctor_portal.reporting_board_case_holds reporting_hold on reporting_hold.appointment_id = b.id and reporting_hold.cleared_at is null
       left join users reporting_hold_creator_user on reporting_hold_creator_user.id = reporting_hold.created_by_user_id
       left join doctor_portal.doctor_profiles reporting_hold_creator_doctor on reporting_hold_creator_doctor.id = reporting_hold.created_by_doctor_id
-      left join native_reports native_report on native_report.appointment_id = b.id
+      left join lateral (select nr.* from native_reports nr where nr.appointment_id=b.id and nr.deleted_at is null and (nr.status<>'final' or nr.is_primary) order by (nr.status='final' and nr.is_primary) desc,nr.legacy_primary desc,nr.id limit 1) native_report on true
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
       left join doctor_portal.doctor_profiles finalized_doctor on finalized_doctor.id = coalesce(native_report.finalized_by_doctor_id, cache.finalized_by_doctor_id)
       left join users finalized_doctor_user on finalized_doctor_user.id = finalized_doctor.user_id
@@ -1831,7 +1831,7 @@ export async function bulkPlaceReportingBoardCaseHolds(input: {
         from appointments_v2.bookings b
         left join doctor_portal.reporting_board_manual_final_overrides manual_final
           on manual_final.appointment_id = b.id and manual_final.cleared_at is null
-        left join native_reports native_report on native_report.appointment_id = b.id
+        left join lateral (select nr.* from native_reports nr where nr.appointment_id=b.id and nr.deleted_at is null and (nr.status<>'final' or nr.is_primary) order by (nr.status='final' and nr.is_primary) desc,nr.legacy_primary desc,nr.id limit 1) native_report on true
       left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id = b.id
         where b.id = any($1::bigint[])
         order by b.id

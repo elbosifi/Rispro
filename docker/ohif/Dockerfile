@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY docker/ohif/app-config.js platform/app/public/config/rispro.js
 COPY frontend/public/assets/nccb-logo.png platform/app/public/assets/nccb-logo.png
 COPY docker/ohif/rispro-reporting extensions/rispro-reporting
+COPY frontend/src/hooks/use-audio-recorder.ts frontend/src/hooks/use-dictation-shortcuts.ts frontend/src/lib/dictation-preferences.ts frontend/src/lib/dictation-target.ts frontend/src/lib/medical-dictation-cleanup.ts extensions/rispro-reporting/src/dictation-shared/
 COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
 COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
 COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.cjs

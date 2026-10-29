@@ -1,0 +1,16 @@
+import {useState} from 'react';
+import {useQuery} from '@tanstack/react-query';
+import {Button,Card,LoadingState,ErrorState} from '@/components/shared';
+import {api} from '@/lib/api-client';
+import {reportBase,REPORT_FIELDS,type WorkspaceReport,type ReportSections} from '@/lib/reporting-workspace-api';
+import {changedText} from '@/lib/reporting-revision-diff';
+type Version={id:number;revision:number|null;kind:string;author:string;createdAt:string;snapshot:{sections?:ReportSections;text?:string}};
+export function ReportRevisionHistory({report,onRestore}:{report:WorkspaceReport;onRestore:(revision:number)=>void}) {
+  const query=useQuery({queryKey:['report-revisions',report.id,report.revision],queryFn:()=>api<{versions:Version[];reviews:{id:number;actor_name:string;comment:string;event_type:string;created_at:string}[]}>(reportBase(report.id)+'/history'),retry:false});
+  const [selected,setSelected]=useState<number|null>(null),[against,setAgainst]=useState<number|null>(null);
+  const versions=query.data?.versions||[],current=versions.find(v=>v.id===selected)||versions.at(-1),previous=versions.find(v=>v.id===against)||versions[versions.indexOf(current!)-1];
+  return <Card variant="compact"><h2 className="font-semibold">Revision history and attribution</h2>{query.isLoading&&<LoadingState message="Loading revisions…"/>}{query.error&&<ErrorState message={query.error.message}/>}<div className="my-3 grid gap-3 sm:grid-cols-2"><label className="text-sm">Revision<select className="input-premium block w-full" value={current?.id||''} onChange={e=>setSelected(Number(e.target.value))}>{versions.map(v=><option value={v.id} key={v.id}>{v.kind} {v.revision??'addendum'} · {v.author} · {new Date(v.createdAt).toLocaleString()}</option>)}</select></label><label className="text-sm">Compare with<select className="input-premium block w-full" value={against||''} onChange={e=>setAgainst(Number(e.target.value)||null)}><option value="">Previous revision</option>{versions.filter(v=>v.snapshot.sections).map(v=><option key={v.id} value={v.id}>Revision {v.revision} · {v.author}</option>)}</select></label></div>
+    {current&&<><p className="text-sm">Editor: {current.author} · {new Date(current.createdAt).toLocaleString()}</p>{current.snapshot.sections?(Object.keys(REPORT_FIELDS) as (keyof ReportSections)[]).map(key=>{const d=changedText(previous?.snapshot.sections?.[key]||'',current.snapshot.sections![key]);return <section key={key} className="my-3"><h3 className="text-sm font-semibold">{REPORT_FIELDS[key]}</h3><p className="whitespace-pre-wrap text-sm">{d.prefix}{d.removed&&<del className="bg-red-100 text-red-900">{d.removed}</del>}{d.added&&<ins className="bg-green-100 text-green-900">{d.added}</ins>}{d.suffix}</p></section>;}):<p className="whitespace-pre-wrap">{current.snapshot.text}</p>}{current.kind==='draft'&&current.revision&&<Button variant="secondary" disabled={!report.canRestoreRevision} onClick={()=>onRestore(current.revision!)}>Restore as New Draft Revision</Button>}</>}
+    <ol className="mt-4 space-y-2 text-sm">{query.data?.reviews.map(e=><li key={e.id}><strong>{e.event_type} · {e.actor_name}</strong> · {new Date(e.created_at).toLocaleString()}<p className="whitespace-pre-wrap">{e.comment}</p></li>)}</ol>
+  </Card>;
+}

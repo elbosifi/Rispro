@@ -15,6 +15,10 @@ export const PATIENT_IDENTITY_RECONCILIATION_LABEL = "rispro_patient_identity_re
 export const PATIENT_IDENTITY_RECONCILIATION_SOURCE_LABEL = "rispro_patient_identity_reconciliation_source";
 const LEGACY_AUTHORITATIVE_ORTHANC_AUTOROUTE_ALIAS = /^rispro_autoroute(?:_[2-9][0-9]*)?$/;
 export type AuthoritativeOrthancSettings = { enabled: boolean; autoExportClinicalDocuments: boolean; autoRouteEnabled: boolean; autoRouteDestinationKey: string; autoRouteDestinationKeys: string[]; baseUrl: string; username: string; password: string; timeoutSeconds: number; verifyTls: boolean; displayName: string };
+/** Source identity excludes credentials; changing the archive origin requires reconciliation. */
+export function authoritativeOrthancArchiveKey(settings: Pick<AuthoritativeOrthancSettings,'baseUrl'>): string {
+  return 'orthanc:' + createHash('sha256').update(settings.baseUrl.replace(/\/+$/, '').toLowerCase()).digest('hex');
+}
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
 export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyTime?: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };

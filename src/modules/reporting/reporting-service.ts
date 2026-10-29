@@ -13,31 +13,35 @@ import { createImagingSourceAdapter } from "../ohif-viewer/adapters.js";
 import { EMPTY_SECTIONS, sections, revision, uuid, provenance, validatePng, type ReportSections } from "./reporting-validation.js";
 import { imageDigest, readReportImage, storeReportImage } from "./report-image-storage-service.js";
 
-interface Identity { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string }
+export interface Identity { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string }
 interface ImageRow {
   id: string; report_id: string; stored_path: string; sha256: string; byte_size: number;
   width: number; height: number; provenance: Record<string, unknown>; caption: string; position: number;
   captured_by_user_id: string; created_at: Date; removed: boolean;
 }
-interface ReportRow {
+export interface ReportRow {
   id: string; appointment_id: string; patient_id: string; primary_study_uid: string;
   imaging_source: { accessStrategy: string; sourcePacsNodeId: number | null };
   identity: Identity; status: "draft" | "final"; revision: number; sections: ReportSections;
   author_user_id: string; author_name: string; finalizer_name: string | null;
   finalized_at: Date | null; signed_snapshot: Snapshot | null; finalize_request_id: string | null;
   created_at: Date; updated_at: Date;
+  report_type: string; collaboration_mode: 'independent'|'shared'; is_primary: boolean;
+  last_editor_name: string|null; review_requested_at: Date|null; review_requested_by: string|null;
+  preferred_reviewer_id: number|null; reviewed_by: string|null; deleted_at: Date|null;
+  author_doctor_role?:string;
 }
 interface Snapshot { identity: Identity; sections: ReportSections; keyImages: ReturnType<typeof publicImage>[]; author: string; finalizer: string; signedAt: string }
 const conflict = () => new HttpError(409, "The report changed in another editor. Your unsaved text is retained. Reload the saved report before retrying.");
 function publicImage({ stored_path: _path, report_id: _report, ...safe }: ImageRow) { return safe; }
-async function images(db: Pick<PoolClient,"query">, reportId: string) {
+export async function images(db: Pick<PoolClient,"query">, reportId: string) {
   return (await db.query<ImageRow>("select * from native_report_key_images where report_id=$1 and removed=false order by position,id", [reportId])).rows;
 }
-async function audit(db: PoolClient, actor: Actor, id: string, action: string, rev: number) {
+export async function audit(db: PoolClient, actor: Actor, id: string, action: string, rev: number) {
   await logAuditEntry({ entityType: "native_report", entityId: id, actionType: action,
     newValues: { revision: rev }, changedByUserId: actor.userId }, db);
 }
-async function transaction<T>(work: (db: PoolClient) => Promise<T>) {
+export async function transaction<T>(work: (db: PoolClient) => Promise<T>) {
   const db = await pool.connect();
   try { await db.query("begin"); const result = await work(db); await db.query("commit"); return result; }
   catch (error) { await db.query("rollback"); throw error; } finally { db.release(); }
@@ -80,6 +84,17 @@ async function assertMapping(db: Pick<PoolClient,"query">, session: ViewerLaunch
 }
 export async function resolveReportContext(actor: Actor, contextId: string) {
   const session = await context(actor, contextId);
+  if(session.reportingStudyKey) return (await import('./workspace-viewer-service.js')).workspaceViewerContext(actor,session);
+  if(session.accessStrategy==='authoritative_orthanc'&&(await (await import('./reporting-policy.js')).readReportingPolicy()).enabled) {
+    const indexed=(await pool.query('select orthanc_study_id from historical_pacs_studies where study_instance_uid=$1',[session.studyInstanceUid])).rows;
+    if(indexed.length===1) {
+      const {getWorkspaceStudy}=await import('./workspace-report-service.js');
+      await getWorkspaceStudy(actor,indexed[0].orthanc_study_id);
+      const study=(await pool.query('select id from native_reporting_studies where study_instance_uid=$1 and orthanc_study_id=$2',[session.studyInstanceUid,indexed[0].orthanc_study_id])).rows;
+      if(study.length===1)return (await import('./workspace-viewer-service.js')).workspaceViewerContext(actor,{...session,reportingStudyKey:study[0].id});
+    }
+    throw new HttpError(409,'Reconcile the study in Doctor Workspace V2 before opening the report panel.');
+  }
   const a = await access(actor, session.appointmentId);
   let blockedReason: string | null = null;
   try { assertSource(session,a.configuration); await assertMapping(pool, session); } catch (e) { blockedReason = (e as Error).message; }
@@ -91,27 +106,29 @@ function identity(row: Awaited<ReturnType<typeof access>>["row"]): Identity {
   return { patientName: row.patientEnglishName || row.patientArabicName || "", patientIdentifier: row.patientMrn || row.patientDicomId || "",
     accession: row.accessionNumber, examination: row.examTypeName || row.modalityName, studyDate: row.bookingDate };
 }
-async function response(db: Pick<PoolClient,"query">, report: ReportRow) {
+export interface ReportResponseCache {images:Awaited<ReturnType<typeof images>>;addenda:{id:string;author:string;signedAt:Date|string;text:string}[]}
+export async function response(db: Pick<PoolClient,"query">, report: ReportRow,loaded?:ReportResponseCache) {
   const snapshot = report.signed_snapshot;
-  return { id: Number(report.id), appointmentId: Number(report.appointment_id), revision: report.revision, status: report.status,
+  return { id: Number(report.id), appointmentId: report.appointment_id == null ? null : Number(report.appointment_id), revision: report.revision, status: report.status,
     identity: snapshot?.identity ?? report.identity, sections: snapshot?.sections ?? report.sections,
     author: report.author_name, finalizer: report.finalizer_name, finalizedAt: report.finalized_at,
-    keyImages: snapshot?.keyImages ?? (await images(db, report.id)).map(publicImage), updatedAt: report.updated_at,
-    addenda: (await db.query("select id,actor_name as author,created_at as \"signedAt\",snapshot->>'text' as text from native_report_versions where report_id=$1 and kind='addendum' order by id", [report.id])).rows };
+    keyImages: snapshot?.keyImages ?? (loaded?.images ?? await images(db, report.id)).map(publicImage), updatedAt: report.updated_at,
+    addenda: loaded?.addenda ?? (await db.query("select id,actor_name as author,created_at as \"signedAt\",snapshot->>'text' as text from native_report_versions where report_id=$1 and kind='addendum' order by id", [report.id])).rows };
 }
 export async function getReport(actor: Actor, appointmentId: number) {
   await access(actor, appointmentId);
-  const report = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1", [appointmentId])).rows[0];
+  const report = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1 and deleted_at is null order by (status='final' and is_primary) desc,legacy_primary desc,id limit 1", [appointmentId])).rows[0];
   if (report) await logAuditEntry({entityType:"native_report",entityId:report.id,actionType:"native_report_read",newValues:{revision:report.revision},changedByUserId:actor.userId});
   return report ? response(pool, report) : null;
 }
 export async function createReport(actor: Actor, contextId: string, appointmentId: number) {
+  if((await (await import('./reporting-policy.js')).readReportingPolicy()).enabled) throw new HttpError(409,'Choose a report explicitly in Doctor Workspace V2 or the updated OHIF report selector.');
   const a = await access(actor, appointmentId);
   if (!a.canEdit) throw new HttpError(403, "Native report creation requires an enabled integration and reporting permission for this assigned case.");
   const session = await context(actor, contextId, appointmentId);
   assertSource(session,a.configuration);
   // An existing report is always retrieved, never duplicated or reattached.
-  const existing = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1", [appointmentId])).rows[0];
+  const existing = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1 and deleted_at is null order by (status='final' and is_primary) desc,legacy_primary desc,id limit 1", [appointmentId])).rows[0];
   if (existing) { await assertMapping(pool, session, existing); return response(pool, existing); }
   const sonic = await readSonicDicomReportSettings();
   if (sonic.sonicDicomReportsEnabled) {
@@ -144,21 +161,35 @@ export async function createReport(actor: Actor, contextId: string, appointmentI
       )`, [appointmentId, !currentSonic.sonicDicomReportsEnabled]);
     if (legacy.rows.length) throw new HttpError(409, "This case has external reporting ownership, unverifiable legacy status, or a manual final override.");
     const r = (await db.query<ReportRow>(`insert into native_reports(appointment_id,patient_id,primary_study_uid,imaging_source,identity,sections,author_user_id,author_name)
-      values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(appointment_id) do nothing returning *`,
+      values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(appointment_id) where legacy_primary and deleted_at is null do nothing returning *`,
     [appointmentId, a.row.patientId, session.studyInstanceUid, JSON.stringify({ accessStrategy: session.accessStrategy, sourcePacsNodeId: session.sourcePacsNodeId }),
       JSON.stringify({ ...identity(a.row), studyDate: session.studyDate || a.row.bookingDate }), JSON.stringify(EMPTY_SECTIONS), actor.userId, a.me.profile!.displayName])).rows[0];
-    const report = r ?? (await db.query<ReportRow>("select * from native_reports where appointment_id=$1", [appointmentId])).rows[0];
+    const report = r ?? (await db.query<ReportRow>("select * from native_reports where appointment_id=$1 and legacy_primary and deleted_at is null", [appointmentId])).rows[0];
     await assertMapping(db, session, report);
     if (r) { await history(db, report, actor, a.me.profile!.displayName, "draft"); await audit(db, actor, report.id, "native_report_created", report.revision); }
     return response(db, report);
   });
 }
-async function history(db: PoolClient, report: ReportRow, actor: Actor, name: string, kind: "draft" | "final") {
-  await db.query(`insert into native_report_versions(report_id,revision,kind,snapshot,actor_user_id,actor_name)
-    values($1,$2,$3,$4,$5,$6)`, [report.id, report.revision, kind, JSON.stringify(report.signed_snapshot ?? { identity: report.identity, sections: report.sections, keyImages: (await images(db, report.id)).map(publicImage) }), actor.userId, name]);
+export async function history(db: PoolClient, report: ReportRow, actor: Actor, name: string, kind: "draft" | "final", requestId?:string) {
+  await db.query(`insert into native_report_versions(report_id,revision,kind,snapshot,actor_user_id,actor_name,request_id)
+    values($1,$2,$3,$4,$5,$6,$7)`, [report.id, report.revision, kind, JSON.stringify(report.signed_snapshot ?? { identity: report.identity, sections: report.sections, keyImages: (await images(db, report.id)).map(publicImage) }), actor.userId, name,requestId??null]);
+  await db.query('insert into native_report_contributors(report_id,user_id,display_name) values($1,$2,$3) on conflict do nothing',[report.id,actor.userId,name]);
 }
 async function locked(actor: Actor, contextId: string, appointmentId: number, expected: unknown, sign: boolean,
-  work: (db: PoolClient, report: ReportRow, a: Awaited<ReturnType<typeof access>>, session: ViewerLaunchSessionRecord) => Promise<unknown>, allowFinal = false, retryId?: string) {
+  work: (db: PoolClient, report: ReportRow, a: Pick<Awaited<ReturnType<typeof access>>,'me'|'configuration'> & {row:Pick<Awaited<ReturnType<typeof access>>['row'],'patientDicomId'>}, session: ViewerLaunchSessionRecord) => Promise<unknown>, allowFinal = false, retryId?: string, selectedReportId?:number) {
+  if(selectedReportId) {
+    const {withWorkspaceReport,canEditWorkspaceReport,workspaceReportResponse}=await import('./workspace-report-service.js');
+    return withWorkspaceReport(actor,selectedReportId,expected,async(db,report,a,study)=>{
+      if(!canEditWorkspaceReport(a,report))throw new HttpError(403,'The selected report is not editable.');
+      const session=await context(actor,contextId,undefined,db),configuration=await readOhifViewerConfiguration();
+      assertSource(session,configuration);
+      if(session.studyInstanceUid!==report.primary_study_uid||session.reportingStudyKey&&session.reportingStudyKey!==study.id)throw new HttpError(403,'The selected report is outside this viewer context.');
+      await work(db,report,{me:a.me,configuration,row:{patientDicomId:a.study.patient_id}},session);
+      const updated=(await db.query<ReportRow>('select * from native_reports where id=$1',[report.id])).rows[0];
+      return workspaceReportResponse(db,updated,a,study.orthanc_study_id);
+    },retryId);
+  }
+  if((await (await import('./reporting-policy.js')).readReportingPolicy()).enabled)throw new HttpError(409,'Use report-specific Doctor Workspace V2 actions so current reporting policies are enforced.');
   const expectedRevision = revision(expected);
   const a = await access(actor, appointmentId);
   if (sign ? !a.canFinalize : !a.canEdit) throw new HttpError(403, sign ? "You do not have report finalization permission for this case." : "You do not have report editing permission for this case.");
@@ -168,8 +199,11 @@ async function locked(actor: Actor, contextId: string, appointmentId: number, ex
     if(sign?!currentAccess.canFinalize:!currentAccess.canEdit)throw new HttpError(403,"Reporting access changed before this operation.");
     const session = await context(actor, contextId, appointmentId, db);
     assertSource(session,currentAccess.configuration);
-    const report = (await db.query<ReportRow>("select * from native_reports where appointment_id=$1 for update", [appointmentId])).rows[0];
+    const report = (await db.query<ReportRow>("select * from native_reports where appointment_id=$1 and legacy_primary and deleted_at is null for update", [appointmentId])).rows[0];
     if (!report) throw new HttpError(404, "Create a RISpro report explicitly before editing.");
+    if((await db.query('select 1 from native_report_study_links where report_id=$1',[report.id])).rowCount &&
+      ((await (await import('./reporting-policy.js')).readReportingPolicy(db)).enabled || 'archiveKey' in report.imaging_source))
+      throw new HttpError(409,'Use report-specific Doctor Workspace V2 actions for this report.');
     await assertMapping(db, session, report);
     const retry = retryId && (report.finalize_request_id === retryId || (await db.query("select 1 from native_report_key_images where id=$1 and report_id=$2",[retryId,report.id])).rows.length > 0);
     if (!retry && report.revision !== expectedRevision) throw conflict();
@@ -191,7 +225,7 @@ export async function finalizeReport(actor: Actor, contextId: string, appointmen
   const requestId = uuid(body.requestId);
   // A retry must still satisfy current access/context checks, but may carry the pre-sign revision.
   const current = await getReport(actor, appointmentId);
-  const prior = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1", [appointmentId])).rows[0];
+  const prior = (await pool.query<ReportRow>("select * from native_reports where appointment_id=$1 and legacy_primary and deleted_at is null", [appointmentId])).rows[0];
   const expected = prior?.finalize_request_id === requestId ? current?.revision : body.expectedRevision;
   return locked(actor, contextId, appointmentId, expected, true, async (db, report, a) => {
     if (report.status === "final") {
@@ -232,7 +266,7 @@ export async function getReportHistory(actor: Actor, appointmentId: number) {
     from native_report_versions v join native_reports r on r.id=v.report_id where r.appointment_id=$1 order by v.id`, [appointmentId])).rows;
 }
 
-export async function uploadKeyImage(actor: Actor, contextId: string, appointmentId: number, body: Record<string, unknown>, bytes: Buffer) {
+export async function uploadKeyImage(actor: Actor, contextId: string, appointmentId: number, body: Record<string, unknown>, bytes: Buffer, selectedReportId?:number) {
   const requestId = uuid(body.requestId);
   const source = provenance(body.provenance);
   const dimensions = await validatePng(bytes);
@@ -268,7 +302,7 @@ export async function uploadKeyImage(actor: Actor, contextId: string, appointmen
       await audit(db, actor, report.id, "native_report_image_added", saved.revision);
       return await response(db, saved);
     } catch (error) { await fs.unlink(stored.absolutePath).catch(() => undefined); throw error; }
-  }, false, requestId).catch(async error => {
+  }, false, requestId,selectedReportId).catch(async error => {
     if (staged) {
       // Resolve an uncertain COMMIT before deleting bytes; never delete a referenced asset.
       const file: { storedPath: string; absolutePath: string } = staged;
@@ -278,7 +312,7 @@ export async function uploadKeyImage(actor: Actor, contextId: string, appointmen
     throw error;
   });
 }
-export async function updateKeyImages(actor: Actor, contextId: string, appointmentId: number, body: Record<string, unknown>) {
+export async function updateKeyImages(actor: Actor, contextId: string, appointmentId: number, body: Record<string, unknown>, selectedReportId?:number) {
   return locked(actor, contextId, appointmentId, body.expectedRevision, false, async (db, report, a) => {
     const selected = body.images as { id: string; caption: string }[];
     const current = await images(db, report.id);
@@ -291,7 +325,7 @@ export async function updateKeyImages(actor: Actor, contextId: string, appointme
     await history(db,saved,actor,a.me.profile!.displayName,"draft");
     await audit(db,actor,report.id,"native_report_images_updated",saved.revision);
     return response(db,saved);
-  });
+  },false,undefined,selectedReportId);
 }
 export async function getKeyImage(actor: Actor, appointmentId: number, imageId: string) {
   await access(actor,appointmentId);
