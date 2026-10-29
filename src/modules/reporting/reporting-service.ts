@@ -292,7 +292,7 @@ export async function uploadKeyImage(actor: Actor, contextId: string, appointmen
     staged = stored;
     try {
       const durable = { ...source, imagingSource: report.imaging_source, sourceStudyDate: String(tag(candidates[0],"00080020") || ""),
-        sourceSeriesDescription: String(tag(candidates[0],"0008103E") || ""), prior: source.studyInstanceUid !== session.studyInstanceUid,
+        sourceSeriesDescription: String(tag(candidates[0],"0008103E") || ""), prior: !session.currentStudyUids.includes(source.studyInstanceUid),
         capturedByUserId: actor.userId, capturedAt: new Date().toISOString() };
       await db.query(`insert into native_report_key_images(id,report_id,stored_path,sha256,byte_size,width,height,provenance,position,captured_by_user_id)
         values($1,$2,$3,$4,$5,$6,$7,$8,(select coalesce(max(position),0)+1 from native_report_key_images where report_id=$2),$9)`,

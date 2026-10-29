@@ -100,12 +100,11 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
     if (!enabled || state === 'ready' || !cornerstoneViewportService) return;
     let alive = true;
     const pending = new Set();
-    const primary = StudyInstanceUIDs[0];
     const selected = () => {
       const candidates = [activeViewportId, ...viewports.keys()];
       for (const id of candidates) {
         const ds = viewports.get(id)?.displaySetInstanceUIDs?.map(uid => displaySetService.getDisplaySetByUID(uid));
-        if (ds?.some(ds => ds?.StudyInstanceUID === primary && !ds.unsupported &&
+        if (ds?.some(ds => StudyInstanceUIDs.includes(ds?.StudyInstanceUID) && !ds.unsupported &&
             !['SR', 'SEG', 'RTSTRUCT', 'RTPLAN', 'RTDOSE', 'DOC', 'PMAP'].includes(ds.Modality))) {
           return cornerstoneViewportService.getCornerstoneViewport(id);
         }
@@ -401,5 +400,5 @@ function configureViewer(root) {
   fs.writeFileSync(hp, source.replace(anchor, anchor + '\n' + diagnosticSeriesRules.map(rule => JSON.stringify(rule) + ',').join('\n')));
 }
 
-module.exports = { configureViewer, configureUsability, fullDynamicRange, isWindowingInput, ctPresets, configureLoading, trackCachedFrames, isDiagnosticReady, getStudiesForPatientByMRN, diagnosticSeriesRules };
+module.exports = { configureViewer, configureUsability, fullDynamicRange, isWindowingInput, ctPresets, configureLoading, loadingSource, trackCachedFrames, isDiagnosticReady, getStudiesForPatientByMRN, diagnosticSeriesRules };
 if (require.main === module) configureViewer(process.cwd());

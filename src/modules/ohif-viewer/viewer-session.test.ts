@@ -45,6 +45,15 @@ describe("OHIF viewer launch/session tokens", () => {
     assert.ok(await findAuthorizedViewerSession("viewer-hash", 10, db));
   });
 
+  it("retains multiple current acquisitions separately from authorized priors across token exchange", async () => {
+    const current = ["1.2.840.42", "1.2.840.43"];
+    const row = session({ current_study_uids: current, permitted_study_uids: [...current, "1.2.840.1"] });
+    const db = memoryExecutor(row);
+    const exchanged = await consumeViewerLaunchToken("launch-hash", 10, "viewer-hash", new Date(Date.now() + 60_000), db);
+    assert.deepEqual(exchanged?.currentStudyUids, current);
+    assert.deepEqual((await findAuthorizedViewerSession("viewer-hash", 10, db))?.permittedStudyUids, [...current, "1.2.840.1"]);
+  });
+
   it("rejects expired, wrong-user, and revoked session access", async () => {
     const expired = memoryExecutor(session({ expires_at: new Date(Date.now() - 1_000).toISOString() }));
     const viewerSessionExpiresAt = new Date(Date.now() + 3_600_000);

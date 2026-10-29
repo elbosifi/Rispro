@@ -17,6 +17,7 @@ window.config = {
   routerBasename: '/ohif',
   showStudyList: false,
   showLoadingIndicator: true,
+  investigationalUseDialog: { option: 'never' },
   whiteLabeling: {
     createLogoComponentFn: React => React.createElement('div', {
       style: { display: 'flex', alignItems: 'center', gap: '6px', height: '32px' },

@@ -116,6 +116,30 @@ const archive = {
 };
 
 describe("AuthoritativeOrthancSourceAdapter", () => {
+  it("reads all accession pages, retains rejected rows, and maps issuer, time and all modalities", async () => {
+    const offsets: number[] = [];
+    globalThis.fetch = async input => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("AccessionNumber"), "ACC-42");
+      assert.equal(url.searchParams.get("includefield"), "all");
+      const offset = Number(url.searchParams.get("offset")); offsets.push(offset);
+      return Response.json(Array.from({ length: offset === 0 ? 100 : 2 }, (_, i) => ({
+        "00080050": { Value: ["ACC-42"] }, "00100020": { Value: ["P-42"] }, "00100021": { Value: ["ISSUER"] },
+        "0020000D": { Value: [offset === 100 && i === 1 ? "" : `1.2.${offset + i + 1}`] },
+        "00080061": { Value: ["MR", "CT"] }, "00080030": { Value: ["235500"] },
+      })));
+    };
+    const studies = await new AuthoritativeOrthancSourceAdapter(archive).searchStudyByAccession("ACC-42");
+    assert.equal(studies.length, 102); assert.deepEqual(offsets, [0, 100]);
+    assert.equal(studies[0]?.modality, "MR\\CT"); assert.equal(studies[0]?.patientIdIssuer, "ISSUER");
+    assert.equal(studies[0]?.studyTime, "235500"); assert.equal(studies[101]?.studyInstanceUid, "");
+  });
+  it("accepts an empty accession result and fails closed on repeated pages", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 204 });
+    assert.deepEqual(await new AuthoritativeOrthancSourceAdapter(archive).searchStudyByAccession("ACC-42"), []);
+    globalThis.fetch = async () => Response.json(Array.from({ length: 100 }, (_, i) => ({ "0020000D": { Value: [`1.2.${i + 1}`] } })));
+    await assert.rejects(() => new AuthoritativeOrthancSourceAdapter(archive).searchStudyByAccession("ACC-42"), /pagination repeated/);
+  });
   it("reads current studies, priors, metadata, and frames directly with archive credentials", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     globalThis.fetch = async (input, init) => {

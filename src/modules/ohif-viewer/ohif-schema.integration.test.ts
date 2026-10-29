@@ -9,14 +9,22 @@ const { pool } = await import("../../db/pool.js");
 after(async () => { await pool.end(); });
 
 describe("OHIF schema integration", () => {
+  it("persists current acquisitions separately from the complete authorization allowlist", async () => {
+    const column = (await pool.query("select data_type,column_default,is_nullable from information_schema.columns where table_schema='public' and table_name='viewer_launch_sessions' and column_name='current_study_uids'")).rows[0];
+    assert.equal(column.data_type, "jsonb");
+    assert.equal(column.is_nullable, "NO");
+    assert.equal(column.column_default, "'[]'::jsonb");
+    assert.equal((await pool.query("select count(*)::int n from viewer_launch_sessions where not (permitted_study_uids @> current_study_uids)")).rows[0].n, 0);
+  });
   it("keeps native reporting opt-in with unique appointment ownership and protected history/image tables",async()=>{
     const column=(await pool.query("select column_default from information_schema.columns where table_schema='public' and table_name='ohif_viewer_settings' and column_name='native_reporting_enabled'")).rows[0];
     assert.match(column.column_default,/false/);
     for(const name of ["native_reports","native_report_versions","native_report_key_images"]){
       assert.equal((await pool.query("select to_regclass($1) is not null present",[name])).rows[0].present,true);
     }
-    const unique=(await pool.query("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='native_reports'::regclass and contype='u'")).rows;
-    assert.ok(unique.some(row=>row.definition==="UNIQUE (appointment_id)"));
+    const unique=(await pool.query("select indexdef from pg_indexes where schemaname='public' and tablename='native_reports' and indexname='native_reports_legacy_appointment_idx'")).rows;
+    assert.equal(unique.length, 1);
+    assert.match(unique[0].indexdef, /CREATE UNIQUE INDEX .*\(appointment_id\) WHERE \(legacy_primary AND \(deleted_at IS NULL\)\)/);
     const triggers=(await pool.query("select tgname from pg_trigger where tgrelid in ('native_reports'::regclass,'native_report_versions'::regclass,'native_report_key_images'::regclass) and not tgisinternal")).rows;
     assert.equal(triggers.length,3);
   });

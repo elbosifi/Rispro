@@ -15,6 +15,7 @@ describe("OHIF runtime configuration", () => {
     vm.runInNewContext(source, context);
     assert.equal(context.window.config?.showStudyList, false);
     assert.equal(context.window.config?.defaultDataSourceName, "risproDicomWeb");
+    assert.equal((context.window.config?.investigationalUseDialog as { option: string }).option, "never");
   });
   it("keeps the DICOMweb selector separate in two viewer tabs", async () => {
     const source = await fs.readFile(appConfigPath,"utf8");

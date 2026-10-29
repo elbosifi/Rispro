@@ -21,6 +21,7 @@ export interface ImagingStudy {
   modality: string;
   studyDescription: string;
   studyDate: string;
+  studyTime?: string;
   studyInstanceUid: string;
 }
 
@@ -92,6 +93,23 @@ export interface StudyMatchResult {
   study: ImagingStudy | null;
   candidateCount: number;
   rejectedPatientMismatchCount: number;
+  studies?: ImagingStudy[];
+  diagnostic?: ExaminationMatchDiagnostic;
+}
+
+export interface ExaminationMatchDiagnostic {
+  reason: "matched" | "no_accession_studies" | "accession_mismatch" | "invalid_study_uid" | "patient_mismatch" | "identity_missing" | "identity_conflict" | "issuer_conflict" | "manual_review";
+  rawCandidateCount: number;
+  exactAccessionCount: number;
+  invalidUidCount: number;
+  rejectedPatientMismatchCount: number;
+  missingPatientIdCount: number;
+  currentStudyCount: number;
+}
+
+export interface ExaminationMatchResult extends StudyMatchResult {
+  studies: ImagingStudy[];
+  diagnostic: ExaminationMatchDiagnostic;
 }
 
 export interface ImagingSourceAdapter {
@@ -112,6 +130,7 @@ export interface ViewerLaunchReadyResponse {
   launchUrl: string;
   openMode: OhifOpenMode;
   currentStudy: { studyInstanceUid: string };
+  currentStudyUids?: string[];
   priorStudies: Array<Pick<ImagingStudy, "studyInstanceUid" | "studyDate" | "modality" | "studyDescription" | "accessionNumber">>;
   priorStudyCount: number;
 }
@@ -120,4 +139,5 @@ export type ViewerLaunchResponse = ViewerLaunchReadyResponse | {
   status: Exclude<ViewerLaunchStatus, "ready">;
   message: string;
   retrievalJobId?: number;
+  diagnostic?: ExaminationMatchDiagnostic;
 };

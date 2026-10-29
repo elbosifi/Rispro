@@ -39,9 +39,14 @@ function dicomJsonStudy(value: unknown): ImagingStudy {
     patientIdIssuer: firstString(dataset["00100021"] ?? dataset.IssuerOfPatientID),
     patientName: firstString(dataset["00100010"] ?? dataset.PatientName),
     accessionNumber: firstString(dataset["00080050"] ?? dataset.AccessionNumber),
-    modality: firstString(dataset["00080061"] ?? dataset["00080060"] ?? dataset.ModalitiesInStudy ?? dataset.Modality),
+    modality: (() => {
+      const value = dataset["00080061"] ?? dataset["00080060"] ?? dataset.ModalitiesInStudy ?? dataset.Modality;
+      const values = value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord).Value : value;
+      return Array.isArray(values) ? values.map(firstString).filter(Boolean).join("\\") : firstString(value);
+    })(),
     studyDescription: firstString(dataset["00081030"] ?? dataset.StudyDescription),
     studyDate: firstString(dataset["00080020"] ?? dataset.StudyDate),
+    studyTime: firstString(dataset["00080030"] ?? dataset.StudyTime),
     studyInstanceUid: firstString(dataset["0020000D"] ?? dataset.StudyInstanceUID),
   };
 }
@@ -181,6 +186,23 @@ export class AuthoritativeOrthancSourceAdapter extends DicomWebSourceAdapter {
     assertAuthoritativeOrthancConfigured(settings);
     const root = joinUrl(settings.baseUrl, "/dicom-web");
     super("authoritative_orthanc", { qidoRoot: root, wadoRsRoot: root, timeoutSeconds: settings.timeoutSeconds, verifyTls: settings.verifyTls }, () => authoritativeHeaders(settings));
+  }
+
+  async searchStudyByAccession(accessionNumber: string): Promise<ImagingStudy[]> {
+    const studies: ImagingStudy[] = [];
+    const pages = new Set<string>();
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      const params = new URLSearchParams({ AccessionNumber: accessionNumber, includefield: "all", limit: String(limit), offset: String(offset) });
+      const payload = await this.json(`${this.endpoint.qidoRoot}/studies?${params}`, "QIDO accession search", true);
+      if (!Array.isArray(payload)) throw new ImagingSourceError("malformed", "QIDO accession search did not return an array.");
+      const signature = JSON.stringify(payload);
+      if (payload.length && pages.has(signature)) throw new ImagingSourceError("malformed", "QIDO accession pagination repeated a page.");
+      pages.add(signature);
+      // Retain malformed UID/identity rows for the matching diagnostics.
+      studies.push(...payload.map(dicomJsonStudy));
+      if (payload.length < limit) return studies;
+    }
   }
 
   async searchStudiesByPatient(patientId: string): Promise<ImagingStudy[]> {

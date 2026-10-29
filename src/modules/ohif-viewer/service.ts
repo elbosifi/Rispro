@@ -28,7 +28,7 @@ import {
   updatePacsWebDiagnostic,
   upsertStudyResolution,
 } from "./repository.js";
-import type { ImagingStudy, OhifAccessStrategy, OhifAuthType, OhifViewerConfiguration, ViewerLaunchResponse } from "./types.js";
+import type { ImagingStudy, OhifAccessStrategy, OhifAuthType, OhifViewerConfiguration, StudyMatchResult, ViewerLaunchResponse } from "./types.js";
 import {
   assertSameDicomWebOrigin,
   createLaunchToken,
@@ -36,6 +36,7 @@ import {
   hashLaunchToken,
   isValidDicomUid,
   matchStudyByAccession,
+  matchAuthoritativeExamination,
   normalizeDicomWebUrl,
   normalizeEnvironmentKey,
   normalizeViewerBasePath,
@@ -206,7 +207,7 @@ async function auditLaunch(actor: Actor, appointmentId: number, status: string, 
 async function resolveCurrentStudy(input: {
   appointmentId: number; accessionNumber: string; patientId: string | null; modality: string; studyDate: string;
   persistedStudyUid: string | null; sourcePacsNodeId: number | null; adapter: Awaited<ReturnType<typeof createImagingSourceAdapter>>;
-}) {
+}): Promise<StudyMatchResult> {
   const persisted = await findStudyResolution(input.appointmentId, input.sourcePacsNodeId);
   const candidateUid = persisted?.studyInstanceUid || (isValidDicomUid(input.persistedStudyUid) ? input.persistedStudyUid : null);
   if (input.adapter.strategy !== "authoritative_orthanc" && candidateUid && await input.adapter.verifyStudyAvailable(candidateUid)) {
@@ -221,6 +222,7 @@ async function resolveCurrentStudy(input: {
     return { status: "matched" as const, study, candidateCount: 1, rejectedPatientMismatchCount: 0 };
   }
   const studies = await input.adapter.searchStudyByAccession(input.accessionNumber);
+  if (input.adapter.strategy === "authoritative_orthanc") return matchAuthoritativeExamination({ ...input, studies, preferredPrimaryUid: candidateUid });
   return matchStudyByAccession({ studies, accessionNumber: input.accessionNumber, patientId: input.patientId, modality: input.modality, studyDate: input.studyDate });
 }
 
@@ -246,16 +248,30 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
     });
     if (matched.status !== "matched" || !matched.study) {
       const status = matched.status === "ambiguous" ? "ambiguous" : "not_found";
-      await auditLaunch(actor, appointmentId, status, { candidateCount: matched.candidateCount, rejectedPatientMismatchCount: matched.rejectedPatientMismatchCount });
-      logger.warn("viewer_accession_resolution_failed", { appointmentId, status, candidateCount: matched.candidateCount, durationMs: Math.round(performance.now() - started) });
-      return { status, message: failureMessage(status) };
+      const diagnostic = matched.diagnostic;
+      await auditLaunch(actor, appointmentId, status, { candidateCount: matched.candidateCount, rejectedPatientMismatchCount: matched.rejectedPatientMismatchCount, diagnostic });
+      logger.warn("viewer_accession_resolution_failed", { appointmentId, status, candidateCount: matched.candidateCount, diagnostic, durationMs: Math.round(performance.now() - started) });
+      const messages = {
+        no_accession_studies: "No studies were found for this accession on the configured OHIF image source.",
+        accession_mismatch: "The image source returned studies without the exact examination accession. Review the archive metadata.",
+        invalid_study_uid: "Accession studies contain an invalid or missing StudyInstanceUID. Review the archive metadata before opening this examination.",
+        patient_mismatch: "Studies were found for this accession, but PatientID does not match the RISpro patient. Resolve the patient mapping before opening images.",
+        identity_missing: "PatientID is missing from RISpro or an accession study. Patient identity must be verified before opening images.",
+        identity_conflict: "Studies for this accession have conflicting patient identities. Resolve the conflict before opening images.",
+        issuer_conflict: "Accession studies have conflicting or incomplete PatientID issuers. Resolve the identity conflict before opening images.",
+        manual_review: "Multiple accession studies require manual review: modality, study date or acquisition metadata does not safely establish one examination.",
+        matched: failureMessage(status),
+      };
+      return { status, message: diagnostic ? messages[diagnostic.reason] : failureMessage(status), diagnostic };
     }
     const currentStudy = matched.study;
+    const currentStudies = matched.studies ?? [currentStudy];
+    const currentStudyUids = currentStudies.map(study => study.studyInstanceUid);
     await upsertStudyResolution({
       appointmentId, accessionNumber: row.accessionNumber, patientIdValue: row.patientDicomId,
       study: currentStudy, sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
       resolutionMethod: adapter.strategy === "orthanc_gateway" ? "orthanc_remote_query" : "exact_accession",
-      diagnostic: { candidateCount: matched.candidateCount, rejectedPatientMismatchCount: matched.rejectedPatientMismatchCount },
+      diagnostic: { candidateCount: matched.candidateCount, rejectedPatientMismatchCount: matched.rejectedPatientMismatchCount, currentStudyUids },
     });
     await logAuditEntry({ entityType: "study_source_resolution", entityId: appointmentId, actionType: "ohif_study_resolved", newValues: {
       status: "successful", appointmentId, sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
@@ -276,7 +292,10 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
       if (adapter.strategy !== "authoritative_orthanc" || (currentStudy.patientId && currentStudy.patientId.trim() === row.patientDicomId.trim())) {
         const candidates = await adapter.searchStudiesByPatient(adapter.strategy === "authoritative_orthanc" ? currentStudy.patientId : row.patientDicomId);
         priors = adapter.strategy === "authoritative_orthanc"
-          ? selectPatientHistory(candidates, currentStudy, row.patientDicomId)
+          ? selectPatientHistory(candidates, currentStudy, row.patientDicomId, currentStudyUids)
+            // An acquisition arriving between the two queries requires a fresh
+            // examination match; it must not be authorized as patient history.
+            .filter(study => study.accessionNumber.trim() !== row.accessionNumber.trim())
           : selectPriorStudies({ studies: candidates, currentStudy, patientId: row.patientDicomId, maxPriors: configuration.settings.maxPriorStudies });
       }
       if (adapter.strategy === "orthanc_gateway") {
@@ -298,20 +317,21 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
         }
       }
     }
-    const permittedStudyUids = [currentStudy.studyInstanceUid, ...priors.map((study) => study.studyInstanceUid)];
+    const permittedStudyUids = [...new Set([...currentStudyUids, ...priors.map((study) => study.studyInstanceUid)])];
     const { token, tokenHash } = createLaunchToken();
     const expiresAt = new Date(Date.now() + configuration.settings.launchTokenTtlSeconds * 1000);
     await createViewerLaunchSession({
       patientId: row.patientId, studyDate: currentStudy.studyDate,
       userId: actor.userId, appointmentId, sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
       accessStrategy: configuration.settings.accessStrategy, currentStudyUid: currentStudy.studyInstanceUid,
-      permittedStudyUids, tokenHash, expiresAt,
+      currentStudyUids, permittedStudyUids, tokenHash, expiresAt,
     });
-    await auditLaunch(actor, appointmentId, "ready", { priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
-    logger.info("viewer_launch_ready", { appointmentId, priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
+    await auditLaunch(actor, appointmentId, "ready", { currentStudyCount: currentStudyUids.length, priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
+    logger.info("viewer_launch_ready", { appointmentId, currentStudyCount: currentStudyUids.length, priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
     return {
       status: "ready", launchUrl: `/api/ohif/launch/${encodeURIComponent(token)}`, openMode: configuration.settings.openMode,
       currentStudy: { studyInstanceUid: currentStudy.studyInstanceUid },
+      currentStudyUids,
       priorStudies: priors.map(({ studyInstanceUid, studyDate, modality, studyDescription, accessionNumber }) => ({ studyInstanceUid, studyDate, modality, studyDescription, accessionNumber })),
       priorStudyCount: priors.length,
     };
@@ -354,10 +374,10 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   });
   const configuration = await readOhifViewerConfiguration();
   const basePath = normalizeViewerBasePath(configuration.settings.ohifPublicBaseUrl, env.ohifPublicBaseUrl);
-  const primary = encodeURIComponent(session.studyInstanceUid);
-  const priors = session.permittedStudyUids.filter(uid => uid !== session.studyInstanceUid).map(encodeURIComponent).join(",");
-  // OHIF eagerly initializes every StudyInstanceUIDs entry. Keep priors in the
-  // authorized study browser for explicit loading, without granting new access.
+  const primary = session.currentStudyUids.map(encodeURIComponent).join(",");
+  const priors = session.permittedStudyUids.filter(uid => !session.currentStudyUids.includes(uid)).map(encodeURIComponent).join(",");
+  // OHIF initializes and classifies every StudyInstanceUIDs entry as current.
+  // Only genuine priors remain in the authorized browser for explicit loading.
   const delivery = env.ohifNativeDeliveryEnabled && session.accessStrategy === "authoritative_orthanc" ? "&risproDelivery=native" : "";
   const studySelector = session.accessStrategy === "authoritative_orthanc"
     ? "&risproSessionStudies=1"

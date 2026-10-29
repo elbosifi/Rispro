@@ -9,7 +9,7 @@ test('minified ONNX initializer works in async chunks/workers and rejects a lost
   verifyMinifiedOnnxGuard(source, 'synthetic-minified.js');
   assert.throws(() => verifyMinifiedOnnxGuard(source.replace('typeof __filename<"u"', 'true'), 'broken.js'), /__filename is not defined/);
 });
-const { configureLoading, trackCachedFrames, isDiagnosticReady } = require('./configure-viewer.cjs');
+const { configureLoading, loadingSource, trackCachedFrames, isDiagnosticReady } = require('./configure-viewer.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -226,6 +226,26 @@ test('pinned loading patches fail closed if the upstream layout changes', () => 
     fs.writeFileSync(path.join(root,'extensions/default/src/ViewerLayout/index.tsx'),'upstream changed');
     assert.throws(()=>configureLoading(root),/Pinned OHIF loading integration changed/);
   } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test('first-image readiness accepts any current acquisition and never a genuine prior', () => {
+  const source=loadingSource.slice(loadingSource.indexOf('export function useFirstDiagnosticImage'),loadingSource.indexOf('export function InitialImageLoading')).replace('export function','function');
+  for(const [study,expected] of [['1.2.1',true],['1.2.2',true],['1.2.9',false]]){
+    const states=[];
+    const viewport={viewportStatus:'rendered',getCurrentImageId:()=>study,getCornerstoneImage:()=>({imageId:study,getPixelData:()=>new Uint16Array([1])})};
+    const servicesManager={services:{
+      cornerstoneViewportService:{getCornerstoneViewport:()=>viewport,EVENTS:{VIEWPORT_DATA_CHANGED:'changed'},subscribe:()=>({unsubscribe(){}})},
+      displaySetService:{getDisplaySetByUID:()=>({StudyInstanceUID:study,Modality:'MR'})},
+    }};
+    const hook=vm.runInNewContext(source+';useFirstDiagnosticImage',{
+      useViewportGrid:()=>[{activeViewportId:'active',viewports:new Map([['active',{displaySetInstanceUIDs:['set']}]])}],
+      useImageViewer:()=>({StudyInstanceUIDs:['1.2.1','1.2.2']}),useState:()=>['loading',s=>states.push(s)],useLayoutEffect:effect=>effect(),
+      isDiagnosticReady,Enums:{ViewportStatus:{RENDERED:'rendered'},Events:{},ViewportType:{STACK:'stack'}},
+      document:new EventTarget(),eventTarget:new EventTarget(),cache:{getImageLoadObject:()=>null},
+    });
+    hook(servicesManager,true);
+    assert.equal(states.includes('ready'),expected);
+  }
 });
 
 test('all bootstrap scripts opt out of CDN script rewriting before src without changing their load order',()=>{

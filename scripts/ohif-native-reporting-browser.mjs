@@ -41,6 +41,7 @@ const transportCounts={proxyFrames:0,authorizations:0};
 let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const responsive=process.env.OHIF_RESPONSIVE==='1';
+const multiStudy=process.env.OHIF_MULTI_STUDY==='1';
 const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1';let workspaceFixture;
 // Keep native responsive discovery/callbacks on the same Docker network too;
 // Windows published-port hairpins can stall a prior QIDO and leave the panel empty.
@@ -101,6 +102,8 @@ try{
       // presentation restoration. Keep the established regression fixtures intact.
       if(responsive && seriesNo===2)Object.assign(ds,{WindowCenter:420,WindowWidth:900});
       if(seriesNo===3 || renderingStress&&seriesNo===4)Object.assign(ds,{StudyInstanceUID:c.study+'.'+(seriesNo+5),StudyDate:new Date(Date.now()-86400000*(seriesNo-2)).toISOString().slice(0,10).replaceAll('-',''),StudyDescription:'SYNTHETIC '+modality+' PRIOR '+seriesNo,AccessionNumber:'SYNTHETIC-PRIOR-'+appointmentId+'-'+seriesNo});
+      // Preserve the original series UID while acquiring under a second study.
+      if(multiStudy && seriesNo===2){c.additionalStudy=c.study+'.7';Object.assign(ds,{StudyInstanceUID:c.additionalStudy,StudyDescription:'SYNTHETIC '+modality+' ADDITIONAL ACQUISITION'});}
       if(renderingStress&&seriesNo===0)Object.assign(ds,{Modality:'OT',SeriesDescription:'Request Documents',ImageType:['DERIVED','SECONDARY']});
       if(modality==='MR')Object.assign(ds,{ScanningSequence:'SE',SequenceVariant:'NONE',ScanOptions:'',MRAcquisitionType:'2D',RepetitionTime:600,EchoTime:15,EchoNumbers:1,MagneticFieldStrength:1.5});
       if(!renderingStress&&seriesNo===4){
@@ -175,7 +178,14 @@ try{
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(process.env.OHIF_NATIVE_AUTH_ACCEPTANCE==='1'){
+  if(multiStudy){
+    const {runMultiStudyAcceptance}=await import('./ohif-multi-study-browser.mjs');
+    await runMultiStudyAcceptance({context,cases,origin,temp,pool,nativeDelivery,backendOrigin:'http://127.0.0.1:'+appPort,
+      launch:async(c,includePriors)=>{
+        const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors}});
+        assert.equal(response.status(),200);return response.json();
+      }});
+  }else if(process.env.OHIF_NATIVE_AUTH_ACCEPTANCE==='1'){
     const {runAuthenticatedNativeAcceptance}=await import('./ohif-native-authenticated-acceptance.mjs');
     await runAuthenticatedNativeAcceptance({browser,cases,origin,backendOrigin:'http://127.0.0.1:'+appPort,archive,archiveRequest,pool,env,temp,login,userId,doctorId,
       logs:()=>containers.map(name=>dockerLogs(name)).join('\n'),

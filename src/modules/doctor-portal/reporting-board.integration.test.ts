@@ -4393,7 +4393,7 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     assert.equal(savedConfiguration.configuration.settings.selectedPacsNodeId, null);
     assert.equal(savedConfiguration.configuration.authoritativeOrthanc.configured, true);
     assert.equal(JSON.stringify(savedConfiguration).includes("test-secret"), false);
-    let resultMode: "normal" | "wrong_patient" | "ambiguous" | "missing" | "offline" = "normal";
+    let resultMode: "normal" | "grouped_two" | "grouped_three" | "wrong_patient" | "ambiguous" | "missing" | "offline" = "normal";
     const calls: string[] = [];
     const current = { "00080050": { Value: [accession] }, "00100020": { Value: [patientId] }, "0020000D": { Value: [uid] }, "00080020": { Value: [addDays(1).replaceAll("-", "")] }, "00080061": { Value: ["CT"] } };
     const series = Array.from({ length: 20 }, (_, index) => ({ ...current, "0020000E": { Value: [`${uid}.${index + 1}`] } }));
@@ -4438,13 +4438,18 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
       if (url.pathname.endsWith("/metadata")) return Response.json([current]);
       assert.equal(url.pathname, "/dicom-web/studies");
       if (url.searchParams.has("PatientID")) return Response.json([current,
+        { ...current, "0020000D": { Value: [`${uid}.2`] } },
         { ...current, "00080050": { Value: ["PRIOR"] }, "0020000D": { Value: [priorUid] }, "00080020": { Value: [addDays(-1).replaceAll("-", "")] } },
         { ...current, "00080050": { Value: ["LATER"] }, "0020000D": { Value: [laterUid] }, "00080020": { Value: ["20991231"] }, "00080061": { Value: ["MR"] } },
         { ...current, "00100020": { Value: ["OTHER-PATIENT"] }, "0020000D": { Value: [unrelatedUid] } },
       ]);
       if (resultMode === "missing") return Response.json([]);
       if (resultMode === "wrong_patient") return Response.json([{ ...current, "00100020": { Value: ["OTHER-PATIENT"] } }]);
-      if (resultMode === "ambiguous") return Response.json([current, { ...current, "0020000D": { Value: [`${uid}.2`] } }]);
+      if (resultMode === "ambiguous") return Response.json([current, { ...current, "0020000D": { Value: [`${uid}.2`] }, "00080061": { Value: ["MR"] } }]);
+      if (resultMode === "grouped_two" || resultMode === "grouped_three") return Response.json([current,
+        { ...current, "0020000D": { Value: [`${uid}.2`] } },
+        ...(resultMode === "grouped_three" ? [{ ...current, "0020000D": { Value: [`${uid}.5`] } }] : []),
+      ]);
       return Response.json([current]);
     };
     const actor = { userId: doctor.id, appRole: "doctor" as const };
@@ -4541,7 +4546,42 @@ const primary = { bookingId: source, accessionNumber: `V2-${String(source).padSt
     const disabledHistory = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
     assert.ok(disabledHistory.status === "ready");
     assert.equal(disabledHistory.priorStudyCount, 0);
+    const oldNative = env.ohifNativeDeliveryEnabled, oldSecret = env.ohifNativeAuthSecret;
+    env.ohifNativeDeliveryEnabled = true; env.ohifNativeAuthSecret = "synthetic-group-secret";
+    t.after(() => { env.ohifNativeDeliveryEnabled = oldNative; env.ohifNativeAuthSecret = oldSecret; });
+    for (const mode of ["grouped_two", "grouped_three"] as const) {
+      resultMode = mode;
+      const grouped = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
+      assert.ok(grouped.status === "ready");
+      const currentUids = mode === "grouped_two" ? [uid, `${uid}.2`] : [uid, `${uid}.2`, `${uid}.5`];
+      assert.deepEqual(grouped.currentStudyUids, currentUids);
+      assert.equal(grouped.priorStudyCount, 0, "Disabling history must retain the entire current examination");
+      const groupedRedirect = new URL(await ohifViewerService.exchangeViewerLaunchToken(grouped.launchUrl.split("/").at(-1)!, doctor.id, response), "http://synthetic.invalid");
+      assert.equal(groupedRedirect.searchParams.get("StudyInstanceUIDs"), currentUids.join(","));
+      assert.equal(groupedRedirect.searchParams.get("risproDelivery"), "native");
+      const groupedContext = groupedRedirect.searchParams.get("risproContext")!;
+      const persistedGroup = (await pool.query("select current_study_uids,permitted_study_uids from viewer_launch_sessions where report_context_id=$1", [groupedContext])).rows[0];
+      assert.deepEqual(persistedGroup.current_study_uids, currentUids);
+      assert.deepEqual(persistedGroup.permitted_study_uids, currentUids);
+      for (const studyUid of [...currentUids, priorUid, "9.9.9"]) {
+        const allowed = currentUids.includes(studyUid);
+        const proxy = await rawApi(doctor.cookie, `${env.ohifDicomWebProxyPath}/context/${groupedContext}/studies/${studyUid}/metadata`);
+        assert.equal(proxy.status, allowed ? 200 : 403);
+        const native = await rawApi(doctor.cookie, "/api/ohif/native/authorize", {
+          "x-rispro-native-gateway": env.ohifNativeAuthSecret, "x-rispro-native-method": "GET",
+          "x-rispro-native-uri": `/ohif-native/context/${groupedContext}/studies/${studyUid}/series/1.2.3/instances/1.2.4/frames/1`,
+        });
+        assert.equal(native.status, allowed ? 204 : 403);
+      }
+    }
+    assert.equal((await pool.query("select count(*)::int n from study_source_resolutions where appointment_id=$1", [appointmentId])).rows[0].n, 1);
+    assert.equal((await pool.query("select count(*)::int n from doctor_portal.case_team_assignments where appointment_id=$1 and assignment_type='reporting'", [appointmentId])).rows[0].n, 1);
     await pool.query(`update ohif_viewer_settings set allow_prior_studies=true where singleton_key=true`);
+    resultMode = "grouped_two";
+    const withHistory = await ohifViewerService.launchReportingBoardCaseInOhif(actor, appointmentId, true);
+    assert.ok(withHistory.status === "ready");
+    assert.deepEqual(withHistory.currentStudyUids, [uid, `${uid}.2`]);
+    assert.deepEqual(withHistory.priorStudies.map(s => s.studyInstanceUid), [laterUid, priorUid]);
     await assert.rejects(() => ohifViewerService.launchReportingBoardCaseInOhif({ userId: otherDoctor.id, appRole: "doctor" }, appointmentId, true), (error: unknown) => Number((error as { statusCode: number }).statusCode) === 403);
     for (const [mode, expected] of [["wrong_patient", "not_found"], ["ambiguous", "ambiguous"], ["missing", "not_found"], ["offline", "source_unavailable"]] as const) {
       resultMode = mode;

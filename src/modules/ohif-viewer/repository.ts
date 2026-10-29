@@ -194,15 +194,16 @@ export async function upsertStudyResolution(input: {
 
 export async function createViewerLaunchSession(input: {
   userId: UserId; appointmentId: number | null; sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy;
-  currentStudyUid: string; permittedStudyUids: string[]; tokenHash: string; expiresAt: Date;
+  currentStudyUid: string; currentStudyUids?: string[]; permittedStudyUids: string[]; tokenHash: string; expiresAt: Date;
   patientId?: number; studyDate?: string; reportingStudyKey?:string;reportId?:number;
 }): Promise<number> {
   const result = await pool.query<{ id: string }>(
     `insert into viewer_launch_sessions
-      (user_id,case_id,appointment_id,source_pacs_node_id,access_strategy,study_instance_uid,permitted_study_uids,token_hash,expires_at,reporting_patient_id,primary_study_date,reporting_study_key,reporting_report_id,case_type)
-     values ($1,$2,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,case when $11::uuid is null then 'appointment' else 'study' end) returning id`,
+      (user_id,case_id,appointment_id,source_pacs_node_id,access_strategy,study_instance_uid,permitted_study_uids,token_hash,expires_at,reporting_patient_id,primary_study_date,reporting_study_key,reporting_report_id,case_type,current_study_uids)
+     values ($1,$2,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,case when $11::uuid is null then 'appointment' else 'study' end,$13::jsonb) returning id`,
     [input.userId, input.appointmentId, input.sourcePacsNodeId, input.accessStrategy, input.currentStudyUid,
-     JSON.stringify(input.permittedStudyUids), input.tokenHash, input.expiresAt.toISOString(), input.patientId ?? null, input.studyDate ?? null,input.reportingStudyKey??null,input.reportId??null]
+     JSON.stringify(input.permittedStudyUids), input.tokenHash, input.expiresAt.toISOString(), input.patientId ?? null, input.studyDate ?? null,input.reportingStudyKey??null,input.reportId??null,
+     JSON.stringify(input.currentStudyUids ?? [input.currentStudyUid])]
   );
   return Number(result.rows[0]?.id);
 }
@@ -212,6 +213,7 @@ export interface ViewerLaunchSessionRecord {
   reportContextId: string;
   patientId: number | null; studyDate: string | null;
   id: number; userId: number; appointmentId: number; studyInstanceUid: string; permittedStudyUids: string[];
+  currentStudyUids: string[];
   sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy; expiresAt: string; usedAt: string | null; revokedAt: string | null;
 }
 
@@ -222,6 +224,7 @@ function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
     reportContextId: String(row.report_context_id || ""),
     patientId: row.reporting_patient_id == null ? null : Number(row.reporting_patient_id), studyDate: nullableText(row.primary_study_date),
     studyInstanceUid: String(row.study_instance_uid),
+    currentStudyUids: Array.isArray(row.current_study_uids) && row.current_study_uids.length ? row.current_study_uids.map(String) : [String(row.study_instance_uid)],
     permittedStudyUids: Array.isArray(row.permitted_study_uids) ? row.permitted_study_uids.map(String) : [],
     sourcePacsNodeId: row.source_pacs_node_id == null ? null : Number(row.source_pacs_node_id),
     accessStrategy: String(row.access_strategy) as OhifAccessStrategy, expiresAt: String(row.expires_at),
