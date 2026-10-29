@@ -87,6 +87,20 @@ assert.ok(s.gateway.volumes.some(v => v.target === '/etc/nginx/templates/native.
 assert.equal(Boolean(s.postgres), process.env.EXPECTED_DB === 'internal');
 assert.equal(Boolean(s.orthanc), process.env.EXPECTED_DICOM === 'orthanc_internal');
 assert.equal(Boolean(s['mpps-bridge']), process.env.EXPECTED_MPPS === 'internal_bridge');
+assert.equal(s.app.depends_on?.orthanc, undefined);
+assert.equal(s['request-scan-worker'].depends_on?.orthanc, undefined);
+assert.equal(s['request-scan-worker'].depends_on.app.condition, 'service_healthy');
+assert.equal(s.gateway.depends_on.app.condition, 'service_healthy');
+if (s.postgres) assert.equal(s.app.depends_on.postgres.condition, 'service_healthy');
+for (const service of [s.app, s['request-scan-worker'], s.gateway, s.postgres, s.orthanc].filter(Boolean)) {
+  assert.equal(service.restart, 'unless-stopped');
+  assert.ok(service.healthcheck.test.length);
+}
+if (s.orthanc) {
+  assert.deepEqual(s.orthanc.healthcheck.test, ['CMD', '/usr/local/bin/check-worklists-ready.sh', '--healthcheck']);
+  assert.ok(s.orthanc.volumes.some(v => v.source.endsWith('orthanc-data') && v.target === '/var/lib/orthanc/db'));
+  assert.ok(s.orthanc.volumes.some(v => v.source.endsWith('orthanc-worklists') && v.target === '/var/lib/orthanc/worklists'));
+}
 EOF_NODE
       done
       printf '[PASS] Native deployment: %s / %s / %s (fresh, upgrade, blank, preserved, disabled)\n' "$db" "$dicom" "$mpps"

@@ -1,8 +1,6 @@
 services:
   app:
-    depends_on:
-      orthanc:
-        condition: service_healthy
+    # MWL readiness is independent of web/worker startup, including after reboot.
     environment:
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY: "1"
       ORTHANC_MWL_ENABLED: "true"
@@ -11,6 +9,8 @@ services:
   orthanc:
     build:
       context: ./docker/orthanc
+      labels:
+        org.rispro.orthanc-build-inputs: ${RISPRO_ORTHANC_BUILD_INPUTS:-unknown}
     image: rispro-orthanc-internal:26.4.0
     container_name: rispro-orthanc
     env_file:

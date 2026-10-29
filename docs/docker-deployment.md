@@ -29,6 +29,14 @@ commit SHA is injected into the running app through Compose and is intentionally
 baked into the early Docker dependency layers, so changing commits does not rebuild
 unchanged OS or npm dependency layers.
 
+Setup/update build the app image once for the web application and Request Scan
+Worker, plus OHIF and the MPPS bridge when enabled. Internal Orthanc is deployed
+separately: unchanged configuration and image retain its container, including when
+it is unhealthy. Changed build inputs (or a missing image) trigger an Orthanc build;
+changed rendered configuration or image triggers a targeted recreation. Existing
+images without the build-input label are reused when the running app's deployed
+SHA proves the Orthanc sources are unchanged.
+
 If you want to change deployment settings during an update, run:
 
 ```bash
@@ -140,13 +148,24 @@ The generated internal Orthanc config now sets:
 
 The deployment also mounts a dedicated `orthanc-worklists` volume at `/var/lib/orthanc/worklists`.
 
-Before RISpro considers the stack healthy, the internal Orthanc deployment now verifies:
+Internal Orthanc MWL readiness is reported separately from web application health.
+The web application does not depend on Orthanc health; the Request Scan Worker
+still waits for the app to become healthy after database migrations. A slow or
+unhealthy Orthanc therefore cannot block web/worker startup. Existing
+`restart: unless-stopped` policies remain in place for automatic startup after a
+VM reboot.
+
+The internal Orthanc readiness probe verifies:
 - the plugin binary exists at `/usr/share/orthanc/plugins/libOrthancWorklists.so`
 - the generated config contains the required Worklists settings
 - the configured worklist directory exists
 - the runtime `/worklists` route responds without `404` or `405`
 
-This readiness probe lives in [docker/orthanc/check-worklists-ready.sh](../docker/orthanc/check-worklists-ready.sh), is wired into the Orthanc container healthcheck, and is also run explicitly by setup/update after `docker compose up -d --build`.
+This readiness probe lives in [docker/orthanc/check-worklists-ready.sh](../docker/orthanc/check-worklists-ready.sh) and remains wired into the Orthanc container healthcheck. Setup/update probe it once after web startup checks and report `ready` or `pending/unavailable` in the summary. A pending MWL report does not fail web deployment and must not be treated as approval to use MWL. Inspect Orthanc health/logs and rerun the probe when it finishes starting:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.orthanc-internal.yml exec -T orthanc /usr/local/bin/check-worklists-ready.sh
+```
 
 ### Mode 3: External Orthanc
 

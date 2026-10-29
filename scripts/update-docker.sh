@@ -103,8 +103,7 @@ parse_deployment_args() {
 
 build_and_restart() {
   cd "${PROJECT_ROOT}"
-  log 'Building and restarting containers...'
-  BUILDX_NO_DEFAULT_ATTESTATIONS=1 RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 RISPRO_BUILD_COMMIT_SHA="${DEPLOY_COMMIT_SHA}" build_and_start_services
   ok 'Containers rebuilt and restarted.'
   log "Built/recreated rispro-app for commit: ${DEPLOY_COMMIT_SHA}"
 }
@@ -158,15 +157,9 @@ main() {
   run_compose_preflight
   log_deploy_timing 'deployment_preflight' "${deployment_preflight_started_at}"
   ok "Updated ${ENV_FILE}"
-  orthanc_recreate_started_at="$(deploy_now_ms)"
-  recreate_internal_orthanc_if_changed
-  log_deploy_timing 'targeted_orthanc_recreation' "${orthanc_recreate_started_at}"
   docker_build_started_at="$(deploy_now_ms)"
   build_and_restart
   log_deploy_timing 'docker_build_and_up' "${docker_build_started_at}"
-  orthanc_readiness_started_at="$(deploy_now_ms)"
-  wait_for_internal_orthanc_worklists
-  log_deploy_timing 'orthanc_readiness' "${orthanc_readiness_started_at}"
   gateway_recreate_started_at="$(deploy_now_ms)"
   recreate_gateway
   log_deploy_timing 'gateway_recreate' "${gateway_recreate_started_at}"
@@ -193,6 +186,7 @@ main() {
     exit 1
   fi
   log_deploy_timing 'qz_readiness' "${qz_started_at}"
+  report_internal_orthanc_worklists
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   ensure_teaching_anatomy_assets

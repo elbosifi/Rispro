@@ -15,6 +15,7 @@ SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 # git clean intentionally removes untracked repository files.
 RISPRO_CONFIG_BACKUP_DIR="${RISPRO_CONFIG_BACKUP_DIR:-${PROJECT_ROOT}/../rispro-config-backups}"
 ORTHANC_CONFIG_CHANGED=0
+ORTHANC_MWL_DEPLOYMENT_STATUS='not checked'
 TEACHING_ANATOMY_DEPLOYMENT_STATUS='unavailable - provisioning failed'
 
 deploy_now_ms() {
@@ -1069,12 +1070,65 @@ EOF_ORTHANC
 }
 
 recreate_internal_orthanc_if_changed() {
-  if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ] || [ "${ORTHANC_CONFIG_CHANGED}" != "1" ]; then
+  if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     return 0
   fi
 
-  log 'Rendered Orthanc configuration changed; recreating only the internal Orthanc service.'
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-deps --force-recreate orthanc
+  local image image_id container_image built_inputs previous_sha
+  local rebuild=0
+  image="$("${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" config --images orthanc)"
+  # Generated runtime configuration is mounted, not part of the image inputs.
+  RISPRO_ORTHANC_BUILD_INPUTS="$(
+    cd "${PROJECT_ROOT}/docker/orthanc"
+    find . -path ./generated -prune -o -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
+  )"
+  export RISPRO_ORTHANC_BUILD_INPUTS
+  image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+  built_inputs="$(docker image inspect --format '{{ index .Config.Labels "org.rispro.orthanc-build-inputs" }}' "$image" 2>/dev/null || true)"
+  if [ -z "$image_id" ]; then
+    rebuild=1
+  elif [ "$built_inputs" != "$RISPRO_ORTHANC_BUILD_INPUTS" ]; then
+    # Adopt an existing image without rebuilding on the first updater run when
+    # the running app proves these same Orthanc sources were already deployed.
+    previous_sha="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' rispro-app 2>/dev/null | sed -n 's/^RISPRO_BUILD_COMMIT_SHA=//p' || true)"
+    if [ -n "$built_inputs" ] && [ "$built_inputs" != '<no value>' ] && [ "$built_inputs" != unknown ]; then
+      rebuild=1
+    elif [[ ! "$previous_sha" =~ ^[0-9a-fA-F]{40}$ ]] || ! git diff --quiet "$previous_sha" -- docker/orthanc; then
+      rebuild=1
+    fi
+  fi
+  if [ "$rebuild" = 1 ]; then
+    log 'Internal Orthanc image is missing or its build inputs changed; building only Orthanc.'
+    "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" build orthanc
+    image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+  fi
+  container_image="$(docker inspect --format '{{.Image}}' rispro-orthanc 2>/dev/null || true)"
+  if [ "${ORTHANC_CONFIG_CHANGED}" = 1 ] || [ "$container_image" != "$image_id" ]; then
+    log 'Internal Orthanc configuration or image changed; recreating only Orthanc.'
+    "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-build --no-deps --force-recreate orthanc
+  else
+    log 'Internal Orthanc configuration and image unchanged; retaining its container.'
+    # Also starts stopped/Created containers without recreating a running one.
+    "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-build --no-deps --no-recreate orthanc
+  fi
+}
+
+build_and_start_services() {
+  local build_services=(app)
+  local runtime_services=(app request-scan-worker gateway)
+  if [ "${OHIF_COMPOSE_PROFILES:-}" = ohif ]; then
+    build_services+=(ohif)
+    runtime_services+=(ohif)
+  fi
+  if [ "$RISPRO_MPPS_MODE" = internal_bridge ]; then
+    build_services+=(mpps-bridge)
+    runtime_services+=(mpps-bridge)
+  fi
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" build "${build_services[@]}"
+  recreate_internal_orthanc_if_changed
+  # Compose retains the PostgreSQL and app-health dependencies, but has no
+  # Orthanc dependency to leave the app/worker Created during slow MWL startup.
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-build "${runtime_services[@]}"
 }
 
 render_db_backup_access_config() {
@@ -1266,27 +1320,18 @@ console.log(`Application-reported build SHA verified: ${expectedSha}`);
 NODE_VERIFY
 }
 
-wait_for_internal_orthanc_worklists() {
+report_internal_orthanc_worklists() {
   if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
     return 0
   fi
 
-  local attempts=30
-  local attempt=1
-
-  log 'Waiting for internal Orthanc Worklists readiness...'
-  while [ "$attempt" -le "$attempts" ]; do
-    if "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T orthanc /usr/local/bin/check-worklists-ready.sh >/dev/null 2>&1; then
-      ok 'Internal Orthanc Worklists plugin is ready.'
-      return 0
-    fi
-    sleep 2
-    attempt=$((attempt + 1))
-  done
-
-  err 'Internal Orthanc Worklists readiness check failed.'
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs orthanc || true
-  return 1
+  if "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T orthanc /usr/local/bin/check-worklists-ready.sh >/dev/null 2>&1; then
+    ORTHANC_MWL_DEPLOYMENT_STATUS='ready'
+    ok 'Internal Orthanc Worklists plugin is ready.'
+  else
+    ORTHANC_MWL_DEPLOYMENT_STATUS='pending/unavailable - inspect Orthanc health and logs'
+    warn 'Internal Orthanc MWL is pending/unavailable; web startup is independent. Check Orthanc health and logs before using MWL.'
+  fi
 }
 
 print_deployment_summary() {
@@ -1332,6 +1377,7 @@ print_deployment_summary() {
       printf '  Embedded MWL:    127.0.0.1:11112 (AE: RISPRO_MWL)\n'
       ;;
     orthanc_internal)
+      printf '  Internal MWL:    %s\n' "$ORTHANC_MWL_DEPLOYMENT_STATUS"
       printf '  Orthanc HTTP:    http://localhost:8042\n'
       printf '  Orthanc DICOM:   127.0.0.1:4242 (AE: RISPRO_ORTHANC)\n'
       ;;

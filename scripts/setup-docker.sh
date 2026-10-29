@@ -23,7 +23,7 @@ check_prerequisites() {
 bring_up_stack() {
   cd "${PROJECT_ROOT}"
   log "Building and starting Docker containers..."
-  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 build_and_start_services
 }
 
 main() {
@@ -83,9 +83,9 @@ main() {
       fi
       run_compose_preflight
       bring_up_stack
-      wait_for_internal_orthanc_worklists
       wait_for_app_health || true
       verify_qz_bootstrap_readiness
+      report_internal_orthanc_worklists
       ensure_teaching_anatomy_assets
       print_deployment_summary 'RISpro is running.'
       exit 0
@@ -96,9 +96,9 @@ main() {
   run_compose_preflight
   ok "Wrote ${ENV_FILE}"
   bring_up_stack
-  wait_for_internal_orthanc_worklists
   wait_for_app_health || true
   verify_qz_bootstrap_readiness
+  report_internal_orthanc_worklists
   ensure_teaching_anatomy_assets
   print_deployment_summary 'RISpro is ready.'
 }
