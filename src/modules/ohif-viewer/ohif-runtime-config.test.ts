@@ -45,4 +45,27 @@ describe("OHIF runtime configuration", () => {
       assert.equal(context.window.config.maxNumRequests.thumbnail, native ? 4 : 1);
     }
   });
+  it("selects upstream limits only for an explicit native experiment and isolates thumbnail scheduling", async () => {
+    const source = await fs.readFile(appConfigPath, "utf8");
+    const id = "00000000-0000-4000-8000-000000000001";
+    for (const [query, limits] of [
+      [`risproContext=${id}&risproDelivery=native`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=current`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=unknown`, [4, 4, 1]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream`, [100, 75, 25]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream&risproThumbnailProfile=current`, [100, 4, 25]],
+      [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=upstream`, [4, 1, 1]],
+      ["risproContext=invalid&risproDelivery=native&risproLoadingProfile=upstream", [4, 1, 1]],
+    ] as const) {
+      const context = { window: { location: { search: `?${query}` }, config: {} as {
+        maxNumRequests: { interaction: number; thumbnail: number; prefetch: number };
+        dataSources: { configuration: { thumbnailRendering: string; enableStudyLazyLoad: boolean } }[];
+      } }, URLSearchParams };
+      vm.runInNewContext(source, context);
+      const { interaction, thumbnail, prefetch } = context.window.config.maxNumRequests;
+      assert.deepEqual([interaction, thumbnail, prefetch], limits);
+      assert.equal(context.window.config.dataSources[0].configuration.enableStudyLazyLoad, true);
+      assert.equal(context.window.config.dataSources[0].configuration.thumbnailRendering, thumbnail === 1 ? "wadors" : "rendered");
+    }
+  });
 });

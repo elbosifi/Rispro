@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url), dcmjs = require('dcmjs');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
-function installProbe() {
+export function installProbe() {
   performance.setResourceTimingBufferSize(30000);
   window.__nativeBench = { renders: [], firstPixels: null, thumbnails: null, longTasksMs: 0, poolPeaks:{},queuePeaks:{} };
   try { new PerformanceObserver(list => { for (const entry of list.getEntries()) window.__nativeBench.longTasksMs += entry.duration; }).observe({ type: 'longtask', buffered: true }); } catch {}
@@ -47,7 +47,7 @@ function installProbe() {
   requestAnimationFrame(sample);
 }
 
-async function waitPixels(page, series, since = 0) {
+export async function waitPixels(page, series, since = 0) {
   await page.waitForFunction(({ series, since }) => window.__nativeBench?.renders.some(r => r.atMs >= since && (!series || r.imageId.includes('/series/' + series + '/'))), { series, since }, { timeout: 90000 });
   return page.evaluate(({ series, since }) => window.__nativeBench.renders.find(r => r.atMs >= since && (!series || r.imageId.includes('/series/' + series + '/'))).atMs, { series, since });
 }
@@ -155,6 +155,10 @@ export async function runNativeBenchmark(h) {
   assert.equal((await authorized.request.get(native + '/metadata')).status(), 403); security.push({ check: 'revocation after one-second plugin cache', status: 'PASS' });
   assert.equal((await authorized.request.get(otherNative+'/metadata')).status(),200);security.push({check:'revoking one context leaves another permitted context isolated',status:'PASS'});
   await authorized.close(); emit({ security });
+  if (process.env.OHIF_LOADING_PROFILE_BENCHMARK === '1') {
+    const { runLoadingProfileBenchmark } = await import('./ohif-loading-profile-benchmark.mjs');
+    return runLoadingProfileBenchmark({ ...h, exchange });
+  }
   const variants = [
     { name: 'stock', origin: archive, stock: true }, { name: 'proxy', origin: baselineOrigin },
     { name: 'proxy-final', origin },

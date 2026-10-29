@@ -6,7 +6,7 @@ if (process.env.RISPRO_E2E !== '1' || !(docker?db.hostname==='rispro-test-postgr
 const { pool } = await import('../src/db/pool.ts');
 const {createApp}=await import('../src/app.ts');
 let metrics, cpu;
-function reset() { metrics = { queries: 0, queryMs: 0, maxPoolWaiting: 0, poolWaits:0,poolWaitMs:0, proxyFrames: 0, authorizations: 0 }; cpu = process.cpuUsage(); }
+function reset() { metrics = { queries: 0, queryMs: 0, maxPoolWaiting: 0, poolWaits:0,poolWaitMs:0, proxyFrames: 0, authorizations: 0, authorizationMs: [] }; cpu = process.cpuUsage(); }
 reset();
 const query = pool.query.bind(pool);
 const connect=pool.connect.bind(pool);
@@ -35,7 +35,11 @@ const server = createServer((req, res) => {
     return;
   }
   if (req.url?.startsWith('/ohif-dicomweb/') && req.url.includes('/frames/')) metrics.proxyFrames++;
-  if (req.url?.startsWith('/api/ohif/native/')) metrics.authorizations++;
+  if (req.url?.startsWith('/api/ohif/native/')) {
+    metrics.authorizations++;
+    const start = performance.now(), current = metrics;
+    res.once('finish', () => current.authorizationMs.push(performance.now() - start));
+  }
   app(req, res);
 });
 await new Promise(r => server.listen(docker?3000:0, docker?'0.0.0.0':'127.0.0.1', r));
