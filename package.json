@@ -41,7 +41,7 @@
     "agent:contract": "node scripts/harness/check-agent-contract.mjs",
     "test:teaching-anatomy:provision": "node --test scripts/teaching-anatomy/provision-spl-liver-atlas.test.mjs scripts/teaching-anatomy/provision-teaching-anatomy.test.mjs scripts/teaching-anatomy/legacy-vtk-polydata.test.mjs",
     "teaching:reset-content": "tsx scripts/teaching/reset-content.ts",
-    "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh && bash scripts/test-database-backup-access.sh",
+    "test:docker:deployment": "bash scripts/test-docker-deployment-regressions.sh && bash scripts/test-database-backup-access.sh && bash scripts/test-ohif-native-deployment.sh",
     "test:qz:deployment": "node --test scripts/qz/qz-deployment.test.mjs scripts/qz/qz-powershell.test.mjs",
     "test:request-scan-worker-compose": "node --test scripts/request-scan-worker-compose.test.mjs",
     "test": "npm run test:backend:unit",

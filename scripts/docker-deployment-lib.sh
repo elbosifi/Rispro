@@ -853,7 +853,7 @@ EOF_ENV
     chmod 600 "${safety}"
   fi
 
-  ENV_DEFAULT_MIGRATIONS="${PROJECT_ROOT}/scripts/docker-env-default-migrations.cjs" ENV_EXISTING="${ENV_FILE}" ENV_RENDERED="${generated}" ENV_OUTPUT="${temporary}" node <<'EOF_NODE'
+  if ! ENV_DEFAULT_MIGRATIONS="${PROJECT_ROOT}/scripts/docker-env-default-migrations.cjs" ENV_EXISTING="${ENV_FILE}" ENV_RENDERED="${generated}" ENV_OUTPUT="${temporary}" node <<'EOF_NODE'
 const fs = require('fs');
 const { migrateLegacyDockerEnvValue } = require(process.env.ENV_DEFAULT_MIGRATIONS);
 const existingPath = process.env.ENV_EXISTING;
@@ -867,6 +867,22 @@ for (const line of rendered.split(/\r?\n/)) {
   const match = line.match(keyPattern);
   if (match) owned.set(match[1], line.replace(/^\s*(?:export\s+)?/, ''));
 }
+// Native infrastructure is installed by every standard Docker deployment.
+// Preserve the effective existing values, including quoted settings; generate
+// only a missing/blank gateway secret. Never rotate a nonempty invalid secret.
+const native = new Map();
+for (const line of existing.split(/\r?\n/)) {
+  const match = line.match(keyPattern);
+  if (match && ['OHIF_NATIVE_AUTH_SECRET', 'OHIF_NATIVE_DELIVERY_ENABLED'].includes(match[1])) {
+    native.set(match[1], match[2].replace(/\s+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2'));
+  }
+}
+const nativeSecret = native.get('OHIF_NATIVE_AUTH_SECRET') || require('node:crypto').randomBytes(32).toString('hex');
+if (!/^[a-f0-9]{64}$/.test(nativeSecret)) throw new Error('Existing OHIF_NATIVE_AUTH_SECRET must be 64 lowercase hex characters; it was not changed.');
+const nativeEnabled = (native.get('OHIF_NATIVE_DELIVERY_ENABLED') || 'true').toLowerCase();
+if (!['true', '1', 'yes', 'false', '0', 'no'].includes(nativeEnabled)) throw new Error('OHIF_NATIVE_DELIVERY_ENABLED must be true or false.');
+owned.set('OHIF_NATIVE_AUTH_SECRET', `OHIF_NATIVE_AUTH_SECRET=${nativeSecret}`);
+owned.set('OHIF_NATIVE_DELIVERY_ENABLED', `OHIF_NATIVE_DELIVERY_ENABLED=${nativeEnabled}`);
 const emitted = new Set();
 const output = [];
 for (const line of existing.split(/\r?\n/)) {
@@ -884,6 +900,11 @@ fs.writeFileSync(outputPath, `${output.join('\n').replace(/\n*$/, '')}\n`, { mod
 const fd = fs.openSync(outputPath, 'r');
 try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 EOF_NODE
+  then
+    rm -f "${generated}" "${temporary}"
+    err 'Environment update failed; the existing .env was not changed.'
+    return 1
+  fi
 
   rendered_key="$(grep -E '^BACKUP_V3_MASTER_KEY=' "${temporary}" | tail -n1 | cut -d '=' -f2- || true)"
   if [ -n "${existing_key}" ] && { [ -z "${rendered_key}" ] || [ "${existing_key}" != "${rendered_key}" ]; }; then
@@ -1116,6 +1137,7 @@ build_compose_args() {
   if [ "$RISPRO_MPPS_MODE" = "internal_bridge" ]; then
     COMPOSE_FILES+=(-f docker-compose.mpps-bridge.yml)
   fi
+  COMPOSE_FILES+=(-f docker-compose.ohif-native.yml)
 }
 
 prepare_qz_printing() {
@@ -1268,6 +1290,13 @@ wait_for_internal_orthanc_worklists() {
 }
 
 print_deployment_summary() {
+  # The gateway health endpoint alone does not prove its native template rendered.
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T gateway sh -c 'test -s /etc/nginx/ohif-native/native.conf && nginx -t' >/dev/null 2>&1 || {
+    err 'Native OHIF infrastructure is not ready: gateway route/configuration validation failed.'
+    return 1
+  }
+  local native_delivery_enabled
+  native_delivery_enabled="$("${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T app printenv OHIF_NATIVE_DELIVERY_ENABLED)" || return 1
   printf '\n===================================================\n'
   ok "$1"
   printf '===================================================\n\n'
@@ -1287,6 +1316,15 @@ print_deployment_summary() {
   fi
   printf '  OHIF DB setting: determined in Settings → Integrations → OHIF Viewer\n'
   printf '  OHIF URL:        /ohif/\n'
+  printf '  Native OHIF infrastructure: installed (gateway configuration validated)\n'
+  if [ "$OHIF_ENABLED" != "true" ]; then
+    printf '  Native OHIF delivery: disabled (OHIF infrastructure gate)\n'
+  else
+    case "$native_delivery_enabled" in
+      true|1|yes) printf '  Native OHIF delivery: enabled for configured authoritative_orthanc connections\n' ;;
+      *) printf '  Native OHIF delivery: disabled (server override; Express proxy retained)\n' ;;
+    esac
+  fi
   printf '  Teaching Anatomy: %s\n' "${TEACHING_ANATOMY_DEPLOYMENT_STATUS}"
 
   case "$RISPRO_DICOM_MODE" in

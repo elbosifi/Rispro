@@ -1,4 +1,5 @@
-# Opt-in gateway transport; append to the VM's EXISTING Compose file list.
+# Included automatically by standard setup/update. Manual Compose deployments
+# can append this to their EXISTING file list to install native infrastructure.
 # Orthanc credentials/origin continue to come from RISpro Settings, not this file.
 services:
   app:

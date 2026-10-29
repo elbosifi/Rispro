@@ -16,8 +16,8 @@
 
 ## Native Orthanc delivery in prepared deployments
 
-Base installations default to proxy. Deploying `docker-compose.ohif-native.yml`
-with its required gateway secret enables native automatically, unless
+Standard Docker setup/update automatically includes `docker-compose.ohif-native.yml`
+and provisions its gateway secret. Native delivery is enabled by default, unless
 `OHIF_NATIVE_DELIVERY_ENABLED=false` is explicitly set. Native delivery is separate
 from the existing `authoritative_orthanc` source strategy. It changes transport
 only: launch, case authorization, study selection, reporting and the Express
@@ -71,49 +71,43 @@ use the explicit proxy rollback below.
 ### Operator activation on `/opt/Rispro` (requires release approval)
 
 1. Finish code review and the required CI/release gates for the exact release.
-   Back up `.env` and record the VM's current Compose file list. Preserve every
-   existing override (especially the database/internal Orthanc overrides).
-2. Install the reviewed source at `/opt/Rispro`. Keep
-   `OHIF_NATIVE_DELIVERY_ENABLED=false` initially. Confirm the authoritative
-   Settings origin and already-saved `rispro_service` account; do not edit either
-   Orthanc service or production database data for this transport change.
-3. Generate a separate gateway secret with `openssl rand -hex 32` and put it in
-   `/opt/Rispro/.env` as `OHIF_NATIVE_AUTH_SECRET=<64 lowercase hex characters>`.
-   Restrict `.env` to the operator (`chmod 600 .env`). This is a gateway secret,
-   not a second Orthanc password. Do not paste it into tickets or logs.
-4. Append `docker-compose.ohif-native.yml` to the **existing** Compose file list.
-   For a VM using only the base file, the commands below apply. If it uses other
-   overrides, insert their `-f` arguments after the base file in every command:
+   Back up `.env`. The normal `scripts/setup-docker.sh` and
+   `scripts/update-docker.sh` workflows automatically append the native overlay
+   while preserving internal/external database, internal Orthanc, database backup
+   access and MPPS overrides. No manual Compose edit or secret generation is needed.
+2. On a new installation, setup generates a cryptographically random 64-character
+   lowercase hex `OHIF_NATIVE_AUTH_SECRET`, saves it in the private `.env`, and
+   defaults `OHIF_NATIVE_DELIVERY_ENABLED=true`. This is a gateway secret, not an
+   Orthanc password. The existing authoritative archive origin and `rispro_service`
+   credentials still come only from Settings.
+3. On an upgrade, the same writer generates only a missing/blank secret and
+   preserves an existing valid secret. A nonempty invalid secret stops preflight
+   without changing `.env` or exposing the value. Existing explicit native
+   delivery disables, including installations carrying the previous default
+   `false`, are preserved. Missing/blank delivery flags default to `true`.
+4. Setup/update checks the rendered native gateway configuration with `nginx -t`
+   before its success summary. The summary separately reports native infrastructure
+   installed and the running app's delivery gate. Enabled means native is the
+   default for properly configured `authoritative_orthanc` sessions; it does not
+   assert that the database OHIF setting or archive connection has been enabled.
+   Other access strategies keep their existing transport. The full
+   `OHIF_INFRASTRUCTURE_DISABLED=true` emergency gate also remains effective.
+5. Existing explicitly disabled installations stay on the proxy. To opt back in
+   after review, change `OHIF_NATIVE_DELIVERY_ENABLED=false` to `true` in `.env`
+   and apply it to the web app using the current deployment modes:
 
    ```bash
    cd /opt/Rispro
-   docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml build app
-   docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml up -d --no-deps app gateway
-   docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml exec -T gateway test -s /etc/nginx/ohif-native/native.conf
-   docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml exec -T gateway nginx -t
+   source scripts/docker-deployment-lib.sh
+   load_existing_config
+   hydrate_deployment_config_from_current_env
+   build_compose_args
+   docker compose "${COMPOSE_FILES[@]}" up -d --no-deps app
    ```
 
-   The official Nginx entrypoint substitutes only the gateway secret into the
-   native template, in a private tmpfs directory. No Orthanc credential is put
-   in the template or container environment. Persist the added Compose file in
-   the VM's normal startup/update command so future recreations retain it.
-5. Verify `/api/health`, `/ohif/`, and ordinary proxy viewing while native remains
-   off. Verify public `/_ohif-native-authorize` and
-   `/api/ohif/native/authorize` return 404. In the approved pilot window,
-   remove the staging `OHIF_NATIVE_DELIVERY_ENABLED=false` entry from `.env`
-   (including any exported shell override), then apply the overlay default to
-   the web app:
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml up -d --no-deps app
-   ```
-
-   Do not use `restart` to apply changed environment values. No Orthanc restart,
-   migration rollback or auto-routing change is needed. Do not run commands
-   that recreate the internal Orthanc or the whole stack.
-   Existing deployments carrying an explicit `false` retain proxy delivery until
-   that override is removed. No Settings or doctor-facing delivery selection is
-   needed; other access strategies retain their existing transport.
+   Do not use `restart` to apply changed environment values. Neither Orthanc needs
+   modification for native delivery. The gateway template is rendered in a private
+   tmpfs directory; keep debug/header logging and `nginx -T` output private.
 6. Open a fresh authorized case. In browser DevTools Network, filter `frames`,
    `metadata` and `rendered`. WADO URLs must start with the RISpro origin plus
    `/ohif-native/context/<context>/studies/<UID>/...`, with successful multipart
@@ -128,8 +122,8 @@ For each open viewer, replace `risproDelivery=native` in its URL with
 `risproDelivery=proxy` and reload. This works without a service restart and uses
 the same authorized context. For subsequent launches, set
 `OHIF_NATIVE_DELIVERY_ENABLED=false` in `/opt/Rispro/.env`, then run the same
-Compose command above with `up -d --no-deps app`. Existing native URLs then fail
-closed, so switch/reload any remaining tabs. The optional gateway overlay can
+mode-preserving Compose command above with `up -d --no-deps app`. Existing native URLs then fail
+closed, so switch/reload any remaining tabs. The installed gateway overlay can
 stay mounted; removing it is not needed for immediate rollback. Leave the saved
 Orthanc credentials, reporting state and both Orthanc servers unchanged.
 
