@@ -12,9 +12,9 @@ Rollback never deletes studies from OsiriX or Orthanc automatically and never re
 
 For the opt-in native Orthanc **transport**, use `risproDelivery=proxy` in the
 existing authorized viewer URL to return to Express immediately. Disable
-`OHIF_NATIVE_DELIVERY_ENABLED` and restart RISpro for future launches. Keep
-`OHIF_NATIVE_AUTH_SECRET` and the callback service available while the archive
-still uses its Authorization plugin; existing server-to-server Basic operations
-and the Express fallback depend on that callback. No database or archive changes
-are required for transport rollback. See the
+`OHIF_NATIVE_DELIVERY_ENABLED` in `.env` and apply it with the existing Compose
+file list plus `up -d --no-deps app` for future launches. Existing native tabs
+must switch to proxy and reload. The native gateway overlay may remain mounted;
+the Express fallback uses the saved Authoritative Orthanc Basic credentials
+independently. No database or archive changes are required. See the
 [native pilot instructions](ohif-viewer-operations-runbook.md).

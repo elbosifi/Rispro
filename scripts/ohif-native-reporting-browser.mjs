@@ -38,14 +38,13 @@ const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
 const nativeDelivery=env.ohifNativeDeliveryEnabled;
 const nativeBenchmark=process.env.OHIF_NATIVE_BENCHMARK==='1';
 const transportCounts={proxyFrames:0,authorizations:0};
-let authorizationServer;
 let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const responsive=process.env.OHIF_RESPONSIVE==='1';
 const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1';let workspaceFixture;
 // Keep native responsive discovery/callbacks on the same Docker network too;
 // Windows published-port hairpins can stall a prior QIDO and leave the panel empty.
-const dockerBackend=nativeBenchmark || nativeDelivery && responsive;
+const dockerBackend=nativeDelivery;
 const reliability=responsive && process.env.OHIF_RELIABILITY==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
@@ -54,44 +53,21 @@ async function setting(category,key,value){await pool.query('insert into system_
 try{
   docker('image','inspect',viewerImage,'orthancteam/orthanc:26.4.0','nginx:1.27.5-alpine');
   docker('network','create',networkName);networkCreated=true;
-  let authorization={};
-  if(nativeDelivery){
-    // Real callback router and real credentials, including fixture provisioning;
-    // no unconditional synthetic authorization branch or authentication bypass.
-    for(const [key,value] of Object.entries({enabled:'enabled',username:'synthetic',password:'synthetic-only'}))await setting('authoritative_orthanc',key,value);
-    if(dockerBackend){
-      docker('network','connect','--alias','rispro-test-postgres',networkName,'rispro-test-postgres');dbNetworkConnected=true;
-      const backendDb=new URL(dbUrl);backendDb.hostname='rispro-test-postgres';backendDb.port='5432';
-      const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:'true',OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
-      benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets'].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
-      let ready=false;for(let attempt=0;attempt<40;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
-      if(!ready)throw Error('Synthetic Docker backend did not start: '+dockerLogs(prefix+'-backend'));
-    }else{
-    const express=require('express'),cookieParser=require('cookie-parser');
-    const {ohifNativeAuthorizationRouter}=await module('src/modules/ohif-viewer/native-authorization.ts');
-    const callback=express();callback.use(express.json());callback.use(cookieParser());
-    callback.use((req,res,next)=>{
-      transportCounts.authorizations++;
-      const json=res.json.bind(res);res.json=value=>{
-        if(transportCounts.authorizations<=6||req.body?.['token-key']==='x-rispro-viewer')console.log(JSON.stringify({pluginCheck:{key:req.body?.['token-key'],level:req.body?.level,method:req.body?.method,granted:value.granted,status:res.statusCode}}));
-        return json(value);
-      };next();
-    });
-    callback.use('/api/ohif/native',ohifNativeAuthorizationRouter);
-    callback.use((error,req,res,next)=>res.status(error.statusCode||500).json({error:error.message}));
-    authorizationServer=createServer(callback);await new Promise(r=>authorizationServer.listen(0,'127.0.0.1',r));
-    }
-    const callbackBase=dockerBackend?'http://benchmark-backend:3000':`http://host.docker.internal:${authorizationServer.address().port}`;
-    authorization={AuthenticationEnabled:false,Plugins:['/usr/share/orthanc/plugins-available/libOrthancDicomWeb.so','/usr/share/orthanc/plugins-available/libOrthancAuthorization.so','/usr/share/orthanc/plugins-available/libOrthancOHIF.so','/usr/share/orthanc/plugins-available/libOrthancGdcm.so'],
-      Gdcm:{RestrictTransferSyntaxes:[]},OHIF:{DataSource:'dicom-web'},Authorization:{WebServiceTokenValidationUrl:`${callbackBase}/api/ohif/native/tokens/validate`,WebServiceUserProfileUrl:`${callbackBase}/api/ohif/native/user/get-profile`,WebServiceUsername:'rispro',WebServicePassword:env.ohifNativeAuthSecret,TokenHttpHeaders:['x-rispro-viewer','authorization'],TokenGetArguments:[],CheckedLevel:'studies',UncheckedFolders:['/ohif/']}};
+  if(nativeDelivery && dockerBackend){
+    docker('network','connect','--alias','rispro-test-postgres',networkName,'rispro-test-postgres');dbNetworkConnected=true;
+    const backendDb=new URL(dbUrl);backendDb.hostname='rispro-test-postgres';backendDb.port='5432';
+    const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:'true',OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
+    benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets'].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
+    let ready=false;for(let attempt=0;attempt<40;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
+    if(!ready)throw Error('Synthetic Docker backend did not start: '+dockerLogs(prefix+'-backend'));
   }
-  writeFileSync(join(temp,'orthanc.json'),JSON.stringify({Name:'SYNTHETIC NATIVE REPORTING',RemoteAccessAllowed:true,AuthenticationEnabled:true,RegisteredUsers:{synthetic:'synthetic-only'},DicomServerEnabled:false,Plugins:['/usr/share/orthanc/plugins'],DicomWeb:{Enable:true,EnableMetadataCache:true,StudiesMetadata:'Full',SeriesMetadata:'Full'},...authorization}));
-  const archivePort=start(prefix+'-archive','orthancteam/orthanc:26.4.0',8042,['--network',networkName,'--network-alias','orthanc',...(!nativeDelivery?['-e','DICOM_WEB_PLUGIN_ENABLED=true']:[]),'-v',join(temp,'orthanc.json')+':/etc/orthanc/orthanc.json:ro']);
+  writeFileSync(join(temp,'orthanc.json'),JSON.stringify({Name:'SYNTHETIC NATIVE REPORTING',RemoteAccessAllowed:true,AuthenticationEnabled:true,RegisteredUsers:{synthetic:'synthetic-only'},DicomServerEnabled:false,Plugins:['/usr/share/orthanc/plugins'],DicomWeb:{Enable:true,EnableMetadataCache:true,StudiesMetadata:'Full',SeriesMetadata:'Full'},}));
+  const archivePort=start(prefix+'-archive','orthancteam/orthanc:26.4.0',8042,['--network',networkName,'--network-alias','authoritative-archive','-e','DICOM_WEB_PLUGIN_ENABLED=true','-v',join(temp,'orthanc.json')+':/etc/orthanc/orthanc.json:ro']);
   const archive='http://127.0.0.1:'+archivePort;
   const archiveRequest=(path,options={})=>fetch(archive+path,{...options,headers:{Authorization:'Basic '+Buffer.from('synthetic:synthetic-only').toString('base64'),...options.headers}});
   for(let attempt=0;attempt<60;attempt++){try{if((await archiveRequest('/system')).ok)break;}catch{}await new Promise(r=>setTimeout(r,500));}
   assert.equal((await archiveRequest('/system')).status,200);
-  for(const [key,value] of Object.entries({enabled:'enabled',base_url:dockerBackend?'http://orthanc:8042':archive,username:'synthetic',password:'synthetic-only',verify_tls:'true',timeout_seconds:'30'}))await setting('authoritative_orthanc',key,value);
+  for(const [key,value] of Object.entries({enabled:'enabled',base_url:dockerBackend?'http://authoritative-archive:8042':archive,username:'synthetic',password:'synthetic-only',verify_tls:'true',timeout_seconds:'30'}))await setting('authoritative_orthanc',key,value);
   await setting('sonicdicom_reports','config',{sonicDicomReportsEnabled:false});
   await setting('documents_and_uploads','storage_path','');await setting('documents_and_uploads','storage_fallback_enabled','true');
   env.uploadsDir=join(temp,'uploads');
@@ -164,23 +140,20 @@ try{
   const appPort=benchmarkPort||appServer.address().port;
   // Use the same direct edge -> OHIF route as Compose, avoiding Windows
   // published-port hairpin connection timeouts during bootstrap chunk fan-out.
-  viewerPort=start(prefix+'-viewer',viewerImage,80,['--network',networkName,'--network-alias','ohif']);
+  viewerPort=start(prefix+'-viewer',viewerImage,80,['--network',networkName,'--network-alias','ohif','-v',join(root,'docker/ohif/app-config.js')+':/usr/share/nginx/html/ohif/app-config.js:ro']);
   let nginx=readFileSync(join(root,'docker/reverse-proxy/nginx.conf'),'utf8').replace('server app:3000 resolve;',dockerBackend?'server benchmark-backend:3000;':`server host.docker.internal:${appPort};`).replace('listen 8080;','listen 80;');
-  if(nativeDelivery)nginx=nginx.replace('include /etc/nginx/ohif-native/*.conf;',readFileSync(join(root,'docker/ohif/native-location.conf'),'utf8'));
-  if(nativeBenchmark){
-    // Additional HTTP gzip is an experiment only; the normal native path stays
-    // unchanged. Both routes use the same archive, tokens and diagnostic bytes.
-    const gzipLocation=readFileSync(join(root,'docker/ohif/native-location.conf'),'utf8').replaceAll('/ohif-native/','/ohif-native-gzip/').replace('  gzip off;','  gzip on;\n  gzip_comp_level 1;\n  gzip_min_length 1024;\n  gzip_types *;\n  gzip_proxied no-store private;');
-    nginx=nginx.replace('    location = /ohif {',gzipLocation+'\n    location = /ohif {');
-  }
+
   writeFileSync(join(temp,'edge.conf'),nginx);
-  const edgeOrigin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
+  const nativeMounts=nativeDelivery?['--tmpfs','/etc/nginx/ohif-native:mode=0700','-e','OHIF_NATIVE_AUTH_SECRET='+env.ohifNativeAuthSecret,'-e','NGINX_ENVSUBST_FILTER=^OHIF_NATIVE_AUTH_SECRET$','-e','NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/ohif-native','-v',join(root,'docker/ohif/native-location.conf')+':/etc/nginx/templates/native.conf.template:ro']:[];
+  const edgeOrigin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,...nativeMounts,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
   let baselineOrigin,quickOrigin;
-  if(nativeBenchmark){
+  if(nativeDelivery)docker('exec',prefix+'-edge','test','-s','/etc/nginx/ohif-native/native.conf');
+  docker('exec',prefix+'-edge','nginx','-t');
+  if(nativeBenchmark && process.env.OHIF_NATIVE_AUTH_ACCEPTANCE!=='1'){
     for(const [alias,image] of [['baseline',process.env.OHIF_BASELINE_IMAGE||'rispro-ohif:ios-reliability'],['quick',process.env.OHIF_QUICK_TEST_IMAGE||'rispro-ohif:lan-native-quick']]){
       start(prefix+'-'+alias,image,80,['--network',networkName,'--network-alias','ohif-'+alias]);
       const config=join(temp,alias+'-edge.conf');writeFileSync(config,nginx.replace('http://ohif:80','http://ohif-'+alias+':80'));
-      const url='http://127.0.0.1:'+start(prefix+'-'+alias+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,'-v',config+':/etc/nginx/nginx.conf:ro']);
+      const url='http://127.0.0.1:'+start(prefix+'-'+alias+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,...nativeMounts,'-v',config+':/etc/nginx/nginx.conf:ro']);
       if(alias==='baseline')baselineOrigin=url;else quickOrigin=url;
     }
   }
@@ -202,7 +175,12 @@ try{
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(nativeBenchmark){
+  if(process.env.OHIF_NATIVE_AUTH_ACCEPTANCE==='1'){
+    const {runAuthenticatedNativeAcceptance}=await import('./ohif-native-authenticated-acceptance.mjs');
+    await runAuthenticatedNativeAcceptance({browser,cases,origin,backendOrigin:'http://127.0.0.1:'+appPort,archive,archiveRequest,pool,env,temp,login,userId,doctorId,
+      logs:()=>containers.map(name=>dockerLogs(name)).join('\n'),
+      launch:async c=>{const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});
+  }else if(nativeBenchmark){
     const {runNativeBenchmark}=await import('./ohif-native-benchmark.mjs');
     await runNativeBenchmark({browser,context,cases,origin,baselineOrigin,quickOrigin,backendOrigin:'http://127.0.0.1:'+appPort,archive,archiveRequest,pool,env,temp,root,login,userId,doctorId,transportCounts,viewerImage,
       archiveCpuMs:()=>Number(/usage_usec (\d+)/.exec(docker('exec',prefix+'-archive','cat','/sys/fs/cgroup/cpu.stat'))[1])/1000,
@@ -467,7 +445,6 @@ try{
     await db.query('delete from historical_pacs_studies where study_instance_uid=any($1::text[])',[cases.flatMap(c=>[c.study,c.study+'.8'])]);
     await db.query('delete from native_reports where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from viewer_launch_sessions where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from study_source_resolutions where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from doctor_portal.case_team_assignments where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from appointments_v2.bookings where id=any($1::bigint[])',[ids]);await db.query('delete from patients where id=any($1::bigint[])',[cases.map(c=>c.patientId)]);if(doctorId){await db.query('delete from doctor_portal.doctor_modality_permissions where doctor_id=$1',[doctorId]);await db.query('delete from doctor_portal.doctor_profiles where id=$1',[doctorId]);}if(policySetId){await db.query('delete from appointments_v2.policy_versions where policy_set_id=$1',[policySetId]);await db.query('delete from appointments_v2.policy_sets where id=$1',[policySetId]);}if(userId){await db.query('delete from audit_log where changed_by_user_id=$1',[userId]);await db.query('delete from users where id=$1',[userId]);}await db.query('commit');
   }catch(error){await db.query('rollback');console.error('Synthetic fixture cleanup failed:',error.message);}finally{db.release();}
-  if(authorizationServer)await new Promise(r=>authorizationServer.close(r));
   if(workspaceFixture)await workspaceFixture.cleanup();
   if(createdModalityIds.length)await pool.query('delete from modalities where id=any($1::bigint[])',[createdModalityIds]);
   env.uploadsDir=oldUploads;await pool.query("delete from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')");for(const row of originalSettings)await pool.query('insert into system_settings(category,setting_key,setting_value,updated_by_user_id,updated_at) values($1,$2,$3,$4,$5)',[row.category,row.setting_key,row.setting_value,row.updated_by_user_id,row.updated_at]);await pool.query('update ohif_viewer_settings set enabled=$1,native_reporting_enabled=$2,access_strategy=$3,selected_pacs_node_id=$4,allow_prior_studies=$5,max_prior_studies=$6 where singleton_key=true',[originalOhif.enabled,originalOhif.native_reporting_enabled,originalOhif.access_strategy,originalOhif.selected_pacs_node_id,originalOhif.allow_prior_studies,originalOhif.max_prior_studies]);await pool.end();

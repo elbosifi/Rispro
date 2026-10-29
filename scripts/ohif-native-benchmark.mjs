@@ -121,7 +121,7 @@ export async function runNativeBenchmark(h) {
     assert.equal(response.status(), 302);
     return response.headers().location;
   }
-  // Real plugin, login cookie and viewer sessions; no viewer/admin credential substitution.
+  // Real gateway authorization, login cookie and viewer sessions.
   const authorized = await browser.newContext(); await authorized.addCookies([{ name: env.cookieName, value: login, url: origin }]);
   const location = await exchange(ct, authorized), contextId = new URL(location, origin).searchParams.get('risproContext');
   const native = `${origin}/ohif-native/context/${contextId}/studies/${ct.study}`;
@@ -129,16 +129,16 @@ export async function runNativeBenchmark(h) {
     ['authenticated study metadata', await authorized.request.get(native + '/metadata'), 200],
     ['unrelated existing study', await authorized.request.get(native.replace(ct.study, cases[1].study) + '/metadata'), 403],
     ['write forbidden', await authorized.request.post(native + '/metadata'), 405],
-    ['unrestricted search unavailable', await authorized.request.get(`${origin}/ohif-native/context/${contextId}/studies`), 404],
+    ['unrestricted search unavailable', await authorized.request.get(`${origin}/ohif-native/context/${contextId}/studies`), 403],
   ];
-  const anonymous = await browser.newContext(); checks.push(['missing login', await anonymous.request.get(native + '/metadata'), 403]); await anonymous.close();
+  const anonymous = await browser.newContext(); checks.push(['missing login', await anonymous.request.get(native + '/metadata'), 401]); await anonymous.close();
   for (const [check, response, expected] of checks) { assert.equal(response.status(), expected, check); security.push({ check, status: 'PASS', http: response.status() }); }
   const jwt=require('jsonwebtoken');
   const otherId=(await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'SYNTHETIC OTHER READER','disabled','doctor',true) returning id",['native-denied.'+randomUUID()])).rows[0].id;
   const other=await browser.newContext();
   try{
     await other.addCookies([{name:env.cookieName,value:jwt.sign({sub:Number(otherId),role:'doctor'},env.jwtSecret,{expiresIn:'1h'}),url:origin}]);
-    assert.equal((await other.request.get(native+'/metadata')).status(),403);security.push({check:'wrong user cannot reuse another viewer context',status:'PASS'});
+    assert.equal((await other.request.get(native+'/metadata')).status(),401);security.push({check:'wrong user cannot reuse another viewer context',status:'PASS'});
   }finally{await other.close();await pool.query('delete from users where id=$1',[otherId]);}
   const otherLocation=await exchange(cases[1],authorized),otherContext=new URL(otherLocation,origin).searchParams.get('risproContext');
   const otherNative=`${origin}/ohif-native/context/${otherContext}/studies/${cases[1].study}`;
@@ -146,13 +146,13 @@ export async function runNativeBenchmark(h) {
   assert.equal((await authorized.request.get(otherNative.replace(cases[1].study,ct.study)+'/metadata')).status(),403);
   assert.equal((await authorized.request.get(native+'/metadata')).status(),200);security.push({check:'two viewer contexts keep distinct study allowlists',status:'PASS'});
   const expired=await browser.newContext();await expired.addCookies([{name:env.cookieName,value:jwt.sign({sub:h.userId,role:'doctor'},env.jwtSecret,{expiresIn:-1}),url:origin}]);
-  assert.equal((await expired.request.get(native+'/metadata')).status(),403);await expired.close();security.push({check:'expired login',status:'PASS'});
+  assert.equal((await expired.request.get(native+'/metadata')).status(),401);await expired.close();security.push({check:'expired login',status:'PASS'});
   const session = (await pool.query('select id from viewer_launch_sessions where report_context_id=$1', [contextId])).rows[0];
   await pool.query("update viewer_launch_sessions set expires_at=now()-interval '1 second' where id=$1",[session.id]);await sleep(1100);
-  assert.equal((await authorized.request.get(native+'/metadata')).status(),403);security.push({check:'expired viewer session',status:'PASS'});
+  assert.equal((await authorized.request.get(native+'/metadata')).status(),401);security.push({check:'expired viewer session',status:'PASS'});
   await pool.query("update viewer_launch_sessions set expires_at=now()+interval '1 hour' where id=$1",[session.id]);await sleep(1100);
   await pool.query('update viewer_launch_sessions set revoked_at=now() where id=$1', [session.id]); await sleep(1100);
-  assert.equal((await authorized.request.get(native + '/metadata')).status(), 403); security.push({ check: 'revocation after one-second plugin cache', status: 'PASS' });
+  assert.equal((await authorized.request.get(native + '/metadata')).status(), 401); security.push({ check: 'revocation without gateway authorization cache', status: 'PASS' });
   assert.equal((await authorized.request.get(otherNative+'/metadata')).status(),200);security.push({check:'revoking one context leaves another permitted context isolated',status:'PASS'});
   await authorized.close(); emit({ security });
   if (process.env.OHIF_LOADING_PROFILE_BENCHMARK === '1') {
@@ -305,7 +305,7 @@ export async function runNativeBenchmark(h) {
       const path=`/ohif-native/context/${qualityContext}/studies/${large.study}/series/${item.series}/instances/${item.sop}/frames/1`;
       const samples=[];
       for(let pair=0;pair<10;pair++)for(const encoding of pair%2?['gzip','identity']:['identity','gzip']){
-        const response=await raw(origin+path.replace('/ohif-native/','/ohif-native-gzip/'),{Cookie:cookie,Accept:'multipart/related; type="application/octet-stream"; transfer-syntax=*','Accept-Encoding':encoding});
+        const response=await raw(origin+path,{Cookie:cookie,Accept:'multipart/related; type="application/octet-stream"; transfer-syntax=*','Accept-Encoding':encoding});
         assert.equal(response.status,200);
         const body=response.headers['content-encoding']==='gzip'?gunzipSync(response.body):response.body;
         assert.deepEqual(frameBytes(body,response.headers['content-type']),item.storedPixels,'Stored compressed frame bytes must remain unchanged');

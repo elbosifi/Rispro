@@ -66,7 +66,7 @@ After addressing the unrelated test failure separately, the prepared invocation 
 
 ```powershell
 $env:OHIF_NATIVE_DELIVERY_ENABLED='true'
-$env:OHIF_NATIVE_AUTH_SECRET='synthetic-only-local-callback'
+$env:OHIF_NATIVE_AUTH_SECRET='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 $env:OHIF_TEST_IMAGE='rispro-ohif:loading-profiles'
 $env:OHIF_NATIVE_BENCHMARK='1'
 $env:OHIF_LOADING_PROFILE_BENCHMARK='1'

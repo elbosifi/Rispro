@@ -324,8 +324,8 @@ if (env.webPushEnabled) {
   }
 }
 
-if (env.ohifNativeDeliveryEnabled && !env.ohifNativeAuthSecret) {
-  throw new Error("OHIF_NATIVE_AUTH_SECRET is required when native OHIF delivery is enabled.");
+if (env.ohifNativeDeliveryEnabled && !/^[a-f0-9]{64}$/.test(env.ohifNativeAuthSecret)) {
+  throw new Error("OHIF_NATIVE_AUTH_SECRET must be 64 lowercase hex characters when native OHIF delivery is enabled.");
 }
 
 for (const [name, value] of [["OHIF_PUBLIC_BASE_URL", env.ohifPublicBaseUrl], ["OHIF_DICOMWEB_PROXY_PATH", env.ohifDicomWebProxyPath]] as const) {

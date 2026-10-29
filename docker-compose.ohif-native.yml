@@ -1,0 +1,12 @@
+# Opt-in gateway transport; append to the VM's EXISTING Compose file list.
+# Orthanc credentials/origin continue to come from RISpro Settings, not this file.
+services:
+  gateway:
+    environment:
+      OHIF_NATIVE_AUTH_SECRET: ${OHIF_NATIVE_AUTH_SECRET:?Set a random 64-character hex gateway secret in .env}
+      NGINX_ENVSUBST_FILTER: ^OHIF_NATIVE_AUTH_SECRET$
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/ohif-native
+    tmpfs:
+      - /etc/nginx/ohif-native:mode=0700
+    volumes:
+      - ./docker/ohif/native-location.conf:/etc/nginx/templates/native.conf.template:ro

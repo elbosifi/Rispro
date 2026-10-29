@@ -1295,15 +1295,16 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     );
   });
 
-  it("authorizes native Orthanc callbacks with the existing login, case and exact-study session", async (t) => {
+  it("authorizes native gateway requests with the existing login, case and complete study path", async (t) => {
     guard();
     const { env } = await import("../../config/env.js");
     const repository = await import("../ohif-viewer/repository.js");
+    const archive = await import("../../services/authoritative-orthanc-service.js");
     const previous = { enabled: env.ohifNativeDeliveryEnabled, secret: env.ohifNativeAuthSecret };
     env.ohifNativeDeliveryEnabled = true;
-    env.ohifNativeAuthSecret = "synthetic-plugin-callback";
-    t.after(() => { env.ohifNativeDeliveryEnabled = previous.enabled; env.ohifNativeAuthSecret = previous.secret; });
-    // Keep this session fixture outside the date-scoped SonicDICOM refresh cases.
+    env.ohifNativeAuthSecret = "a".repeat(64);
+    archive.__setAuthoritativeOrthancSettingsForTests({ enabled: true, baseUrl: "http://synthetic-archive.invalid:8042", username: "synthetic-service", password: "synthetic-service-password", timeoutSeconds: 30, verifyTls: true, displayName: "Synthetic", autoExportClinicalDocuments: false, autoRouteEnabled: false, autoRouteDestinationKey: "", autoRouteDestinationKeys: [] });
+    t.after(() => { env.ohifNativeDeliveryEnabled = previous.enabled; env.ohifNativeAuthSecret = previous.secret; archive.__resetAuthoritativeOrthancForTests(); });
     const appointmentId = await createBooking({ modalityId: ctModalityId, examTypeId: ctExamTypeId, date: addDays(800), patientName: "Native authorization" });
     await assignDirectly(appointmentId, doctor.doctorId);
     const uid = "2.25.202610270001";
@@ -1311,40 +1312,46 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
     await repository.createViewerLaunchSession({ userId: doctor.id, appointmentId, sourcePacsNodeId: null, accessStrategy: "authoritative_orthanc", currentStudyUid: uid, permittedStudyUids: [uid], tokenHash, expiresAt: new Date(Date.now() + 60_000) });
     const session = await repository.consumeViewerLaunchToken(tokenHash, doctor.id, tokenHash, new Date(Date.now() + 60_000));
     assert.ok(session);
-    const authorization = "Basic " + Buffer.from("rispro:" + env.ohifNativeAuthSecret).toString("base64");
-    const callback = async (overrides: Record<string, unknown> = {}, cookie = doctor.cookie, serviceAuth = authorization) => {
-      const response = await fetch(app.baseUrl + "/api/ohif/native/tokens/validate", { method: "POST", headers: { "Content-Type": "application/json", Authorization: serviceAuth }, body: JSON.stringify({ "token-key": "x-rispro-viewer", "token-value": session.reportContextId + "|" + cookie, method: "get", level: "study", "dicom-uid": uid, ...overrides }) });
-      return { status: response.status, body: await response.json() as { granted?: boolean; validity?: number } };
-    };
-    assert.deepEqual(await callback(), { status: 200, body: { granted: true, validity: 1 } });
-    assert.equal((await callback({}, doctor.cookie, "wrong")).status, 401);
-    assert.equal((await callback({ "dicom-uid": "9.9.9" })).body.granted, false);
-    assert.equal((await callback({ method: "delete" })).body.granted, false);
-    assert.equal((await callback({ level: "system", uri: "/studies" })).body.granted, false);
-    assert.equal((await callback({ "token-value": randomUUID() + "|" + doctor.cookie })).body.granted, false);
-    assert.equal((await callback({}, otherDoctor.cookie)).body.granted, false);
-    assert.equal((await callback({}, "")).body.granted, false);
+    const path = `/ohif-native/context/${session.reportContextId}/studies/${uid}`;
+    const authorize = (uri = path + "/metadata", cookie = doctor.cookie, secret = env.ohifNativeAuthSecret, method = "GET") => fetch(app.baseUrl + "/api/ohif/native/authorize", { headers: { Cookie: cookie, "X-Rispro-Native-Gateway": secret, "X-Rispro-Native-Uri": uri, "X-Rispro-Native-Method": method } });
+    const granted = await authorize();
+    assert.equal(granted.status, 204);
+    assert.equal(granted.headers.get("x-rispro-orthanc-origin"), "http://synthetic-archive.invalid:8042");
+    assert.equal(granted.headers.get("x-rispro-orthanc-authorization"), "Basic " + Buffer.from("synthetic-service:synthetic-service-password").toString("base64"));
+    assert.equal(granted.headers.get("x-rispro-dicomweb-path"), `/studies/${uid}/metadata`);
+    for (const secret of ["", "wrong"]) {
+      const denied = await authorize(undefined, doctor.cookie, secret);
+      assert.equal(denied.status, 403);
+      assert.equal(denied.headers.get("x-rispro-orthanc-authorization"), null);
+      assert.ok(!(await denied.text()).includes("synthetic-service-password"));
+    }
+    assert.equal((await authorize(path.replace(uid, "9.9.9") + "/metadata")).status, 403);
+    assert.equal((await authorize(path + "/metadata?StudyInstanceUID=9.9.9")).status, 403);
+    assert.equal((await authorize(path + "/metadata/extra")).status, 403);
+    assert.equal((await authorize(path + "/%2e%2e/system")).status, 403);
+    assert.equal((await authorize(undefined, doctor.cookie, undefined, "DELETE")).status, 403);
+    assert.equal((await authorize(path.replace(session.reportContextId!, randomUUID()) + "/metadata")).status, 401);
+    assert.equal((await authorize(undefined, otherDoctor.cookie)).status, 401);
+    assert.equal((await authorize(undefined, "")).status, 401);
     const jwt = (await import("jsonwebtoken")).default;
-    assert.equal((await callback({}, `${env.cookieName}=${jwt.sign({ sub: doctor.id, role: "doctor" }, env.jwtSecret, { expiresIn: -1 })}`)).status, 401);
+    assert.equal((await authorize(undefined, `${env.cookieName}=${jwt.sign({ sub: doctor.id, role: "doctor" }, env.jwtSecret, { expiresIn: -1 })}`)).status, 401);
     await pool.query("update viewer_launch_sessions set expires_at=now()-interval '1 second' where id=$1", [session.id]);
-    assert.equal((await callback()).body.granted, false);
+    assert.equal((await authorize()).status, 401);
     await pool.query("update viewer_launch_sessions set expires_at=now()+interval '1 minute',revoked_at=now() where id=$1", [session.id]);
-    assert.equal((await callback()).body.granted, false);
+    assert.equal((await authorize()).status, 401);
     await pool.query("update viewer_launch_sessions set revoked_at=null where id=$1", [session.id]);
     env.ohifNativeDeliveryEnabled = false;
-    assert.equal((await callback()).body.granted, false);
-    const archiveSettings = (await pool.query("select setting_key,setting_value,updated_by_user_id from system_settings where category='authoritative_orthanc'")).rows;
-    t.after(async () => {
-      await pool.query("delete from system_settings where category='authoritative_orthanc'");
-      for (const row of archiveSettings) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values('authoritative_orthanc',$1,$2::jsonb,$3)", [row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
-    });
-    for (const [key, value] of Object.entries({ enabled: "enabled", username: "synthetic-service", password: "synthetic-service-password" })) await pool.query("insert into system_settings(category,setting_key,setting_value) values('authoritative_orthanc',$1,$2::jsonb) on conflict(category,setting_key) do update set setting_value=excluded.setting_value", [key, JSON.stringify({ value })]);
-    const serviceToken = { "token-key": "authorization", "token-value": "Basic " + Buffer.from("synthetic-service:synthetic-service-password").toString("base64") };
-    assert.equal((await callback(serviceToken)).body.granted, true, "Rollback retains authenticated backend archive operations");
-    assert.equal((await callback({ ...serviceToken, "token-value": "Basic wrong" })).body.granted, false);
-    const profile = await fetch(app.baseUrl + "/api/ohif/native/user/get-profile", { method: "POST", headers: { "Content-Type": "application/json", Authorization: authorization }, body: JSON.stringify(serviceToken) });
-    assert.equal(profile.status, 200);
-    assert.deepEqual((await profile.json() as { permissions: string[] }).permissions, ["all"]);
+    const disabled = await authorize();
+    assert.equal(disabled.status, 403);
+    assert.equal(disabled.headers.get("x-rispro-orthanc-authorization"), null);
+    env.ohifNativeDeliveryEnabled = true;
+    const saved = await archive.readAuthoritativeOrthancSettings();
+    for (const baseUrl of ["http://orthanc:8042", "http://rispro-orthanc:8042", "https://synthetic-archive.invalid:8042"]) {
+      archive.__setAuthoritativeOrthancSettingsForTests({ ...saved, baseUrl });
+      const denied = await authorize();
+      assert.equal(denied.status, 403);
+      assert.equal(denied.headers.get("x-rispro-orthanc-authorization"), null);
+    }
   });
 
   it("refreshes a stale SonicDICOM cache entry through the protected board scope", async () => {
