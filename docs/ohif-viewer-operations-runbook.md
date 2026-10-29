@@ -14,9 +14,11 @@
 7. Enable the database OHIF setting and verify `Open Images` for a controlled doctor/case. No `.env` or Docker change is required for ordinary enable/disable operations.
 8. Confirm the current study, bounded priors, LAN access, domain access, audit entries, and no credentials in browser network responses.
 
-## Native Orthanc delivery pilot (disabled by default)
+## Native Orthanc delivery in prepared deployments
 
-`OHIF_NATIVE_DELIVERY_ENABLED=false` is the default. Native delivery is separate
+Base installations default to proxy. Deploying `docker-compose.ohif-native.yml`
+with its required gateway secret enables native automatically, unless
+`OHIF_NATIVE_DELIVERY_ENABLED=false` is explicitly set. Native delivery is separate
 from the existing `authoritative_orthanc` source strategy. It changes transport
 only: launch, case authorization, study selection, reporting and the Express
 fallback retain their existing authority.
@@ -97,8 +99,10 @@ use the explicit proxy rollback below.
    the VM's normal startup/update command so future recreations retain it.
 5. Verify `/api/health`, `/ohif/`, and ordinary proxy viewing while native remains
    off. Verify public `/_ohif-native-authorize` and
-   `/api/ohif/native/authorize` return 404. In the approved pilot window, set
-   `OHIF_NATIVE_DELIVERY_ENABLED=true` in `.env`, then apply it to the web app:
+   `/api/ohif/native/authorize` return 404. In the approved pilot window,
+   remove the staging `OHIF_NATIVE_DELIVERY_ENABLED=false` entry from `.env`
+   (including any exported shell override), then apply the overlay default to
+   the web app:
 
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.ohif-native.yml up -d --no-deps app
@@ -107,6 +111,9 @@ use the explicit proxy rollback below.
    Do not use `restart` to apply changed environment values. No Orthanc restart,
    migration rollback or auto-routing change is needed. Do not run commands
    that recreate the internal Orthanc or the whole stack.
+   Existing deployments carrying an explicit `false` retain proxy delivery until
+   that override is removed. No Settings or doctor-facing delivery selection is
+   needed; other access strategies retain their existing transport.
 6. Open a fresh authorized case. In browser DevTools Network, filter `frames`,
    `metadata` and `rendered`. WADO URLs must start with the RISpro origin plus
    `/ohif-native/context/<context>/studies/<UID>/...`, with successful multipart

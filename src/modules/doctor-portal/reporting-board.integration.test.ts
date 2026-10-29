@@ -1352,6 +1352,24 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
       assert.equal(denied.status, 403);
       assert.equal(denied.headers.get("x-rispro-orthanc-authorization"), null);
     }
+    // Reuse the existing launch selector: only prepared authoritative sessions
+    // receive the native URL flag; emergency disable and other strategies do not.
+    const sourceId = Number((await pool.query("insert into pacs_nodes(name,host,called_ae_title) values('SYNTHETIC launch selector','127.0.0.1','SYNTHETIC') returning id")).rows[0].id);
+    t.after(async () => {
+      await pool.query('delete from viewer_launch_sessions where source_pacs_node_id=$1', [sourceId]);
+      await pool.query('delete from pacs_nodes where id=$1', [sourceId]);
+    });
+    for (const [accessStrategy, enabled, native] of [
+      ["authoritative_orthanc", true, true], ["authoritative_orthanc", false, false],
+      ["native_dicomweb", true, false], ["orthanc_gateway", true, false],
+    ] as const) {
+      env.ohifNativeDeliveryEnabled = enabled;
+      const token = randomUUID();
+      await repository.createViewerLaunchSession({ userId: doctor.id, appointmentId, sourcePacsNodeId: accessStrategy === "authoritative_orthanc" ? null : sourceId, accessStrategy, currentStudyUid: uid, permittedStudyUids: [uid], tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60_000) });
+      const response = { cookie() {} } as unknown as import("express").Response;
+      const redirect = await ohifViewerService.exchangeViewerLaunchToken(token, doctor.id, response);
+      assert.equal(new URL(redirect, "http://synthetic.invalid").searchParams.get("risproDelivery"), native ? "native" : null);
+    }
   });
 
   it("refreshes a stale SonicDICOM cache entry through the protected board scope", async () => {

@@ -1,6 +1,12 @@
 # Opt-in gateway transport; append to the VM's EXISTING Compose file list.
 # Orthanc credentials/origin continue to come from RISpro Settings, not this file.
 services:
+  app:
+    environment:
+      # Prepared deployments select native automatically; explicit false is the
+      # server-side emergency override. Base-only installations stay on proxy.
+      OHIF_NATIVE_DELIVERY_ENABLED: "${OHIF_NATIVE_DELIVERY_ENABLED:-true}"
+      OHIF_NATIVE_AUTH_SECRET: ${OHIF_NATIVE_AUTH_SECRET:?Set a random 64-character hex gateway secret in .env}
   gateway:
     environment:
       OHIF_NATIVE_AUTH_SECRET: ${OHIF_NATIVE_AUTH_SECRET:?Set a random 64-character hex gateway secret in .env}
