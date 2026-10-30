@@ -26,7 +26,7 @@ describe("OHIF schema integration", () => {
     assert.equal(unique.length, 1);
     assert.match(unique[0].indexdef, /CREATE UNIQUE INDEX .*\(appointment_id\) WHERE \(legacy_primary AND \(deleted_at IS NULL\)\)/);
     const triggers=(await pool.query("select tgname from pg_trigger where tgrelid in ('native_reports'::regclass,'native_report_versions'::regclass,'native_report_key_images'::regclass) and not tgisinternal")).rows;
-    assert.equal(triggers.length,3);
+    assert.deepEqual(triggers.map(t=>t.tgname).sort(),['native_primary_signature_guard','native_report_history_immutable','native_report_image_immutable','native_signed_report_immutable']);
   });
   it("has all normalized OHIF tables, a singleton settings row, and the hardening migration", async () => {
     const tables = await pool.query<{ table_name: string }>(

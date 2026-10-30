@@ -96,38 +96,59 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
     const date=String(input[key]).replaceAll('-','');if(!/^\d{8}$/.test(date)) throw new HttpError(400,'Invalid study date.');
     where.push(`replace(s.study_date,'-','') ${operator} ${param(date)}`);
   }
-  if(assignedOnly) where.push('s.assigned_doctor_id=$4');
+  // Count/filter only the data needed by the selected filter. Attribution JSON
+  // and appointment display data are hydrated after the materialized page limit.
+  const registryJoin=` left join native_reporting_studies st on st.source_archive_key=$2 and st.study_instance_uid=s.study_instance_uid`;
+  const reportFrom=`from native_reports n left join native_report_study_links l on l.report_id=n.id where n.deleted_at is null and n.primary_study_uid=s.study_instance_uid
+    and n.imaging_source->>'accessStrategy'='authoritative_orthanc' and coalesce(n.imaging_source->>'archiveKey',$2)=$2 and (l.study_id=st.id or l.report_id is null)`;
+  const mine=`(n.author_user_id=$3 or exists(select 1 from native_report_contributors c where c.report_id=n.id and c.user_id=$3))`;
+  const reportJoin=(display:boolean)=>` left join lateral(select count(*)::int report_count,
+    bool_or(n.status='final' and n.is_primary and n.report_type='primary' and (l.report_id is null or st.primary_report_id=n.id)) primary_final,
+    bool_or(n.status='draft' and n.report_type='primary') active_draft,
+    bool_or(n.review_requested_at is not null and n.status='draft' and n.report_type='primary') in_review,
+    bool_or(${mine}) mine,bool_or(n.status='draft' and ${mine}) my_draft
+    ${display?`,
+      jsonb_agg(jsonb_build_object('id',n.id,'author',n.author_name,'signer',n.finalizer_name,'status',case when n.status='draft' and n.review_requested_at is not null then 'in_review' else n.status end) order by n.id) reports`:''}
+    ${reportFrom}) r on true`;
+  // Two indexed UID lookups replace scanning bookings with OR / EXISTS for each
+  // archive row. UNION removes a booking found through both verified paths.
+  const appointmentJoin=` left join lateral(select b.id appointment_id,cta.assigned_doctor_id,cta.assigned_at,d.display_name assigned_doctor,rp.name_en priority,
+    case when mf.id is not null or cache.report_status='final' then 'external_final'
+      when cache.report_status='draft' then 'external_draft'
+      when cache.report_status in ('no_report','study_not_found') then 'no_report' else 'unknown' end external_reporting_status
+    from (select id from appointments_v2.bookings where study_instance_uid=s.study_instance_uid
+      union select appointment_id from study_source_resolutions where study_instance_uid=s.study_instance_uid and source_kind='authoritative_orthanc'
+      order by id limit 1) matched join appointments_v2.bookings b on b.id=matched.id
+    left join doctor_portal.case_team_assignments cta on cta.appointment_id=b.id and cta.assignment_type='reporting' and cta.status='active'
+    left join doctor_portal.doctor_profiles d on d.id=cta.assigned_doctor_id left join reporting_priorities rp on rp.id=b.reporting_priority_id
+    left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id=b.id
+    left join doctor_portal.reporting_board_manual_final_overrides mf on mf.appointment_id=b.id and mf.cleared_at is null) a on true`;
+  const nativeStatus=`case when r.primary_final then 'final' when r.in_review then 'in_review' when r.active_draft then 'draft'
+    when r.report_count>0 then 'additional_reports' else 'no_report' end`;
   const filter=String(input.status||'all');
-  if(filter==='my_reports') where.push('coalesce(s.mine,false)');
-  else if(filter==='my_drafts') where.push('coalesce(s.my_draft,false)');
-  else if(filter!=='all'&&filter!=='assigned') where.push(`reporting_status=${param(filter)}`);
-  const sonic=await readSonicDicomReportSettings();
-  const sql=`with catalogue as (
-    select s.*,st.id as registry_id,a.appointment_id,a.assigned_doctor_id,a.assigned_at,a.assigned_doctor,a.priority,
-      coalesce(r.report_count,0) report_count,coalesce(r.reports,'[]'::jsonb) reports,r.mine,r.my_draft,
-      case when st.primary_report_id is not null or r.primary_final or a.external_final then 'final' when r.in_review then 'in_review' when r.active_draft then 'draft'
-        when r.report_count>0 then 'additional_reports' when a.external_status='draft' then 'external_draft'
-        when ${sonic.sonicDicomReportsEnabled?'true':'false'} or a.external_unknown then 'unknown' else 'no_report' end reporting_status
-    from historical_pacs_studies s
-    left join native_reporting_studies st on st.source_archive_key=$2 and st.study_instance_uid=s.study_instance_uid
-    left join lateral(select count(*)::int report_count,bool_or(n.status='final' and n.is_primary) primary_final,bool_or(n.status='draft') active_draft,bool_or(n.review_requested_at is not null and n.status='draft') in_review,
-      bool_or(n.author_user_id=$3 or exists(select 1 from native_report_contributors c where c.report_id=n.id and c.user_id=$3)) mine,
-      bool_or(n.status='draft' and (n.author_user_id=$3 or exists(select 1 from native_report_contributors c where c.report_id=n.id and c.user_id=$3))) my_draft,
-      jsonb_agg(jsonb_build_object('id',n.id,'author',n.author_name,'signer',n.finalizer_name,'status',case when n.status='draft' and n.review_requested_at is not null then 'in_review' else n.status end)) reports
-      from native_reports n left join native_report_study_links l on l.report_id=n.id where n.deleted_at is null and n.primary_study_uid=s.study_instance_uid
-        and n.imaging_source->>'accessStrategy'='authoritative_orthanc' and coalesce(n.imaging_source->>'archiveKey',$2)=$2 and (l.study_id=st.id or l.report_id is null)) r on true
-    left join lateral(select b.id appointment_id,cta.assigned_doctor_id,cta.assigned_at,d.display_name assigned_doctor,rp.name_en priority,
-      (mf.id is not null or cache.report_status='final') external_final,cache.report_status external_status,
-      (cache.report_status='unavailable' and cache.last_attempt_at is not null) external_unknown
-      from appointments_v2.bookings b left join doctor_portal.case_team_assignments cta on cta.appointment_id=b.id and cta.assignment_type='reporting' and cta.status='active'
-      left join doctor_portal.doctor_profiles d on d.id=cta.assigned_doctor_id left join reporting_priorities rp on rp.id=b.reporting_priority_id
-      left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id=b.id
-      left join doctor_portal.reporting_board_manual_final_overrides mf on mf.appointment_id=b.id and mf.cleared_at is null
-      where b.study_instance_uid=s.study_instance_uid or exists(select 1 from study_source_resolutions sr where sr.appointment_id=b.id and sr.study_instance_uid=s.study_instance_uid and sr.source_kind='authoritative_orthanc') order by b.id limit 1) a on true
-  ) select * from catalogue s where ${where.join(' and ')}`;
+  let filterJoins='';
+  if(assignedOnly){filterJoins+=appointmentJoin;where.push('a.assigned_doctor_id=$4');}
+  if(['unknown','external_draft','external_final'].includes(filter)) {
+    if(!assignedOnly)filterJoins+=appointmentJoin;
+    where.push(`coalesce(a.external_reporting_status,'unknown')=${param(filter)}`);
+  } else if(filter==='my_reports'||filter==='my_drafts') {
+    filterJoins+=registryJoin+' '+reportJoin(false);
+    where.push(filter==='my_drafts'?'coalesce(r.my_draft,false)':'coalesce(r.mine,false)');
+  } else if(filter!=='all'&&filter!=='assigned') {
+    filterJoins+=registryJoin+' '+reportJoin(false);
+    where.push(`(${nativeStatus})=${param(filter)}`);
+  }
   const order=({date:'study_date',patient:'patient_name_raw',accession:'accession_number',modality:'modalities_in_study'} as Record<string,string>)[String(input.sort)]||'study_date';
   const direction=input.direction==='asc'?'asc':'desc';
-  const count=(await pool.query('select count(*)::int total from ('+sql+') filtered',values)).rows[0].total;
-  const rows=(await pool.query(sql+` order by ${order} ${direction} nulls last,orthanc_study_id limit ${param(limit)} offset ${param(offset)}`,values)).rows;
+  // Keep $2/$3 typed even when no reporting joins are required by the count.
+  const filtered=`from historical_pacs_studies s ${filterJoins} where $2::text is not null and $3::bigint>0 and ${where.join(' and ')}`;
+  const count=(await pool.query(`select count(*)::int total ${filtered}`,values)).rows[0].total;
+  const page=`select s.* ${filtered} order by s.${order} ${direction} nulls last,s.orthanc_study_id limit ${param(limit)} offset ${param(offset)}`;
+  const rows=(await pool.query(`with page as materialized (${page})
+    select s.*,st.id registry_id,a.appointment_id,a.assigned_doctor_id,a.assigned_at,a.assigned_doctor,a.priority,
+      coalesce(r.report_count,0) report_count,coalesce(r.reports,'[]'::jsonb) reports,r.mine,r.my_draft,
+      (${nativeStatus}) reporting_status,coalesce(a.external_reporting_status,'unknown') external_reporting_status
+    from page s ${registryJoin} ${reportJoin(true)} ${appointmentJoin}
+    order by s.${order} ${direction} nulls last,s.orthanc_study_id`,values)).rows;
   return {studies:rows,total:count,limit,offset,freshness,modalities:codes};
 }

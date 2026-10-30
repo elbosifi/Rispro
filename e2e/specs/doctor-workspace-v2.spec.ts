@@ -48,6 +48,12 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   const pixels:string[]=[];page.on('request',r=>{if(/\/frames\/|\/wado|\/ohif\/|\/ohif-dicomweb\//i.test(r.url()))pixels.push(r.url());});
   await page.goto('/doctor/reporting?q='+prefix+'&offset=200');
   await expect(page.getByRole('heading',{name:'Reporting',exact:true})).toBeVisible();await expect(page.getByText('201–215 of 215')).toBeVisible();
+  await expect(page.getByRole('cell').filter({hasText:'No RISpro Report'})).toHaveCount(15);
+  await expect(page.getByRole('cell').filter({hasText:'External Status Unknown'})).toHaveCount(15);
+  for(const label of ['RISpro Draft','In Review','RISpro Final','External Draft','External Final','Additional Reports'])await expect(page.getByLabel('Reporting status').getByRole('option',{name:label,exact:true})).toHaveCount(1);
+  const rowHeight=await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height);expect(rowHeight).toBeLessThanOrEqual(72);
+  writeFileSync(info.outputPath('catalogue-density.json'),JSON.stringify({rowHeight,visibleRows:await page.locator('tbody tr').evaluateAll(rows=>rows.filter(r=>r.getBoundingClientRect().top>=0&&r.getBoundingClientRect().bottom<=innerHeight).length)}));
+  await page.screenshot({path:info.outputPath('desktop-catalogue.png'),fullPage:true});
   await expect(page.locator('aside').getByRole('button',{name:'Reporting Board',exact:true})).toHaveCount(0);
   const denied=await page.request.get('/api/doctor/reporting-board/cases');expect(denied.status()).toBe(403);
   await page.getByRole('link',{name:'Open Reports'}).first().click();await expect(page.getByText('No RISpro report exists.')).toBeVisible();
@@ -76,6 +82,9 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   await page.getByRole('button',{name:'Submit for Review'}).click();await expect(page.getByText(/Primary Interpretation · in review/)).toBeVisible();await page.getByRole('button',{name:'Withdraw Review'}).click();await expect(page.getByText(/Primary Interpretation · draft/)).toBeVisible();
   await page.getByRole('button',{name:'History / Compare'}).click();await expect(page.getByRole('heading',{name:'Revision history and attribution'})).toBeVisible();await page.screenshot({path:info.outputPath('history.png'),fullPage:true});
   await page.getByRole('button',{name:'Finalize',exact:true}).click();await page.getByRole('button',{name:'Confirm and Sign'}).click();await expect(page.getByLabel('Findings',{exact:true})).toHaveAttribute('readonly','');await expect(page.getByText(/Signed by: Dr E2E Non-Supervisor/)).toBeVisible();
+  const signedUid=(await db.query("select primary_study_uid from native_reports where status='final' limit 1")).rows[0].primary_study_uid;
+  const catalogueResponse=await page.request.get('/api/native-reporting/workspace/studies?'+new URLSearchParams({q:signedUid,status:'final'}));expect(catalogueResponse.ok()).toBeTruthy();
+  const catalogue=await catalogueResponse.json();expect(catalogue.total).toBe(1);expect(catalogue.studies[0].reporting_status).toBe('final');expect(catalogue.studies[0].external_reporting_status).toBe('unknown');
   const print=await page.request.get(new URL(await page.getByRole('link',{name:'Print',exact:true}).getAttribute('href')||'',page.url()).href);expect(print.ok()).toBeTruthy();expect(await print.text()).toContain('Retained conflicting local text');
   // A late transcription is cancelled when navigating to another report.
   await other.reload();await other.getByRole('link',{name:'All study reports'}).click();await other.getByLabel('Report type',{exact:true}).selectOption('second_opinion');await other.getByRole('button',{name:'Create Report',exact:true}).click();await expect(other.getByLabel('Findings',{exact:true})).toBeEditable();
@@ -85,6 +94,7 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   await other.getByRole('link',{name:'All study reports'}).click();await expect(other.getByRole('button',{name:'Create Report',exact:true})).toBeDisabled();await expect(other.getByText('Current policy allows signed addenda only.',{exact:false})).toBeVisible();
   await db.query(`update system_settings set setting_value=setting_value || '{"additional":"typed","allowedTypes":["primary","second_opinion","additional_interpretation","peer_review"]}'::jsonb where category='doctor_workspace' and setting_key='reporting_policy'`);
   await page.setViewportSize({width:390,height:844});await page.goto('/doctor/reporting?q='+prefix+'&offset=200');await expect(page.getByRole('link',{name:'Open Reports'}).first()).toBeVisible();await page.screenshot({path:info.outputPath('mobile-catalogue.png'),fullPage:true});
+  await page.getByRole('cell').filter({hasText:'No RISpro Report'}).first().scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('mobile-reporting-status.png')});
   await page.goto('/doctor/home');await expect(page.getByText('My active drafts',{exact:true})).toBeVisible();await page.screenshot({path:info.outputPath('mobile-home.png'),fullPage:true});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy();
   expect(pixels).toEqual([]);await second.close();

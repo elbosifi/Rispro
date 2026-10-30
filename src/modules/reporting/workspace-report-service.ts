@@ -30,7 +30,7 @@ async function registry(db:PoolClient,a:Access) {
       if(report.imaging_source.sourcePacsNodeId!==null || Number(report.patient_id)!==Number(a.appointment.patient_id)) throw new HttpError(409,'Legacy report source or patient requires reconciliation.');
       await verifyLiveStudy(a.study);
       await db.query('insert into native_report_study_links(report_id,study_id) values($1,$2)',[report.id,record.id]);
-      if(report.status==='final'&&report.is_primary) {
+      if(report.status==='final'&&report.is_primary&&report.report_type==='primary') {
         if(record.primary_report_id&&Number(record.primary_report_id)!==Number(report.id)) throw new HttpError(409,'Multiple existing primary signatures require reconciliation.');
         await db.query('update native_reporting_studies set primary_report_id=$2 where id=$1',[record.id,report.id]);record.primary_report_id=report.id;
       }
@@ -67,7 +67,7 @@ async function view(db:Pick<PoolClient,'query'>,report:ReportRow,a:Access,studyK
   report.author_doctor_role=loaded?loaded.role:(await db.query('select doctor_role from doctor_portal.doctor_profiles where user_id=$1',[report.author_user_id])).rows[0]?.doctor_role;
   const contributors=loaded?.contributors??(await db.query('select user_id as "userId",display_name as name,first_contributed_at as "firstContributedAt" from native_report_contributors where report_id=$1 order by first_contributed_at,user_id',[report.id])).rows;
   return {...await response(db,report,loaded),studyKey,status:report.status==='draft'&&report.review_requested_at?'in_review':report.status,
-    creatorId:Number(report.author_user_id),reportType:report.report_type,mode:report.collaboration_mode,isPrimary:report.is_primary,
+    creatorId:Number(report.author_user_id),reportType:report.report_type,mode:report.collaboration_mode,isPrimary:report.status==='final'&&report.is_primary&&report.report_type==='primary',
     contributors,lastEditor:report.last_editor_name||report.author_name,createdAt:report.created_at,deletedAt:report.deleted_at,
     reviewRequestedBy:report.review_requested_by,reviewRequestedAt:report.review_requested_at,preferredReviewerId:report.preferred_reviewer_id,
     reviewEnabled:a.policy.enabled&&(a.policy.review!=='none'||Boolean(report.review_requested_at)),blockedReason:a.freshness.fresh?null:'Archive verification is unavailable or stale. The preserved report is read-only.',

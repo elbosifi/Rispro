@@ -122,6 +122,35 @@ test('an additional interpretation alone never marks a study primary-final or dr
   assert.equal((await doctorDashboard(doctor,30)).departmentCompleted,before.departmentCompleted);
 });
 
+test('unrestricted independent signatures never acquire a second authoritative primary',async()=>{
+  const policy=await readReportingPolicy();await updateReportingPolicy(manager,{...policy,additional:'unrestricted'});
+  try {
+    let a=await create(doctor,18,'independent'),b=await create(other,18,'independent');
+    a=await saveWorkspaceDraft(doctor,a.id,{expectedRevision:a.revision,sections:content});b=await saveWorkspaceDraft(other,b.id,{expectedRevision:b.revision,sections:content});
+    const results=await Promise.all([finalizeWorkspaceReport(doctor,a.id,{expectedRevision:a.revision,requestId:randomUUID(),confirmed:true,signerUserId:doctor.userId}),finalizeWorkspaceReport(other,b.id,{expectedRevision:b.revision,requestId:randomUUID(),confirmed:true,signerUserId:other.userId})]);
+    assert.equal(results.filter(r=>r.isPrimary).length,1);
+    assert.equal((await getWorkspaceStudy(doctor,studies[18].orthancStudyId)).primaryReportId,results.find(r=>r.isPrimary)!.id);
+    assert.equal((await workspaceHistory(doctor,Number(a.id))).versions.filter(v=>v.kind==='final').length,1);
+  }finally{await updateReportingPolicy(manager,{...await readReportingPolicy(),additional:policy.additional});}
+});
+
+test('database rejects additional primary flags and duplicate legacy primary finals without changing signed rows',async()=>{
+  const primary=(await pool.query("select n.* from native_reports n join native_report_study_links l on l.report_id=n.id join native_reporting_studies s on s.id=l.study_id where s.orthanc_study_id=$1 and n.status='final' and n.is_primary",[studies[2].orthancStudyId])).rows[0];
+  const insert=`insert into native_reports(primary_study_uid,imaging_source,identity,status,sections,author_user_id,author_name,report_type,is_primary,finalized_by_user_id,finalized_at,signed_snapshot)
+    values($1,$2,$3,'final',$4,$5,'Synthetic',$6,true,$5,now(),'{}')`;
+  await assert.rejects(()=>pool.query(insert,[primary.primary_study_uid,JSON.stringify(primary.imaging_source),JSON.stringify(primary.identity),JSON.stringify(content),doctor.userId,'second_opinion']),/additional interpretation/);
+  await assert.rejects(()=>pool.query(insert,[primary.primary_study_uid,JSON.stringify({accessStrategy:'authoritative_orthanc',sourcePacsNodeId:null}),JSON.stringify(primary.identity),JSON.stringify(content),doctor.userId,'primary']),/primary final already exists/);
+  assert.deepEqual((await pool.query('select * from native_reports where id=$1',[primary.id])).rows[0],primary);
+});
+
+test('cached external ownership still blocks native creation when the external integration is disabled',async()=>{
+  const {booking}=await bookedStudy(17);
+  await pool.query("insert into doctor_portal.reporting_board_sonicdicom_cache(appointment_id,report_status,last_attempt_at) values($1,'draft',now())",[booking]);
+  const row=(await listWorkspaceStudies(doctor,{q:studies[17].accessionNumber})).studies[0];
+  assert.equal(row.reporting_status,'no_report');assert.equal(row.external_reporting_status,'external_draft');
+  await assert.rejects(()=>create(doctor,17),/External reporting ownership/);
+});
+
 test('single-author soft deletion, recreation and supervisor recovery retain versions',async()=>{
   const a=await create(doctor,3,'independent');const removed=await deleteWorkspaceDraft(doctor,a.id,{expectedRevision:a.revision,confirmed:true,reason:'Wrong template'});assert.ok(removed.deletedAt);
   await assert.rejects(()=>getWorkspaceReport(doctor,a.id),/not found/);

@@ -22,7 +22,7 @@ export interface Freshness {status:string;lastSuccessAt:string|null;error:string
 export interface StudyReports {studyKey:string;identity:ReportIdentity;studyUid:string;reports:WorkspaceReport[];policy:ReportingPolicy;freshness:Freshness;canCreate:boolean;blockedReason:string|null;primaryReportId:number|null}
 export interface StudyListRow {
   orthanc_study_id:string;study_instance_uid:string;patient_id:string;patient_name_raw:string;accession_number:string;study_description:string;
-  modalities_in_study:string[];study_date:string;series_count:number;reporting_status:string;report_count:number;assigned_doctor:string|null;
+  modalities_in_study:string[];study_date:string;series_count:number;reporting_status:string;external_reporting_status:string;report_count:number;assigned_doctor:string|null;
   reports:{id:number;author:string;signer:string|null;status:string}[];
 }
 export const workspaceBase='/native-reporting/workspace';
