@@ -9,6 +9,7 @@ import {
   listTeamCases,
   listUnassignedCases,
   reassignCase,
+  listReportingAppointments,
 } from "./cases-repository.js";
 
 interface Actor {
@@ -35,6 +36,16 @@ function ensureDateRange(input: CaseFilters): CaseFilters {
 export async function getMyDoctorCases(actor: Actor, filters: CaseFilters) {
   const me = await requireRosterDoctor(actor);
   return listMyCases(me.profile!.id, ensureDateRange(filters));
+}
+
+export async function getDoctorReportingAppointments(actor:Actor,input:Record<string,unknown>,archiveKey:string|null) {
+  const me=await requireRosterDoctor(actor);
+  const permissions=me.allowedModalities.filter(p=>p.active&&p.canReport);
+  if(me.profile?.userActive===false||!permissions.length)throw new HttpError(403,'Active reporting and modality permissions are required.');
+  const manager=me.moduleCapabilities.includes('doctor_supervisor')||me.moduleCapabilities.includes('doctor_admin');
+  for(const key of ['from','to'])if(input[key]&&!/^\d{4}-\d{2}-\d{2}$/.test(String(input[key])))throw new HttpError(400,'Invalid appointment date.');
+  const codes=[...new Set(permissions.map(p=>p.modalityCode==='MRI'?'MR':p.modalityCode||''))];
+  return {...await listReportingAppointments({doctorId:me.profile!.id,manager,modalityIds:permissions.map(p=>p.modalityId),modalityCodes:codes,archiveKey,userId:actor.userId},input),modalities:codes};
 }
 
 export async function getTeamDoctorCases(actor: Actor, filters: CaseFilters) {

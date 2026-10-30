@@ -20,7 +20,7 @@ interface BookingRow extends CaseBookingSignal {
   requiresReport: boolean;
 }
 
-const CASE_SELECT = `
+function caseSelect(reportingOnly=false) { return `
   select
     b.id as "appointmentId",
     b.booking_date::text as "appointmentDate",
@@ -30,6 +30,8 @@ const CASE_SELECT = `
     p.national_id as "patientNationalId",
     p.arabic_full_name as "patientArabicName",
     p.english_full_name as "patientEnglishName",
+    coalesce((select pi.value from patient_identifiers pi where pi.patient_id=p.id and pi.is_primary order by pi.id limit 1),nullif(p.identifier_value,''),p.national_id) as "patientIdentifier",
+    b.study_instance_uid as "studyInstanceUid",
     b.modality_id as "modalityId",
     m.code as "modalityCode",
     m.name_en as "modalityName",
@@ -56,7 +58,7 @@ const CASE_SELECT = `
   join patients p on p.id = b.patient_id
   join modalities m on m.id = b.modality_id
   left join exam_types et on et.id = b.exam_type_id
-  left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.status = 'active'
+  left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.status = 'active' ${reportingOnly?"and cta.assignment_type='reporting'":''}
   left join doctor_portal.doctor_roster_assignments dra on dra.id = cta.roster_assignment_id
   left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
   left join users assigned_doctor_user on assigned_doctor_user.id = assigned_doctor.user_id
@@ -78,7 +80,7 @@ const CASE_SELECT = `
       wuc.id desc
     limit 1
   ) catalog on b.requires_report = true
-`;
+`; }
 
 function filters(params: { dateFrom: string; dateTo: string; modalityId?: number | null; status?: string | null; requiresReport?: boolean | null; caseCategory?: string | null }) {
   const values: unknown[] = [params.dateFrom, params.dateTo];
@@ -110,7 +112,7 @@ export async function listMyCases(doctorId: number, params: { dateFrom: string; 
     ))
   `);
   const result = await pool.query<DoctorCaseRow>(
-    `${CASE_SELECT} where ${scoped.where.join(" and ")} order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 500`,
+    `${caseSelect()} where ${scoped.where.join(" and ")} order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 500`,
     scoped.values
   );
   return result.rows;
@@ -123,7 +125,7 @@ export async function listTeamCases(params: { dateFrom: string; dateTo: string; 
     scoped.where.push(`cta.roster_assignment_id = $${scoped.values.length}`);
   }
   const result = await pool.query<DoctorCaseRow>(
-    `${CASE_SELECT} where ${scoped.where.join(" and ")} and cta.id is not null order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 1000`,
+    `${caseSelect()} where ${scoped.where.join(" and ")} and cta.id is not null order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 1000`,
     scoped.values
   );
   return result.rows;
@@ -132,10 +134,68 @@ export async function listTeamCases(params: { dateFrom: string; dateTo: string; 
 export async function listUnassignedCases(params: { dateFrom: string; dateTo: string; modalityId?: number | null }): Promise<DoctorCaseRow[]> {
   const scoped = filters(params);
   const result = await pool.query<DoctorCaseRow>(
-    `${CASE_SELECT} where ${scoped.where.join(" and ")} and cta.id is null and b.status not in ('cancelled', 'discontinued', 'voided') order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 1000`,
+    `${caseSelect()} where ${scoped.where.join(" and ")} and cta.id is null and b.status not in ('cancelled', 'discontinued', 'voided') order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 1000`,
     scoped.values
   );
   return result.rows;
+}
+
+/** Read-only reporting view. Reuses the case list and its assigned/roster scope;
+ * it deliberately exposes no assignment or supervisor management operations. */
+export async function listReportingAppointments(scope: {doctorId:number;manager:boolean;modalityIds:number[];modalityCodes:string[];archiveKey:string|null;userId:UserId}, input:Record<string,unknown>) {
+  const values:unknown[]=[scope.modalityIds,scope.doctorId,scope.archiveKey,scope.modalityCodes,scope.userId];
+  const where=['b.requires_report=true','b.modality_id=any($1::bigint[])','$2::bigint>0'];
+  const param=(v:unknown)=>{values.push(v);return '$'+values.length;};
+  if(!scope.manager)where.push(`(cta.assigned_doctor_id=$2 or exists(select 1 from doctor_portal.doctor_roster_members drm where drm.roster_assignment_id=cta.roster_assignment_id and drm.doctor_id=$2))`);
+  if(input.q)where.push(`(concat_ws(' ',p.english_full_name,p.arabic_full_name,p.mrn,p.identifier_value,p.national_id,et.name_en,('V2-'||lpad(b.id::text,6,'0')),b.study_instance_uid) ilike ${param('%'+String(input.q).slice(0,200)+'%')}
+    or exists(select 1 from patient_identifiers pi where pi.patient_id=p.id and pi.value ilike $${values.length}))`);
+  if(input.modality)where.push(`(case when m.code='MRI' then 'MR' else m.code end)=${param(String(input.modality).toUpperCase()==='MRI'?'MR':String(input.modality).toUpperCase())}`);
+  for(const [key,op] of [['from','>='],['to','<=']] as const)if(input[key])where.push(`b.booking_date ${op} ${param(String(input[key]))}::date`);
+  const status=String(input.status||'all');
+  let filter='true';
+  if(['unknown','external_draft','external_final'].includes(status))filter=`"externalReportingStatus"=${param(status)}`;
+  else if(status==='my_reports')filter='mine';
+  else if(status==='my_drafts')filter='my_draft';
+  else if(status!=='all')filter=`"reportingStatus"=${param(status)}`;
+  const cte=`with cases as (${caseSelect(true)} where ${where.join(' and ')}), associated as (
+    select c.*,idx.orthanc_study_id as "studyKey",('V2-'||lpad(c."appointmentId"::text,6,'0')) as "appointmentNumber",
+      case when r.primary_final then 'final' when r.in_review then 'in_review' when r.active_draft then 'draft'
+        when r.report_count>0 then 'additional_reports' when idx.orthanc_study_id is not null then 'no_report' else null end as "reportingStatus",
+      case when mf.id is not null or cache.report_status='final' then 'external_final' when cache.report_status='draft' then 'external_draft'
+        when cache.report_status in ('no_report','study_not_found') then 'no_report' else 'unknown' end as "externalReportingStatus",r.mine,r.my_draft
+    from cases c
+    left join lateral(
+      select h.orthanc_study_id,h.study_instance_uid from historical_pacs_studies h
+      where $3::text is not null and h.study_instance_uid in (
+        select c."studyInstanceUid" union select sr.study_instance_uid from study_source_resolutions sr where sr.appointment_id=c."appointmentId" and sr.source_kind='authoritative_orthanc')
+      and h.study_instance_uid ~ '^[0-9]+(\\.[0-9]+)+$' and length(h.study_instance_uid)<=64
+      and h.patient_id=c."patientIdentifier" and nullif(h.patient_id,'') is not null
+      and (nullif(h.accession_number,'') is null or h.accession_number=('V2-'||lpad(c."appointmentId"::text,6,'0')))
+      and h.modalities_in_study && $4::text[] and not exists(select 1 from unnest(h.modalities_in_study) m where m not in ('SR','PR','SEG','KO','DOC') and (case when m='MRI' then 'MR' else m end)<>all($4::text[]))
+      and not exists(select 1 from historical_pacs_studies dup where dup.study_instance_uid=h.study_instance_uid and dup.orthanc_study_id<>h.orthanc_study_id)
+      and not exists(select 1 from appointments_v2.bookings other where other.id<>c."appointmentId" and (other.study_instance_uid=h.study_instance_uid or exists(select 1 from study_source_resolutions sr where sr.appointment_id=other.id and sr.source_kind='authoritative_orthanc' and sr.study_instance_uid=h.study_instance_uid)))
+      and (select count(distinct matched.study_instance_uid) from historical_pacs_studies matched where matched.study_instance_uid in (
+        select c."studyInstanceUid" union select sr.study_instance_uid from study_source_resolutions sr where sr.appointment_id=c."appointmentId" and sr.source_kind='authoritative_orthanc'))=1
+    ) idx on true
+    left join native_reporting_studies st on st.source_archive_key=$3 and st.study_instance_uid=idx.study_instance_uid
+    left join lateral(select count(*) report_count,
+      bool_or(n.status='final' and n.is_primary and n.report_type='primary' and (l.report_id is null or st.primary_report_id=n.id)) primary_final,
+      bool_or(n.status='draft' and n.report_type='primary') active_draft,
+      bool_or(n.status='draft' and n.report_type='primary' and n.review_requested_at is not null) in_review,
+      bool_or(n.author_user_id=$5 or exists(select 1 from native_report_contributors nc where nc.report_id=n.id and nc.user_id=$5)) mine,
+      bool_or(n.status='draft' and (n.author_user_id=$5 or exists(select 1 from native_report_contributors nc where nc.report_id=n.id and nc.user_id=$5))) my_draft
+      from native_reports n left join native_report_study_links l on l.report_id=n.id
+      where n.deleted_at is null and n.primary_study_uid=idx.study_instance_uid and n.imaging_source->>'accessStrategy'='authoritative_orthanc'
+      and coalesce(n.imaging_source->>'archiveKey',$3)=$3 and (l.study_id=st.id or l.report_id is null)) r on true
+    left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id=c."appointmentId"
+    left join doctor_portal.reporting_board_manual_final_overrides mf on mf.appointment_id=c."appointmentId" and mf.cleared_at is null
+  )`;
+  const total=(await pool.query(`${cte} select count(*)::int total from associated where ${filter}`,values)).rows[0].total;
+  const order=({date:'"appointmentDate"',patient:'"patientEnglishName"',accession:'"appointmentId"',modality:'"modalityCode"'} as Record<string,string>)[String(input.sort)]||'"appointmentDate"';
+  const direction=input.direction==='asc'?'asc':'desc';
+  const limit=Math.min(100,Math.max(1,Math.trunc(Number(input.limit)||25))),offset=Math.max(0,Math.trunc(Number(input.offset)||0));
+  const appointments=(await pool.query(`${cte} select * from associated where ${filter} order by ${order} ${direction} nulls last,"appointmentId" limit ${param(limit)} offset ${param(offset)}`,values)).rows;
+  return {appointments,total,limit,offset};
 }
 
 async function listAssignableBookings(input: AssignCasesInput): Promise<BookingRow[]> {

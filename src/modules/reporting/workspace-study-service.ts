@@ -65,6 +65,7 @@ export function studyIdentity(s:WorkspaceStudy):Identity {
 export async function verifyLiveStudy(s:WorkspaceStudy) {
   const remote=await (await createAuthoritativeOrthancClient()).getStudyForIndex(s.orthanc_study_id);
   if(!remote || remote.studyInstanceUid!==s.study_instance_uid || remote.patientId!==s.patient_id || (remote.accessionNumber||'')!==(s.accession_number||'')) throw new HttpError(409,'Archive patient/study identity changed. Reconcile and synchronize before reporting.');
+  return remote;
 }
 export async function verifyExternalOwnership(s:WorkspaceStudy,appointmentId:number|null,db:Db) {
   const settings=await readSonicDicomReportSettings();

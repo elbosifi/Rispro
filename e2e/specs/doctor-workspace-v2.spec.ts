@@ -28,6 +28,10 @@ test.beforeAll(async()=>{
     if(url.pathname==='/transcribe'){req.resume();req.on('end',()=>{const text=transcript;setTimeout(()=>res.end(JSON.stringify({text,processing_seconds:0.1})),delayTranscription?1800:0);});return;}
     if(url.pathname==='/changes'){res.end(JSON.stringify({Changes:[],Last:0,Done:true}));return;}
     if(url.pathname==='/statistics'){res.end(JSON.stringify({CountStudies:215}));return;}
+    if(url.pathname==='/dicom-web/studies'){
+      const matches=studies.filter(s=>(!url.searchParams.get('AccessionNumber')||s.accession===url.searchParams.get('AccessionNumber'))&&(!url.searchParams.get('PatientID')||s.patient===url.searchParams.get('PatientID'))).slice(Number(url.searchParams.get('offset')||0),Number(url.searchParams.get('offset')||0)+100);
+      res.end(JSON.stringify(matches.map(s=>({'0020000D':{vr:'UI',Value:[s.uid]},'00100020':{vr:'LO',Value:[s.patient]},'00100010':{vr:'PN',Value:[{Alphabetic:s.name}]},'00080050':{vr:'SH',Value:[s.accession]},'00080061':{vr:'CS',Value:['CT']},'00080020':{vr:'DA',Value:[e2eTodayInTripoli().replaceAll('-','')]},'00081030':{vr:'LO',Value:['Synthetic CT']}}))));return;
+    }
     const s=studies.find(s=>url.pathname==='/studies/'+s.id);
     if(s){res.end(JSON.stringify({ID:s.id,MainDicomTags:{StudyInstanceUID:s.uid,AccessionNumber:s.accession,StudyDate:e2eTodayInTripoli().replaceAll('-',''),StudyDescription:'Synthetic CT',ModalitiesInStudy:'CT'},PatientMainDicomTags:{PatientID:s.patient,PatientName:s.name},Series:['synthetic-series']}));return;}
     res.statusCode=404;res.end('{}');
@@ -45,7 +49,7 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   test.setTimeout(150_000);page.setDefaultTimeout(15_000);await page.context().grantPermissions(['microphone']);
   await page.addInitScript(()=>localStorage.setItem('rispro.workstation.dictation.v1',JSON.stringify({keyboardEnabled:true,keyboardShortcut:{code:'F9',ctrl:false,alt:false,shift:false,meta:false},keyboardMode:'hold'})));
   await signInWithSession(page,'e2e_doctor_non_supervisor');
-  const pixels:string[]=[];page.on('request',r=>{if(/\/frames\/|\/wado|\/ohif\/|\/ohif-dicomweb\//i.test(r.url()))pixels.push(r.url());});
+  const pixels:string[]=[];page.on('request',r=>{if(!r.url().endsWith('/api/ohif/availability')&&/\/frames\/|\/wado|\/ohif\/|\/ohif-dicomweb\//i.test(r.url()))pixels.push(r.url());});
   await page.goto('/doctor/reporting?q='+prefix+'&offset=200');
   await expect(page.getByRole('heading',{name:'Reporting',exact:true})).toBeVisible();await expect(page.getByText('201–215 of 215')).toBeVisible();
   await expect(page.getByRole('cell').filter({hasText:'No RISpro Report'})).toHaveCount(15);
@@ -69,12 +73,12 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   await expect(page.getByRole('status').filter({hasText:/^Saved$/})).toBeVisible();
   await page.screenshot({path:info.outputPath('desktop-editor.png'),fullPage:true});
   expect(pixels).toEqual([]);
-  transcript='stale transcription must not arrive';delayTranscription=true;
+  transcript='dictation retained before navigation';delayTranscription=true;
   await findings.focus();const pendingTranscript=page.waitForRequest('**/api/medical-dictation/transcribe');
   await page.keyboard.down('F9');await expect(page.getByRole('button',{name:'Stop dictation',exact:true})).toBeVisible();await page.waitForTimeout(650);await page.keyboard.up('F9');await pendingTranscript;
   await page.getByRole('link',{name:'Back to Reporting Worklist'}).click();await expect(page).toHaveURL(new RegExp('offset=200'));await expect(page.getByText('201–215 of 215')).toBeVisible();
   await page.goto(reportUrl);
-  await page.waitForTimeout(2000);await expect(page.getByLabel('Findings',{exact:true})).toHaveValue('Before Dictated finding after');delayTranscription=false;
+  await expect(page.getByLabel('Findings',{exact:true})).toHaveValue(/Dictation retained before navigation/);delayTranscription=false;
   const second=await browser.newContext({baseURL:'http://127.0.0.1:5173'}),other=await second.newPage();await signInWithSession(other,'e2e_doctor_other');await other.goto(reportUrl);
   await other.getByLabel('Findings',{exact:true}).fill('Second doctor findings');await other.getByRole('button',{name:'Save',exact:true}).click();await expect(other.getByRole('status').filter({hasText:/^Saved$/})).toBeVisible();
   await page.getByLabel('Findings',{exact:true}).fill('Retained conflicting local text');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByText('Your unsaved text is retained.',{exact:false}).first()).toBeVisible();await expect(page.getByLabel('Findings',{exact:true})).toHaveValue('Retained conflicting local text');
@@ -100,4 +104,68 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   expect(pixels).toEqual([]);await second.close();
   await db.query(`update system_settings set setting_value=setting_value || '{"enabled":false}'::jsonb where category='doctor_workspace' and setting_key='reporting_policy'`);
   await page.goto(reportUrl);await expect(page.getByLabel('Findings',{exact:true})).toHaveValue('Retained conflicting local text');await expect(page.getByLabel('Findings',{exact:true})).toHaveAttribute('readonly','');
+});
+
+test('Round 2: report-free viewer launch, appointments, cached return, save failure, responsive worklist and editor return',async({page,context},info)=>{
+  test.setTimeout(150_000);page.setDefaultTimeout(15_000);
+  await page.setViewportSize({width:1600,height:1000});
+  await db.query(`update system_settings set setting_value=setting_value || '{"enabled":true}'::jsonb where category='doctor_workspace' and setting_key='reporting_policy'`);
+  await db.query("update ohif_viewer_settings set enabled=true,access_strategy='authoritative_orthanc',allow_prior_studies=false,open_mode='new_tab' where singleton_key=true");
+  await signInWithSession(page,'e2e_doctor_non_supervisor');
+  // Exercise the real launch endpoint and token exchange. The diagnostic viewer
+  // document is synthetic; this test does not claim diagnostic-frame validation.
+  await context.route('**/api/ohif/launch/**',async route=>{
+    const response=await route.fetch({maxRedirects:0});expect(response.status()).toBe(302);expect(response.headers().location).toContain('/ohif/viewer?');
+    await route.fulfill({status:200,contentType:'text/html',body:'<h1>Synthetic diagnostic viewer</h1>'});
+  });
+  const before=Number((await db.query('select count(*) n from native_reports')).rows[0].n);
+  const url='/doctor/reporting?'+new URLSearchParams({q:prefix,offset:'200',modality:'CT',status:'all',sort:'patient',direction:'asc',from:e2eTodayInTripoli(),to:e2eTodayInTripoli()});
+  let catalogueRequests=0;page.on('request',r=>{if(r.url().includes('/api/native-reporting/workspace/studies?'))catalogueRequests++;});
+  await page.goto(url);await expect(page.getByRole('button',{name:'PACS Studies',exact:true})).toHaveAttribute('aria-pressed','true');await expect(page.getByText('201–215 of 215')).toBeVisible();
+  const height=await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height);expect(height).toBeLessThanOrEqual(48);
+  await page.screenshot({path:info.outputPath('round2-desktop-pacs.png'),fullPage:true});
+  const requestsBefore=catalogueRequests;
+  await page.locator('main').evaluate(e=>{e.scrollTop=100;});
+  const top=await page.locator('main').evaluate(e=>e.scrollTop);
+  await page.getByRole('link',{name:'Open Reports',exact:true}).first().click();await expect(page.getByRole('heading',{name:'Study reports'})).toBeVisible();
+  await page.getByRole('link',{name:'Back to Reporting Worklist'}).click();await expect(page.getByText('201–215 of 215')).toBeVisible();expect(catalogueRequests).toBe(requestsBefore);
+  const returnRequests=catalogueRequests-requestsBefore;
+  expect(await page.locator('main').evaluate(e=>e.scrollTop)).toBe(top);
+  // Delaying authorization proves that Chromium receives a synchronous blank tab.
+  await page.route('**/workspace/studies/*/images-launch',async route=>{await new Promise(r=>setTimeout(r,500));await route.continue();});
+  const popupPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'View Images',exact:true}).first().click();const popup=await popupPromise;
+  await expect(popup.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();await popup.close();
+  expect(Number((await db.query('select count(*) n from native_reports')).rows[0].n)).toBe(before);
+  // A blocked popup must not issue a launch request or retain a token in the UI.
+  await page.evaluate(()=>{window.open=()=>null;});await page.getByRole('button',{name:'View Images',exact:true}).first().click();await expect(page.getByText('The browser blocked the OHIF tab.',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'Open images in this tab'})).toBeVisible();
+  await page.getByRole('button',{name:'Open images in this tab'}).click();await expect(page.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();
+  await page.goto(url);await expect(page.getByText('201–215 of 215')).toBeVisible();
+  const sample=studies[214],patient=(await db.query("insert into patients(arabic_full_name,english_full_name,normalized_arabic_name,identifier_type,identifier_value,age_years,sex) values($1,$1,$1,'other',$2,40,'O') returning id",[prefix+' appointment',sample.patient])).rows[0].id;
+  const version=(await db.query('select id from appointments_v2.policy_versions order by id limit 1')).rows[0].id;
+  const ct=(await db.query("select id from modalities where code='CT'")).rows[0].id;
+  const doctor=(await db.query("select d.id from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where u.username='e2e_doctor_non_supervisor'")).rows[0].id;
+  const bookings=(await db.query("insert into appointments_v2.bookings(patient_id,modality_id,booking_date,case_category,status,requires_report,policy_version_id,study_instance_uid) values($1,$2,$3,'non_oncology','completed',true,$4,$5),($1,$2,$3,'non_oncology','scheduled',true,$4,null) returning id",[patient,ct,e2eTodayInTripoli(),version,sample.uid])).rows;
+  for(const b of bookings)await db.query("insert into doctor_portal.case_team_assignments(appointment_id,assigned_doctor_id,modality_id,assignment_type,status) values($1,$2,$3,'reporting','active')",[b.id,doctor,ct]);
+  sample.accession='V2-'+String(bookings[0].id).padStart(6,'0');await db.query('update historical_pacs_studies set accession_number=$2 where orthanc_study_id=$1',[sample.id,sample.accession]);
+  await db.query(`update system_settings set setting_value=jsonb_set(setting_value,'{value,enabledModalityCodes}','["E2E_CT","CT"]'::jsonb) where category='doctor_portal_reporting_board' and setting_key='config'`);
+  await page.goto('/doctor/my-work');await expect(page.getByRole('button',{name:'View Images',exact:true}).first()).toBeEnabled();
+  const assignedPopupPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'View Images',exact:true}).first().click();const assignedPopup=await assignedPopupPromise;await expect(assignedPopup.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();await assignedPopup.close();
+  await page.goto(url);await expect(page.getByRole('button',{name:'PACS Studies',exact:true})).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'RISpro Appointments',exact:true}).click();await expect(page.getByText('Not in PACS / Study Not Linked',{exact:true})).toBeVisible();await expect(page.getByText('Linked PACS Study',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Open Reports',exact:true})).toHaveCount(1);await page.screenshot({path:info.outputPath('round2-desktop-appointments.png'),fullPage:true});
+  await page.getByRole('button',{name:'View Appointment',exact:true}).first().click();await expect(page.getByRole('complementary',{name:'Appointment and patient details'})).toBeVisible();await page.getByRole('button',{name:'Close appointment and patient details',exact:true}).last().click();
+  await page.getByRole('link',{name:'Open Reports',exact:true}).click();await expect(page.getByRole('heading',{name:'Study reports'})).toBeVisible();await page.getByRole('button',{name:'Create Report',exact:true}).click();await expect(page.getByLabel('Findings',{exact:true})).toBeEditable();
+  await page.getByLabel('Findings',{exact:true}).fill('Save before opening images');
+  const editorPopupPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'Open Images in OHIF'}).click();const editorPopup=await editorPopupPromise;await expect(editorPopup.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();await editorPopup.close();await expect(page.getByRole('status').filter({hasText:/^Saved$/})).toBeVisible();
+  await page.route('**/reports/*/draft',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'Synthetic save failure'})}));
+  await page.getByLabel('Findings',{exact:true}).fill('Round 2 retained clinical text');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByRole('status').filter({hasText:/^Save Failed$/})).toBeVisible();await page.getByRole('link',{name:'Back to Reporting Worklist'}).click();await expect(page.getByLabel('Findings',{exact:true})).toHaveValue('Round 2 retained clinical text');
+  await page.unroute('**/reports/*/draft');await page.getByRole('link',{name:'Back to Reporting Worklist'}).click();await expect(page.getByText('RISpro Draft',{exact:true}).last()).toBeVisible();expect(new URL(page.url()).searchParams.get('view')).toBe('appointments');
+  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>{window.scrollTo(0,0);document.querySelector('[aria-label="RISpro appointments table"]')?.scrollTo(0,0);});await page.screenshot({path:info.outputPath('round2-mobile-appointments.png'),fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.getByRole('button',{name:'PACS Studies',exact:true}).click();await expect(page.getByRole('button',{name:'PACS Studies',exact:true})).toHaveAttribute('aria-pressed','true');await expect(page.locator('[aria-label="PACS studies table"] tbody tr').first()).toBeVisible();await page.evaluate(()=>{window.scrollTo(0,0);document.querySelector('[aria-label="PACS studies table"]')?.scrollTo(0,0);});await page.screenshot({path:info.outputPath('round2-mobile-pacs.png'),fullPage:true});
+  await page.getByRole('button',{name:'View Images',exact:true}).first().scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('round2-mobile-image-actions.png')});
+  await page.setViewportSize({width:820,height:1180});await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>{window.scrollTo(0,0);document.querySelector('[aria-label="PACS studies table"]')?.scrollTo(0,0);requestAnimationFrame(()=>resolve());})));await page.screenshot({path:info.outputPath('round2-tablet-pacs.png'),fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  // The configured same-tab mode reuses the current browser tab.
+  await db.query("update ohif_viewer_settings set open_mode='same_tab' where singleton_key=true");await page.reload();const tabs=context.pages().length;
+  await page.getByRole('button',{name:'View Images',exact:true}).first().click();await expect(page.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();expect(context.pages().length).toBe(tabs);
+  writeFileSync(info.outputPath('round2-evidence.json'),JSON.stringify({rowHeight:height,cachedReturnRequests:returnRequests,reportFreeLaunch:true,appointmentRows:2,popup:true,sameTab:true}));
 });

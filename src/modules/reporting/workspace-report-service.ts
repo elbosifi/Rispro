@@ -16,12 +16,12 @@ function assertCreation(a:Access) {
   const assigned=a.appointment&&Number(a.appointment.assigned_doctor_id)===a.me.profile!.id;
   if(a.policy.creation==='assigned'&&!assigned || a.policy.creation==='assigned_permission'&&!assigned&&!supervisor(a.me)) throw new HttpError(403,'Reporting policy requires assignment or supervisor permission.');
 }
-async function registry(db:PoolClient,a:Access) {
+export async function workspaceStudyRegistry(db:PoolClient,a:Access,adoptLegacy=true) {
   const record=(await db.query<StudyRecord>(`insert into native_reporting_studies(source_archive_key,study_instance_uid,orthanc_study_id,identity,modalities)
     values($1,$2,$3,$4,$5) on conflict(source_archive_key,study_instance_uid) do update set study_instance_uid=excluded.study_instance_uid returning *`,
   [a.freshness.archiveKey,a.study.study_instance_uid,a.study.orthanc_study_id,JSON.stringify(a.identity),a.study.modalities_in_study])).rows[0];
   if(record.orthanc_study_id!==a.study.orthanc_study_id || record.identity.patientIdentifier!==a.identity.patientIdentifier || record.identity.accession!==a.identity.accession) throw new HttpError(409,'Stored report identity conflicts with the archive. Reconciliation is required.');
-  if(a.appointment) {
+  if(adoptLegacy&&a.appointment) {
     await db.query('select id from appointments_v2.bookings where id=$1 for update',[a.appointment.id]);
     // Only verified exact-UID, same-patient authoritative-archive legacy records can be linked.
     const legacy=(await db.query<ReportRow>(`select * from native_reports n where appointment_id=$1 and primary_study_uid=$2 and imaging_source->>'accessStrategy'='authoritative_orthanc'
@@ -38,6 +38,7 @@ async function registry(db:PoolClient,a:Access) {
   }
   return record;
 }
+const registry=workspaceStudyRegistry;
 function canReview(a:Access,report:ReportRow) {
   return a.policy.reviewEligibility!=='designated' || supervisor(a.me) || Number(report.preferred_reviewer_id)===a.me.profile!.id;
 }
