@@ -951,6 +951,34 @@ export async function checkSonicDicomReportStatusesBatch(
   return results;
 }
 
+/** PACS-only callers have no appointment. Resolve exact UIDs in one bounded SQL
+ * batch; never substitute an arbitrary accession match for a verified UID. */
+export async function checkSonicDicomStudyStatusesBatch(studyUids:string[]):Promise<Map<string,ReportStatusResult>> {
+  const uids=[...new Set(studyUids)].slice(0,200),results=new Map<string,ReportStatusResult>();
+  if(!uids.length)return results;
+  const settings=await readSonicDicomReportSettings();
+  const unavailable=(state:'unavailable'|'disabled')=>{for(const uid of uids)results.set(uid,{state,canViewReport:false,source:'sonicdicom',reportFinalAt:null});};
+  if(!settings.sonicDicomReportsEnabled){unavailable('disabled');return results;}
+  if(settings.sonicDicomReadinessMode!=='sql_server'){unavailable('unavailable');return results;}
+  try {
+    await withSqlConnection(settings,async({sql,pool})=>{
+      const rows=await querySqlReportReadinessBatch(pool,sql,validateDatabaseName(settings.sonicDicomDicomDatabaseName,'dicom'),validateDatabaseName(settings.sonicDicomReportDatabaseName,'report'),uids,'study_instance_uid',settings.sonicDicomSqlNoReportStatusCodes);
+      for(const [uid,result] of studyStatusesFromReadiness(settings,uids,rows))results.set(uid,result);
+    });
+  }catch{unavailable('unavailable');}
+  return results;
+}
+function studyStatusesFromReadiness(settings:SonicDicomReportSettings,uids:string[],rows:Map<string,SqlReadiness>) {
+  return new Map(uids.map(uid=>{
+    const row=rows.get(uid);
+    // A missing result row is not evidence that the study has no external report.
+    const result:ReportStatusResult=!row?{state:'unavailable',canViewReport:false,source:'sonicdicom',reportFinalAt:null}:row.foundStudy?readinessResult(settings,row,'study_instance_uid').result:{state:'study_not_found',canViewReport:false,source:'sonicdicom',reportFinalAt:null,correlationMethod:null};
+    return [uid,result];
+  }));
+}
+export const __studyStatusesFromReadinessForTest=studyStatusesFromReadiness;
+export const __querySqlReportReadinessBatchForTest=querySqlReportReadinessBatch;
+
 function normalizeStudyNote(value: unknown): string | null {
   const trimmed = String(value ?? "").trim();
   return trimmed || null;

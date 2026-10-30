@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import {after,before,test} from 'node:test';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
+import {readFile,unlink} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import sharp from 'sharp';
+import {storeReportImage,readReportImage} from './report-image-storage-service.js';
+import {nativeReportingRouter} from './reporting-routes.js';
+import {errorHandler} from '../../middleware/error-handler.js';
 import {randomUUID} from 'node:crypto';
 import {pool} from '../../db/pool.js';
 import {DEFAULT_REPORTING_POLICY,readReportingPolicy,updateReportingPolicy} from './reporting-policy.js';
 import {authoritativeOrthancArchiveKey,__setAuthoritativeOrthancSettingsForTests,__setAuthoritativeOrthancFetchForTests,__resetAuthoritativeOrthancForTests,type AuthoritativeOrthancSettings} from '../../services/authoritative-orthanc-service.js';
-import {upsertHistoricalPacsStudies} from '../../services/historical-pacs-index-service.js';
-import {listWorkspaceStudies} from './workspace-study-service.js';
+import {upsertHistoricalPacsStudies,runHistoricalPacsSyncCycle} from '../../services/historical-pacs-index-service.js';
+import {listWorkspaceStudies,archiveStatus} from './workspace-study-service.js';
 import {createWorkspaceReport,getWorkspaceStudy,saveWorkspaceDraft,finalizeWorkspaceReport,reviewWorkspaceReport,deleteWorkspaceDraft,workspaceHistory,restoreWorkspaceRevision,getWorkspaceReport,addWorkspaceAddendum} from './workspace-report-service.js';
 import {doctorDashboard,assignedWork} from './workspace-dashboard-service.js';
 import {getDoctorReportingAppointments} from '../doctor-portal/cases-service.js';
@@ -14,9 +23,12 @@ import {env} from '../../config/env.js';
 import {findViewerContext,consumeViewerLaunchToken} from '../ohif-viewer/repository.js';
 import {hashLaunchToken} from '../ohif-viewer/validation.js';
 import type {Actor} from '../doctor-portal/reporting-board-service.js';
+import {listReportingBoardCasesByAppointmentIds,listReportingBoardCaseCandidates} from '../doctor-portal/reporting-board-repository.js';
+import {DEFAULT_SONICDICOM_REPORT_SETTINGS} from '../../services/sonicdicom-report-settings.js';
+import {refreshWorkspaceSonicStudies,workspaceSonicSourceKey,enqueueWorkspaceSonicStudies} from '../../services/workspace-sonicdicom-cache-service.js';
 const prefix='wv2_'+Date.now(),settings:AuthoritativeOrthancSettings={enabled:true,baseUrl:'http://127.0.0.1:19481',username:'synthetic',password:'synthetic',timeoutSeconds:2,verifyTls:true,displayName:'Synthetic',autoExportClinicalDocuments:false,autoRouteEnabled:false,autoRouteDestinationKey:'',autoRouteDestinationKeys:[]};
-let doctor:Actor,other:Actor,manager:Actor,noSign:Actor;
-let originalPolicy:unknown,originalSonic:unknown,originalSync:Record<string,unknown>;
+let doctor:Actor,other:Actor,manager:Actor,noSign:Actor,upstreamUnavailable=false;
+let originalPolicy:unknown,originalSonic:unknown,originalSonicConfig:unknown,originalSync:Record<string,unknown>;
 let verifiedDisposable=false;const bookingIds:number[]=[],patientIds:number[]=[],policySetIds:number[]=[];
 const study=(i:number)=>({orthancStudyId:prefix+'_'+i,studyInstanceUid:'1.2.826.0.1.3680043.10.'+Date.now()+'.'+i,accessionNumber:prefix+'A'+i,patientId:prefix+'P'+i,patientName:'Synthetic Patient '+i,patientBirthDate:null,patientSex:null,studyDate:'20261029',studyDescription:'Synthetic CT '+i,modalitiesInStudy:['CT'],seriesCount:2,instanceCount:20});
 const studies=Array.from({length:215},(_,i)=>study(i));
@@ -31,11 +43,14 @@ before(async()=>{
   verifiedDisposable=true;
   originalPolicy=(await pool.query("select setting_value from system_settings where category='doctor_workspace' and setting_key='reporting_policy'")).rows[0]?.setting_value;
   originalSonic=(await pool.query("select setting_value from system_settings where category='sonicdicom_reports' and setting_key='sonicdicom_reports_enabled'")).rows[0]?.setting_value;
+  originalSonicConfig=(await pool.query("select setting_value from system_settings where category='sonicdicom_reports' and setting_key='config'")).rows[0]?.setting_value;
+  await pool.query("insert into system_settings(category,setting_key,setting_value) values('sonicdicom_reports','config',$1) on conflict(category,setting_key) do update set setting_value=excluded.setting_value",[JSON.stringify(DEFAULT_SONICDICOM_REPORT_SETTINGS)]);
   originalSync=(await pool.query('select * from historical_pacs_sync_state')).rows[0];
   await pool.query("update system_settings set setting_value=$1 where category='doctor_workspace' and setting_key='reporting_policy'",[JSON.stringify({...DEFAULT_REPORTING_POLICY,enabled:true})]);
   await pool.query("insert into system_settings(category,setting_key,setting_value) values('sonicdicom_reports','sonicdicom_reports_enabled','{\"value\":\"disabled\"}') on conflict(category,setting_key) do update set setting_value=excluded.setting_value");
   __setAuthoritativeOrthancSettingsForTests(settings);
   __setAuthoritativeOrthancFetchForTests(async(input)=>{
+    if(upstreamUnavailable)throw new Error('Synthetic Orthanc connectivity outage');
     const id=new URL(String(input)).pathname.split('/')[2],s=studies.find(x=>x.orthancStudyId===id);
     if(!s)return new Response('{}',{status:404});
     return new Response(JSON.stringify({ID:id,MainDicomTags:{StudyInstanceUID:s.studyInstanceUid,AccessionNumber:s.accessionNumber,StudyDate:s.studyDate,StudyDescription:s.studyDescription,ModalitiesInStudy:s.modalitiesInStudy.join('\\')},PatientMainDicomTags:{PatientID:s.patientId,PatientName:s.patientName},Series:['s1','s2']}));
@@ -47,6 +62,7 @@ before(async()=>{
 after(async()=>{
   if(!verifiedDisposable){await pool.end();return;}
   __resetAuthoritativeOrthancForTests();
+  await pool.query('delete from doctor_portal.workspace_sonicdicom_cache where orthanc_study_id=any($1::text[])',[studies.map(s=>s.orthancStudyId)]);
   await pool.query('delete from historical_pacs_studies where orthanc_study_id=any($1::text[])',[[...studies.map(s=>s.orthancStudyId),prefix+'_duplicate']]);
   // Retention remains enforced during every scenario. Exact synthetic fixture
   // teardown alone uses the disposable DB's existing replication-role pattern.
@@ -59,7 +75,12 @@ after(async()=>{
   }catch(e){await cleanup.query('rollback');throw e;}finally{cleanup.release();}
   if(originalPolicy) await pool.query("update system_settings set setting_value=$1 where category='doctor_workspace' and setting_key='reporting_policy'",[JSON.stringify(originalPolicy)]);
   if(originalSonic) await pool.query("update system_settings set setting_value=$1 where category='sonicdicom_reports' and setting_key='sonicdicom_reports_enabled'",[JSON.stringify(originalSonic)]);
-  if(originalSync) await pool.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=$2,last_error=$3',[originalSync.source_archive_key,originalSync.last_success_at,originalSync.last_error]);
+  if(originalSonicConfig)await pool.query("update system_settings set setting_value=$1 where category='sonicdicom_reports' and setting_key='config'",[JSON.stringify(originalSonicConfig)]);
+  else await pool.query("delete from system_settings where category='sonicdicom_reports' and setting_key='config'");
+  if(originalSync) {
+    const columns=Object.keys(originalSync).filter(k=>k!=='singleton_key');assert.ok(columns.every(k=>/^[a-z_]+$/.test(k)));
+    await pool.query(`update historical_pacs_sync_state set (${columns.join(',')})=(select ${columns.join(',')} from jsonb_populate_record(null::historical_pacs_sync_state,$1)) where singleton_key=true`,[JSON.stringify(originalSync)]);
+  }
   await pool.end();
 });
 const content={clinicalHistory:'History',comparison:'None',technique:'CT',findings:'Normal findings',impression:'Normal impression'};
@@ -161,6 +182,8 @@ test('single-author soft deletion, recreation and supervisor recovery retain ver
   const a=await create(doctor,3,'independent');const removed=await deleteWorkspaceDraft(doctor,a.id,{expectedRevision:a.revision,confirmed:true,reason:'Wrong template'});assert.ok(removed.deletedAt);
   await assert.rejects(()=>getWorkspaceReport(doctor,a.id),/not found/);
   const fresh=await create(doctor,3,'independent');assert.notEqual(fresh.id,a.id);
+  await assert.rejects(()=>deleteWorkspaceDraft(manager,a.id,{expectedRevision:removed.revision,confirmed:true,reason:'Recovery requested'},true),/replacement report/i);
+  await deleteWorkspaceDraft(doctor,fresh.id,{expectedRevision:fresh.revision,confirmed:true,reason:'Replacement withdrawn'});
   const restored=await deleteWorkspaceDraft(manager,a.id,{expectedRevision:removed.revision,confirmed:true,reason:'Recovery requested'},true);assert.equal(restored.deletedAt,null);
   const shared=await create(doctor,4);const edited=await saveWorkspaceDraft(other,shared.id,{expectedRevision:shared.revision,sections:content});
   await assert.rejects(()=>deleteWorkspaceDraft(doctor,edited.id,{expectedRevision:edited.revision,confirmed:true,reason:'test'}),/supervisor/);
@@ -308,4 +331,276 @@ test('changed patient identity, ambiguous UID, stale catalogue and archive switc
   await upsertHistoricalPacsStudies([{...studies[7],orthancStudyId:prefix+'_duplicate'}]);await assert.rejects(()=>create(doctor,7),/Ambiguous/);
   await pool.query("update historical_pacs_sync_state set last_success_at=now()-interval '1 hour'");await assert.rejects(()=>create(doctor,8),/stale/);
   await pool.query('update historical_pacs_sync_state set last_success_at=now(),source_archive_key=$1',['other-archive']);const list=await listWorkspaceStudies(doctor,{q:prefix});assert.equal(list.freshness.status,'unavailable');assert.equal(list.studies.length,0);
+  await pool.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=now(),last_error=null',[authoritativeOrthancArchiveKey(settings)]);
+});
+
+test('review aggregation separates designated, open, submitted and shared contributions without double counting',async()=>{
+  const reviewer=await user('reviewcounts'),reviewerId=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[reviewer.userId])).rows[0].id;
+  const initial=await doctorDashboard(reviewer,7);
+  let designated=await create(doctor,26),open=await create(doctor,27),own=await create(reviewer,28);
+  designated=await saveWorkspaceDraft(reviewer,designated.id,{expectedRevision:designated.revision,sections:content});
+  designated=await reviewWorkspaceReport(doctor,designated.id,{expectedRevision:designated.revision,action:'submit',preferredReviewerId:Number(reviewerId)});
+  open=await reviewWorkspaceReport(doctor,open.id,{expectedRevision:open.revision,action:'submit'});
+  own=await reviewWorkspaceReport(reviewer,own.id,{expectedRevision:own.revision,action:'submit'});
+  const current=await doctorDashboard(reviewer,7);
+  assert.equal(current.workload.awaiting_review,initial.workload.awaiting_review+1);
+  assert.equal(current.workload.open_review,initial.workload.open_review+1);
+  assert.equal(current.workload.submitted,1);assert.equal(current.workload.shared,2);assert.equal(current.workload.drafts,2);
+  const policy=await readReportingPolicy();await updateReportingPolicy(manager,{...policy,reviewEligibility:'designated'});
+  try {
+    const restricted=await doctorDashboard(reviewer,7);assert.equal(restricted.workload.open_review,0);assert.equal(restricted.workload.awaiting_review,1);
+    await assert.rejects(()=>reviewWorkspaceReport(other,designated.id,{expectedRevision:designated.revision,action:'feedback',comment:'Not designated'}),/not eligible/);
+    await assert.rejects(()=>finalizeWorkspaceReport(other,designated.id,{expectedRevision:designated.revision,requestId:randomUUID(),confirmed:true,signerUserId:other.userId}),/Signing permission/);
+    await assert.rejects(()=>reviewWorkspaceReport(other,designated.id,{expectedRevision:designated.revision,action:'withdraw'}),/not eligible/);
+  }finally{await updateReportingPolicy(manager,{...await readReportingPolicy(),reviewEligibility:policy.reviewEligibility});}
+  own=await reviewWorkspaceReport(reviewer,own.id,{expectedRevision:own.revision,action:'withdraw'});
+  await deleteWorkspaceDraft(reviewer,own.id,{expectedRevision:own.revision,confirmed:true,reason:'Synthetic withdrawn draft'});
+  assert.equal((await doctorDashboard(reviewer,7)).workload.drafts,1);
+});
+
+test('simultaneous saves keep exactly one revision, its editor, immutable history and independent content',async()=>{
+  const shared=await create(doctor,29),independent=await create(other,29,'independent');
+  const original=(await workspaceHistory(doctor,shared.id)).versions[0];
+  const results=await Promise.allSettled([
+    saveWorkspaceDraft(doctor,shared.id,{expectedRevision:1,sections:{...content,findings:'Doctor A'}}),
+    saveWorkspaceDraft(other,shared.id,{expectedRevision:1,sections:{...content,findings:'Doctor B'}}),
+  ]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.match((results.find(r=>r.status==='rejected') as PromiseRejectedResult).reason.message,/Revision conflict/);
+  const winner=(results.find(r=>r.status==='fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof saveWorkspaceDraft>>>).value;
+  assert.deepEqual((await getWorkspaceReport(doctor,shared.id)).sections,winner.sections);
+  const history=await workspaceHistory(doctor,shared.id);assert.equal(history.versions.length,2);assert.deepEqual(history.versions[0],original);
+  assert.equal(history.versions[1].author,winner.lastEditor);assert.ok(history.versions[1].createdAt);
+  assert.deepEqual((await getWorkspaceReport(doctor,independent.id)).sections,independent.sections);
+  await assert.rejects(()=>pool.query("update native_report_versions set actor_name='Changed' where report_id=$1",[shared.id]),/append only/);
+});
+
+test('legacy recovery rejects replacement drafts and finals without transferring appointment authority',async()=>{
+  await bookedStudy(30);
+  const old=await create(doctor,30,'independent');
+  const removed=await deleteWorkspaceDraft(doctor,old.id,{expectedRevision:old.revision,confirmed:true,reason:'Synthetic removal'});
+  // Also exercise drafts deleted by the older implementation, which cleared this flag.
+  await pool.query('update native_reports set legacy_primary=false where id=$1',[old.id]);
+  await assert.rejects(()=>deleteWorkspaceDraft(doctor,old.id,{expectedRevision:removed.revision,confirmed:true,reason:'Unauthorized recovery'},true),/not permitted/);
+  const replacement=await create(other,30,'independent');
+  const prior=(await pool.query('select * from native_reports where id=any($1::bigint[]) order by id',[[old.id,replacement.id]])).rows;
+  await assert.rejects(()=>deleteWorkspaceDraft(manager,old.id,{expectedRevision:removed.revision,confirmed:true,reason:'Recovery'},true),/replacement report/i);
+  assert.deepEqual((await pool.query('select * from native_reports where id=any($1::bigint[]) order by id',[[old.id,replacement.id]])).rows,prior);
+  await deleteWorkspaceDraft(other,replacement.id,{expectedRevision:replacement.revision,confirmed:true,reason:'Withdraw replacement'});
+  const recovered=await deleteWorkspaceDraft(manager,old.id,{expectedRevision:removed.revision,confirmed:true,reason:'Approved recovery'},true);
+  assert.equal(recovered.id,old.id);assert.equal(recovered.revision,removed.revision+1);
+  assert.equal((await pool.query('select legacy_primary from native_reports where id=$1',[old.id])).rows[0].legacy_primary,true);
+  const removedAgain=await deleteWorkspaceDraft(manager,recovered.id,{expectedRevision:recovered.revision,confirmed:true,reason:'Synthetic removal'});
+  let final=await create(other,30,'independent');final=await saveWorkspaceDraft(other,final.id,{expectedRevision:final.revision,sections:content});
+  final=await finalizeWorkspaceReport(other,final.id,{expectedRevision:final.revision,confirmed:true,requestId:randomUUID(),signerUserId:other.userId});
+  await assert.rejects(()=>deleteWorkspaceDraft(manager,old.id,{expectedRevision:removedAgain.revision,confirmed:true,reason:'Recovery beside final'},true),/replacement report/i);
+  await assert.rejects(()=>deleteWorkspaceDraft(manager,final.id,{expectedRevision:final.revision,confirmed:true,reason:'Signed deletion'}),/not permitted/);
+  await assert.rejects(()=>restoreWorkspaceRevision(manager,final.id,{expectedRevision:final.revision,revision:2}),/not permitted/);
+});
+
+test('signing rejects a live modality change even with an otherwise fresh catalogue',async()=>{
+  let draft=await create(doctor,31);draft=await saveWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,sections:content});
+  studies[31].modalitiesInStudy=['MR'];
+  try {await assert.rejects(()=>finalizeWorkspaceReport(doctor,draft.id,{expectedRevision:draft.revision,confirmed:true,requestId:randomUUID(),signerUserId:doctor.userId}),/live study modalities changed/);}
+  finally{studies[31].modalitiesInStudy=['CT'];}
+  assert.equal((await getWorkspaceReport(doctor,draft.id)).status,'draft');
+  const uid=studies[31].studyInstanceUid;studies[31].studyInstanceUid=uid+'.99';await upsertHistoricalPacsStudies([studies[31]]);
+  try{await assert.rejects(()=>getWorkspaceReport(doctor,draft.id),/Study Instance UID conflicts/);}
+  finally{studies[31].studyInstanceUid=uid;await upsertHistoricalPacsStudies([studies[31]]);}
+});
+
+test('personal native and external activity uses diagnostic modality, real signer and Tripoli calendar boundaries',async()=>{
+  const signer=await user('activity'),signerId=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[signer.userId])).rows[0].id;
+  await pool.query("insert into doctor_portal.doctor_modality_permissions(doctor_id,modality_id,can_report,active) select $1,id,true,true from modalities where code='MR'",[signerId]);
+  const dates=(await pool.query(`select ((now() at time zone 'Africa/Tripoli')::date::timestamp at time zone 'Africa/Tripoli') start`)).rows[0];
+  const midnight=new Date(dates.start).getTime();
+  const times=[midnight,midnight-1,midnight-6*86400000,midnight-6*86400000-1,midnight-29*86400000,midnight-29*86400000-1,midnight+86400000];
+  for(let i=0;i<times.length;i++) {
+    const s=studies[32+i];s.modalitiesInStudy=['SR','MRI'];await upsertHistoricalPacsStudies([s]);
+    await getWorkspaceStudy(signer,s.orthancStudyId);
+    const record=(await pool.query('select id from native_reporting_studies where orthanc_study_id=$1',[s.orthancStudyId])).rows[0];
+    const r=(await pool.query(`insert into native_reports(primary_study_uid,imaging_source,identity,status,sections,author_user_id,author_name,report_type,is_primary,legacy_primary,finalized_by_user_id,finalized_by_doctor_id,finalized_at,signed_snapshot)
+      select study_instance_uid,jsonb_build_object('accessStrategy','authoritative_orthanc','sourcePacsNodeId',null,'archiveKey',source_archive_key),identity,'final',$2,$3,'Original author','second_opinion',false,false,$4,$5,$6,'{}' from native_reporting_studies where id=$1 returning id`,[record.id,JSON.stringify(content),doctor.userId,signer.userId,signerId,new Date(times[i])])).rows[0];
+    await pool.query('insert into native_report_study_links(report_id,study_id) values($1,$2)',[r.id,record.id]);
+  }
+  const external=await bookedStudy(39);
+  await pool.query("insert into doctor_portal.reporting_board_sonicdicom_cache(appointment_id,report_status,finalized_by_doctor_id,report_final_at) values($1,'final',$2,$3)",[external.booking,signerId,new Date(midnight)]);
+  for(const [days,expected] of [[1,1],[7,3],[30,5]]) {
+    const dashboard=await doctorDashboard(signer,days);assert.equal(dashboard.totalFinalized,expected);assert.equal(dashboard.additionalFinalized,expected);
+    assert.deepEqual(dashboard.activity,[{modality:'MR',total:expected,additional:expected}]);
+    assert.equal(dashboard.externalFinalized,1);assert.deepEqual(dashboard.externalActivity,[{modality:'CT',total:1}]);
+  }
+  assert.equal((await doctorDashboard(doctor,1)).activity.some(r=>r.modality==='SR'),false);
+});
+
+test('assigned examination recognizes an existing unbooked final and ignores another independent draft',async()=>{
+  let final=await create(doctor,40);final=await saveWorkspaceDraft(doctor,final.id,{expectedRevision:final.revision,sections:content});
+  final=await finalizeWorkspaceReport(other,final.id,{expectedRevision:final.revision,confirmed:true,requestId:randomUUID(),signerUserId:other.userId});
+  await create(doctor,40,'independent','second_opinion');
+  // A subsequently linked examination must use study authority, not only report.appointment_id.
+  const s=studies[40],accession=s.accessionNumber,{booking,ct}=await bookedStudy(40);
+  s.accessionNumber=accession;await upsertHistoricalPacsStudies([s]);
+  const doctorId=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[doctor.userId])).rows[0].id;
+  await pool.query("insert into doctor_portal.case_team_assignments(appointment_id,assigned_doctor_id,modality_id,assignment_type,status) values($1,$2,$3,'reporting','active')",[booking,doctorId,ct]);
+  assert.equal((await assignedWork(doctor,{status:'final',q:s.patientName})).cases.some(c=>Number(c.appointmentId)===Number(booking)),true);
+  assert.equal((await assignedWork(doctor,{status:'pending',q:s.patientName})).cases.some(c=>Number(c.appointmentId)===Number(booking)),false);
+});
+
+test('authenticated routes keep stale browsing and signed print available, reject mutations, then recover after sync',async()=>{
+  let draft=await create(doctor,41);draft=await saveWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,sections:content});
+  let signed=await create(doctor,42);signed=await saveWorkspaceDraft(doctor,signed.id,{expectedRevision:signed.revision,sections:content});
+  signed=await finalizeWorkspaceReport(doctor,signed.id,{expectedRevision:signed.revision,confirmed:true,requestId:randomUUID(),signerUserId:doctor.userId});
+  const original=(await pool.query('select * from native_reports where id=$1',[signed.id])).rows[0];
+  const app=express();app.use(express.json(),cookieParser());app.use('/api/native-reporting',nativeReportingRouter);app.use(errorHandler);
+  const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
+  const request=(path:string,actor:Actor|null=doctor,method='GET',body?:unknown)=>fetch(origin+'/api/native-reporting'+path,{method,headers:{'Content-Type':'application/json',...(actor?{cookie:env.cookieName+'='+jwt.sign({sub:Number(actor.userId),role:actor.appRole},env.jwtSecret,{expiresIn:'5m'})}:{})},body:body?JSON.stringify(body):undefined});
+  try {
+    const failed=await runHistoricalPacsSyncCycle(async()=>{throw new Error('Synthetic synchronization outage');});assert.equal(failed.mode,'failed');
+    const catalogue=await request('/workspace/studies?q='+prefix);assert.equal(catalogue.status,200);const list=await catalogue.json();assert.equal(list.freshness.status,'stale');assert.ok(list.studies.length>0);assert.ok(list.freshness.lastSuccessAt);
+    const preserved=await request('/reports/'+signed.id);assert.equal(preserved.status,200);assert.equal((await preserved.json()).canEdit,false);
+    const print=await request('/reports/'+signed.id+'/print');assert.equal(print.status,200);assert.match(await print.text(),/Normal impression/);
+    assert.equal((await request('/reports/'+signed.id+'/print',null)).status,401);
+    assert.equal((await request('/reports/'+draft.id+'/draft',doctor,'PUT',{expectedRevision:draft.revision,sections:content})).status,409);
+    assert.equal((await request('/reports/'+draft.id+'/finalize',doctor,'POST',{expectedRevision:draft.revision,confirmed:true,requestId:randomUUID(),signerUserId:doctor.userId})).status,409);
+    // Missing index rows use the immutable registry for preserved report reads only.
+    await pool.query('delete from historical_pacs_studies where orthanc_study_id=$1',[studies[42].orthancStudyId]);
+    assert.equal((await request('/reports/'+signed.id+'/print')).status,200);await upsertHistoricalPacsStudies([studies[42]]);
+    await pool.query('update historical_pacs_sync_state set last_full_sync_at=now(),last_change_sequence=0');
+    const recovered=await runHistoricalPacsSyncCycle(async()=>{
+      assert.equal((await archiveStatus()).fresh,false,'Retry startup must not mark a failed catalogue fresh before successful synchronization');
+      return {getChanges:async()=>({changes:[],lastSequence:0,done:true}),listStudiesForIndexPage:async()=>{throw new Error('Unexpected full sync');},getStudyForIndex:async()=>null};
+    });assert.equal(recovered.mode,'incremental');
+    assert.equal((await getWorkspaceReport(doctor,draft.id)).canEdit,true);
+    assert.equal((await request('/reports/'+draft.id+'/draft',doctor,'PUT',{expectedRevision:draft.revision,sections:{...content,findings:'After sync recovery'}})).status,200);
+    const rev=(await getWorkspaceReport(doctor,draft.id)).revision;
+    const policy=await readReportingPolicy();await updateReportingPolicy(manager,{...policy,review:'mandatory',mandatoryReviewRoles:['consultant']});
+    try {
+      assert.equal((await request('/reports/'+draft.id+'/finalize',doctor,'POST',{expectedRevision:rev,confirmed:true,requestId:randomUUID(),signerUserId:doctor.userId,reviewed:true,reviewRequired:false})).status,403,'Direct API fields cannot bypass mandatory review');
+    }finally{await updateReportingPolicy(manager,{...await readReportingPolicy(),review:policy.review,mandatoryReviewRoles:policy.mandatoryReviewRoles});}
+    upstreamUnavailable=true;
+    const unverified=await request('/reports/'+draft.id+'/finalize',doctor,'POST',{expectedRevision:rev,confirmed:true,requestId:randomUUID(),signerUserId:doctor.userId});
+    assert.equal(unverified.status,503);assert.match(await unverified.text(),/Live archive verification is unavailable/);
+    assert.equal((await request('/reports/'+signed.id+'/print')).status,200);upstreamUnavailable=false;
+    assert.equal((await request('/reports/'+draft.id+'/finalize',noSign,'POST',{expectedRevision:rev,confirmed:true,requestId:randomUUID(),signerUserId:noSign.userId})).status,403);
+    await pool.query('update doctor_portal.doctor_modality_permissions set can_report=false where doctor_id in (select id from doctor_portal.doctor_profiles where user_id=$1)',[noSign.userId]);
+    for(const path of ['/workspace/studies/'+studies[41].orthancStudyId,'/reports/'+signed.id,'/reports/'+signed.id+'/history','/reports/'+signed.id+'/print'])assert.equal((await request(path,noSign)).status,403,path);
+    for(const [path,method,body] of [
+      ['/workspace/studies/'+studies[41].orthancStudyId+'/reports','POST',{mode:'shared',requestId:randomUUID()}],
+      ['/reports/'+draft.id+'/draft','PUT',{expectedRevision:rev,sections:content}],
+      ...['review','finalize','delete','recover','restore-revision','addenda','images-launch'].map(action=>['/reports/'+draft.id+'/'+action,'POST',{expectedRevision:rev,action:'submit',revision:1,confirmed:true,requestId:randomUUID(),signerUserId:noSign.userId,text:'Unauthorized',reason:'Unauthorized'}] as const),
+    ] as const)assert.equal((await request(path,noSign,method,body)).status,403,path);
+    assert.deepEqual((await pool.query('select * from native_reports where id=$1',[signed.id])).rows[0],original);
+  }finally{upstreamUnavailable=false;await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await pool.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=now(),last_error=null',[authoritativeOrthancArchiveKey(settings)]);}
+});
+
+test('Reporting Board attributes native and SonicDICOM finals independently of assignment and gives native fields precedence',async()=>{
+  const assigned=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[doctor.userId])).rows[0].id;
+  const signer=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[other.userId])).rows[0].id;
+  const before=await doctorDashboard(other,1),ids:number[]=[];
+  for(const [i,native,external] of [[43,false,true],[44,true,false],[45,true,true]] as const) {
+    const {booking,ct,s}=await bookedStudy(i);ids.push(Number(booking));
+    await pool.query("insert into doctor_portal.case_team_assignments(appointment_id,assigned_doctor_id,modality_id,assignment_type,status) values($1,$2,$3,'reporting','active')",[booking,assigned,ct]);
+    if(external)await pool.query("insert into doctor_portal.reporting_board_sonicdicom_cache(appointment_id,report_status,finalized_by_doctor_id,report_final_at,sonicdicom_finalized_by_account) values($1,'final',$2,now(),'synthetic-external')",[booking,native?assigned:signer]);
+    if(native) {
+      const identity={patientName:s.patientName,patientIdentifier:s.patientId,accession:s.accessionNumber,examination:s.studyDescription,studyDate:s.studyDate};
+      await pool.query(`insert into native_reports(appointment_id,patient_id,primary_study_uid,imaging_source,identity,status,sections,author_user_id,author_name,finalized_by_user_id,finalized_by_doctor_id,finalizer_name,finalized_at,signed_snapshot)
+        select b.id,b.patient_id,$2,$3,$4,'final',$5,$6,'Synthetic author',$7,$8,$9,now(),$10 from appointments_v2.bookings b where b.id=$1`,[booking,s.studyInstanceUid,JSON.stringify({accessStrategy:'authoritative_orthanc',sourcePacsNodeId:null,archiveKey:authoritativeOrthancArchiveKey(settings)}),JSON.stringify(identity),JSON.stringify(content),doctor.userId,other.userId,signer,prefix+'other',JSON.stringify({identity,sections:content,keyImages:[]})]);
+      await getWorkspaceStudy(other,s.orthancStudyId);
+    }
+    const rows=await listReportingBoardCasesByAppointmentIds([Number(booking)]);assert.equal(rows.length,1);
+    assert.equal(rows[0].assignedDoctorId,Number(assigned));assert.equal(rows[0].finalizedByDoctorId,Number(signer));assert.equal(rows[0].assignmentMatch,'mismatch');assert.equal(rows[0].reportStatus,'final');
+    assert.equal(rows[0].finalizedByDoctorName,prefix+'other');
+    for(const [finalizedByDoctorId,assignmentMatch,expected] of [[Number(signer),'mismatch',1],[Number(assigned),'matched',0]] as const)assert.equal((await listReportingBoardCaseCandidates({appointmentId:Number(booking),limit:10,offset:0,reportStatus:'all',finalizedByDoctorId,assignmentMatch})).length,expected);
+  }
+  const after=await doctorDashboard(other,1);assert.equal(after.totalFinalized,before.totalFinalized+2);assert.equal(after.externalFinalized,before.externalFinalized+1);
+  assert.equal(after.departmentCompleted,before.departmentCompleted+3,'Native and external finals on one examination count once');
+  assert.equal((await assignedWork(doctor,{status:'pending'})).cases.some(c=>ids.includes(Number(c.appointmentId))),false);
+});
+
+test('draft deletion and recovery retain captured bytes, image identity and immutable earlier revisions',async()=>{
+  const originalUploads=env.uploadsDir,keys=['storage_path','storage_fallback_enabled'];
+  const storage=(await pool.query("select setting_key,setting_value from system_settings where category='documents_and_uploads' and setting_key=any($1::text[])",[keys])).rows;
+  const root=resolve('test-results',prefix+'-assets');env.uploadsDir=root;let absolutePath:string|undefined;
+  try {
+    for(const [key,value] of [['storage_path',root],['storage_fallback_enabled','false']])await pool.query("insert into system_settings(category,setting_key,setting_value) values('documents_and_uploads',$1,$2) on conflict(category,setting_key) do update set setting_value=excluded.setting_value",[key,JSON.stringify({value})]);
+    let report=await create(doctor,46,'independent');const png=await sharp({create:{width:32,height:32,channels:3,background:'white'}}).png().toBuffer();
+    const stored=await storeReportImage(png);absolutePath=stored.absolutePath;
+    const image=(await pool.query(`insert into native_report_key_images(id,report_id,stored_path,sha256,byte_size,width,height,provenance,position,captured_by_user_id)
+      values($1,$2,$3,$4,$5,32,32,'{}',1,$6) returning *`,[randomUUID(),report.id,stored.storedPath,stored.sha256,png.length,doctor.userId])).rows[0];
+    report=await saveWorkspaceDraft(doctor,report.id,{expectedRevision:report.revision,sections:content});
+    const before=await workspaceHistory(doctor,report.id);
+    report=await deleteWorkspaceDraft(doctor,report.id,{expectedRevision:report.revision,confirmed:true,reason:'Retain synthetic assets'});
+    assert.deepEqual(await readReportImage(image),png);assert.deepEqual(await readFile(absolutePath),png);
+    report=await deleteWorkspaceDraft(manager,report.id,{expectedRevision:report.revision,confirmed:true,reason:'Authorized recovery'},true);
+    report=await restoreWorkspaceRevision(doctor,report.id,{expectedRevision:report.revision,revision:2});
+    assert.equal(report.revision,5);assert.equal(report.keyImages[0].id,image.id);
+    assert.deepEqual((await workspaceHistory(doctor,report.id)).versions.slice(0,2),before.versions);
+    assert.deepEqual((await pool.query('select * from native_report_key_images where id=$1',[image.id])).rows[0],image);
+    assert.deepEqual(await readReportImage(image),png);
+  }finally{
+    env.uploadsDir=originalUploads;
+    await pool.query("delete from system_settings where category='documents_and_uploads' and setting_key=any($1::text[])",[keys]);
+    for(const row of storage)await pool.query("insert into system_settings(category,setting_key,setting_value) values('documents_and_uploads',$1,$2)",[row.setting_key,JSON.stringify(row.setting_value)]);
+    if(absolutePath)await unlink(absolutePath);
+  }
+});
+
+test('recovery does not take reporting ownership back from a later external report',async()=>{
+  const {booking}=await bookedStudy(47);const draft=await create(doctor,47,'independent');
+  const removed=await deleteWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,confirmed:true,reason:'Synthetic removal'});
+  await pool.query("insert into doctor_portal.reporting_board_sonicdicom_cache(appointment_id,report_status,last_success_at,sonicdicom_latest_document_id) values($1,'final',now(),'synthetic-later-document')",[booking]);
+  await assert.rejects(()=>deleteWorkspaceDraft(manager,removed.id,{expectedRevision:removed.revision,confirmed:true,reason:'Recovery'},true),/External reporting ownership/);
+  assert.ok((await getWorkspaceReport(manager,removed.id)).deletedAt);
+  assert.equal((await pool.query('select report_status from doctor_portal.reporting_board_sonicdicom_cache where appointment_id=$1',[booking])).rows[0].report_status,'final');
+});
+
+test('PACS dates and 50-row defaults cover the complete archive with invalid dates last',async()=>{
+  const dates=['19900101','20261030','20261030','not-a-date','20260230',''];
+  for(let i=0;i<dates.length;i++)await pool.query('update historical_pacs_studies set study_date=$2 where orthanc_study_id=$1',[studies[60+i].orthancStudyId,dates[i]]);
+  const first=await listWorkspaceStudies(doctor,{q:prefix});assert.equal(first.limit,50);assert.equal(first.studies.length,50);assert.ok(first.total>=200);
+  assert.deepEqual(first.studies.slice(0,2).map(r=>r.orthanc_study_id),[studies[61].orthancStudyId,studies[62].orthancStudyId].sort());
+  const all=[];for(let offset=0;offset<first.total;offset+=50)all.push(...(await listWorkspaceStudies(doctor,{q:prefix,offset})).studies);
+  assert.equal(new Set(all.map(r=>r.orthanc_study_id)).size,first.total);assert.equal(all.at(-4)!.study_date,'19900101');
+  assert.deepEqual(new Set(all.slice(-3).map(r=>r.study_date)),new Set(['not-a-date','20260230','']));
+  assert.equal((await listWorkspaceStudies(doctor,{q:studies[60].patientId})).total,1);
+});
+
+test('PACS-only external status is source-bound, batched, retained on failure and refreshed incrementally',async()=>{
+  const settings={...DEFAULT_SONICDICOM_REPORT_SETTINGS,sonicDicomReportsEnabled:true,sonicDicomSqlEnabled:true,sonicDicomSqlServer:'127.0.0.1',sonicDicomSqlUsername:'synthetic',sonicDicomSqlTimeoutMs:100};
+  const setConfig=(value:unknown)=>pool.query("update system_settings set setting_value=$1 where category='sonicdicom_reports' and setting_key='config'",[JSON.stringify(value)]);
+  await setConfig(settings);
+  const keys=studies.slice(70,74).map(s=>s.orthancStudyId),uids=studies.slice(70,74).map(s=>s.studyInstanceUid),archiveKey=authoritativeOrthancArchiveKey({baseUrl:'http://127.0.0.1:19481'}),sourceKey=workspaceSonicSourceKey(settings);
+  try {
+    const departmentBefore=(await doctorDashboard(doctor,1)).departmentCompleted;
+    assert.equal((await listWorkspaceStudies(doctor,{q:studies[70].patientId})).studies[0].external_reporting_status,'not_checked');
+    await enqueueWorkspaceSonicStudies(archiveKey,sourceKey,keys);
+    let calls=0;
+    const lookup:Parameters<typeof refreshWorkspaceSonicStudies>[2]=async ids=>{calls++;assert.ok(ids.length<=50);assert.ok(ids.every(id=>uids.includes(id)));return new Map(ids.map((id,i)=>[id,{state:(['final','draft','no_report','study_not_found'] as const)[uids.indexOf(id)],canViewReport:i===0,source:'sonicdicom' as const,reportFinalAt:null}]));};
+    const tick=await refreshWorkspaceSonicStudies(50,pool,lookup);assert.equal(tick.successful,4);assert.equal(calls,1);
+    assert.equal((await doctorDashboard(doctor,1)).departmentCompleted,departmentBefore+1,'PACS-only external finals contribute one completed examination');
+    for(const [i,status] of ['external_final','external_draft','external_no_report','external_not_found'].entries())assert.equal((await listWorkspaceStudies(doctor,{q:studies[70+i].patientId})).studies[0].external_reporting_status,status);
+    assert.equal((await listWorkspaceStudies(doctor,{q:studies[70].patientId,status:'external_final'})).total,1);
+    assert.equal((await refreshWorkspaceSonicStudies(50,pool,lookup)).candidates,0,'Unchanged catalogue requests must not reset next_check_at');
+    await pool.query('update doctor_portal.workspace_sonicdicom_cache set next_check_at=now() where study_instance_uid=$1',[uids[0]]);
+    const failed=await refreshWorkspaceSonicStudies(50,pool,async()=>new Map());assert.equal(failed.failed,1);
+    const retained=(await listWorkspaceStudies(doctor,{q:studies[70].patientId})).studies[0];assert.equal(retained.external_reporting_status,'external_unavailable');assert.equal(retained.external_last_known_status,'final');assert.ok(retained.external_checked_at);
+    const stored=(await pool.query('select * from doctor_portal.workspace_sonicdicom_cache where archive_key=$1 and sonic_source_key=$2 and study_instance_uid=$3',[archiveKey,sourceKey,uids[0]])).rows[0];assert.ok(new Date(stored.next_check_at)>new Date(stored.last_attempt_at));
+    await setConfig({...settings,sonicDicomSqlServer:'different-synthetic-source'});assert.equal((await listWorkspaceStudies(doctor,{q:studies[70].patientId})).studies[0].external_reporting_status,'not_checked');
+    await setConfig({...settings,sonicDicomReportsEnabled:false});assert.equal((await listWorkspaceStudies(doctor,{q:studies[72].patientId})).studies[0].external_reporting_status,'external_disabled');
+    assert.equal((await refreshWorkspaceSonicStudies(50,pool,lookup)).candidates,0);
+    await assert.rejects(()=>create(doctor,70),/External reporting ownership/);
+    await assert.rejects(()=>create(doctor,71),/External reporting ownership/);
+    await pool.query('update historical_pacs_studies set series_count=series_count+1 where orthanc_study_id=$1',[keys[1]]);
+    await setConfig(settings);await listWorkspaceStudies(doctor,{q:studies[71].patientId});
+    assert.equal((await listWorkspaceStudies(doctor,{q:studies[71].patientId})).studies[0].external_reporting_status,'external_unavailable');
+    await setConfig({...settings,sonicDicomReportsEnabled:false});await assert.rejects(()=>create(doctor,71),/External reporting ownership/);
+    await setConfig(settings);
+    const bookingCount=(await pool.query('select count(*)::int n from appointments_v2.bookings')).rows[0].n;
+    const {backfillWorkspaceExternalStatus}=await import('./workspace-study-service.js');
+    await assert.rejects(()=>backfillWorkspaceExternalStatus(doctor,{limit:3}),/Supervisor/);
+    const backfill=await backfillWorkspaceExternalStatus(manager,{limit:3});assert.equal(backfill.examined,3);assert.ok(backfill.nextCursor);assert.equal((await pool.query('select count(*)::int n from appointments_v2.bookings')).rows[0].n,bookingCount);
+    // The display cache cannot authorize creation, even when it retained no-report.
+    await assert.rejects(()=>create(doctor,72),/External reporting owns/);
+  }finally{await setConfig(DEFAULT_SONICDICOM_REPORT_SETTINGS);}
 });

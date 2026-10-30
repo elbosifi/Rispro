@@ -58,8 +58,8 @@ it('serializes pending saves and newer edits before SPA return with exact workli
   for(const part of ['q=SYN','offset=50','sort=patient','direction=asc'])expect(screen.getByTestId('location').textContent).toContain(part);
 });
 
-it.each([[503,'Save Failed'],[409,'Revision Conflict']])('retains unsaved text and blocks navigation after HTTP %s',async(code,label)=>{
-  vi.mocked(api).mockImplementation(async(_path,options)=>{if(options?.method==='PUT')throw new ApiError('Synthetic save error',code);return report() as never;});
+it.each([[503,'Save Failed','Synthetic save error'],[409,'Revision Conflict','Revision conflict. Your unsaved text is retained.'],[409,'Save Failed','The archive index is stale. Synchronize it before changing reports.']] as const)('retains unsaved text and blocks navigation after HTTP %s (%s)',async(code,label,message)=>{
+  vi.mocked(api).mockImplementation(async(_path,options)=>{if(options?.method==='PUT')throw new ApiError(message,code);return report() as never;});
   mount();await screen.findByDisplayValue('Original');fireEvent.change(screen.getByLabelText('Findings'),{target:{value:'Must retain this text'}});fireEvent.click(screen.getByRole('button',{name:'Save'}));
   await screen.findByText(label,{exact:true});fireEvent.click(screen.getByRole('link',{name:'Back to Reporting Worklist'}));
   await waitFor(()=>expect(screen.getByTestId('location').textContent).toContain('/reports/42'));

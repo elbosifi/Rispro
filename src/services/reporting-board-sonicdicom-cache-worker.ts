@@ -1,6 +1,7 @@
 import os from "node:os";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
+import {refreshWorkspaceSonicStudies} from './workspace-sonicdicom-cache-service.js';
 import {
   enqueueReportingBoardSonicDicomCacheRows,
   refreshReportingBoardSonicDicomCacheCandidates,
@@ -13,7 +14,7 @@ const DEFAULT_BATCH_SIZE = 200;
 const ADVISORY_LOCK_KEY = 712364091;
 
 export interface ReportingBoardSonicDicomCacheWorker { stop(): Promise<void>; }
-export interface ReportingBoardSonicDicomCacheTick { lockAcquired: boolean; candidates: number; successful: number; changedStatus: number; final: number; failed: number; durationMs: number; }
+export interface ReportingBoardSonicDicomCacheTick { lockAcquired: boolean; candidates: number; successful: number; changedStatus: number; final: number; failed: number; durationMs: number; workspace?:{candidates:number;successful:number;failed:number}; }
 
 let running = false;
 let stopped = false;
@@ -33,7 +34,8 @@ export async function runReportingBoardSonicDicomCacheTick(options: { batchSize?
       const candidates = await selectDueReportingBoardSonicDicomCacheCandidates(options.batchSize ?? DEFAULT_BATCH_SIZE, client);
       const comparisonCandidates = await selectDueComparisonSonicDicomCacheCandidates(options.batchSize ?? DEFAULT_BATCH_SIZE, client);
       const result = await refreshReportingBoardSonicDicomCacheCandidates(candidates, comparisonCandidates);
-      return { lockAcquired: true, ...result, durationMs: Date.now() - started };
+      const workspace=await refreshWorkspaceSonicStudies(Math.min(options.batchSize??50,50),client);
+      return { lockAcquired: true, ...result,workspace, durationMs: Date.now() - started };
     } finally { await client.query("select pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => null); }
   } finally { client.release(); running = false; }
 }

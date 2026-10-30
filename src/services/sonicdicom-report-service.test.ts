@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_SONICDICOM_REPORT_SETTINGS } from "./sonicdicom-report-settings.js";
+import {__studyStatusesFromReadinessForTest,__querySqlReportReadinessBatchForTest} from './sonicdicom-report-service.js';
 import { __accessionFallbackStudyPredicateForTest, __activeDocumentPredicateForTest, __documentHistoriesFromSqlRowsForTest, __isSonicDicomActiveDocumentStatusForTest, __mapSonicDicomSqlStatusCodeForTest, __resolveSonicDicomCorrelationForTest, selectAssignmentAwareSonicDicomDocument, selectSonicDicomComparisonDocument } from "./sonicdicom-report-service.js";
 
 const settings = {
@@ -22,6 +23,28 @@ const readiness = (overrides: Partial<{
   latestDocumentId: "20",
   finalizedByAccount: "doctor.b@nccb.ly",
   ...overrides,
+});
+
+describe('PACS-only UID batch status',()=>{
+  it('keeps final, draft, verified absence and missing/unavailable results distinct by UID',()=>{
+    const rows=new Map([
+      ['1.2.1',readiness()],['1.2.2',readiness({statusCode:1})],
+      ['1.2.3',readiness({foundReport:false,statusCode:null})],['1.2.4',readiness({foundStudy:false,foundReport:false,statusCode:null})],
+      ['1.2.5',readiness({statusCode:999})],
+    ]);
+    const results=__studyStatusesFromReadinessForTest(settings,['1.2.1','1.2.2','1.2.3','1.2.4','1.2.5','1.2.6'],rows);
+    assert.deepEqual([...results.values()].map(r=>r.state),['final','draft','no_report','study_not_found','unavailable','unavailable']);
+    assert.equal(results.get('1.2.1')!.finalizedByAccount,'doctor.b@nccb.ly');
+  });
+  it('binds exact study UIDs and configured tombstones in one SQL batch without appointment IDs or accession fallback',async()=>{
+    const inputs:{name:string;value:unknown}[]=[];let statement='';
+    const request={input(name:string,_type:unknown,value:unknown){inputs.push({name,value});return request;},async query<T>(sqlText:string){statement=sqlText;return {recordset:[] as T[]};}};
+    const sql={Int:()=>0,NVarChar:()=>0,ConnectionPool:class {async connect(){}async close(){}request(){return request;}}};
+    await __querySqlReportReadinessBatchForTest({request:()=>request,connect:async()=>{},close:async()=>{}},sql,'dicom','report',['1.2.1','1.2.2','1.2.1'],'study_instance_uid',[7]);
+    assert.deepEqual(inputs.filter(p=>p.name.startsWith('studyInstanceUid')).map(p=>p.value),['1.2.1','1.2.2']);
+    assert.match(statement,/s\.StudyInstanceUID = input\.StudyInstanceUID/);assert.doesNotMatch(statement,/AccessionNumber|appointment|booking/i);
+    assert.match(statement,/outer apply/);assert.ok(inputs.some(p=>p.value===7));
+  });
 });
 
 describe("SonicDICOM active document SQL parameter binding", () => {

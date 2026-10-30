@@ -35,7 +35,7 @@ function StandaloneReportEditor({initial}:{initial:WorkspaceReport}) {
       const c=current.current;if(!c.dirty)return;if(c.conflict)throw new Error('Compare and reconcile the saved revision before saving.');
       const generation=c.generation,submitted={...c.text};setSaving(true);setSaveFailure(false);setError('');
       try{const saved=await api<WorkspaceReport>(base+'/draft',{method:'PUT',body:JSON.stringify({expectedRevision:c.report.revision,sections:submitted})});if(!alive.current)return;adopt(saved);const changed=current.current.generation!==generation;current.current.dirty=changed;setDirty(changed);}
-      catch(e){if(alive.current){setSaveFailure(true);setError((e as Error).message);if(e instanceof ApiError&&e.status===409){current.current.conflict=true;setConflict(true);}}throw e;}
+      catch(e){if(alive.current){setSaveFailure(true);setError((e as Error).message);if(e instanceof ApiError&&e.status===409&&/revision conflict|changed in another editor/i.test(e.message)){current.current.conflict=true;setConflict(true);}}throw e;}
       finally{if(alive.current)setSaving(false);}
     });chain.current=result;await result;
   },[base,adopt]);
@@ -61,7 +61,7 @@ function StandaloneReportEditor({initial}:{initial:WorkspaceReport}) {
     if(dictation?.busy){setError('Finish dictation before performing a report action.');return;}
     mutationActive.current=true;setBusy(true);setError('');
     try{do{await save();}while(current.current.dirty);const result=await post<WorkspaceReport>(base+'/'+action,{...body,expectedRevision:current.current.report.revision});if(alive.current){adopt(result,true);setConfirm('');setReason('');setReviewComment('');if(action==='addenda')addendumId.current=requestId();}}
-    catch(e){if(alive.current){setError((e as Error).message);if(e instanceof ApiError&&e.status===409){current.current.conflict=true;setConflict(true);}}}finally{mutationActive.current=false;if(alive.current)setBusy(false);}
+    catch(e){if(alive.current){setError((e as Error).message);if(e instanceof ApiError&&e.status===409&&/revision conflict|changed in another editor/i.test(e.message)){current.current.conflict=true;setConflict(true);}}}finally{mutationActive.current=false;if(alive.current)setBusy(false);}
   }
   function images(sameTab=false){void viewer.launch(()=>post(base+'/images-launch',{}),sameTab,prepareNavigation);}
   const editable=report.canEdit&&!busy&&!report.deletedAt;

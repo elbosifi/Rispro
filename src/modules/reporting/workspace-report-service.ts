@@ -141,6 +141,7 @@ export async function getWorkspaceReport(actor:Actor,id:number) {
     a={me,policy,freshness:{...freshness,fresh:false},appointment:null,identity:record.identity,study:{orthanc_study_id:record.orthanc_study_id,study_instance_uid:record.study_instance_uid,patient_id:record.identity.patientIdentifier,patient_name_raw:record.identity.patientName,accession_number:record.identity.accession,study_description:record.identity.examination,study_date:record.identity.studyDate,modalities_in_study:record.modalities,series_count:0}};
   }
   if(a.freshness.archiveKey!==record.source_archive_key) throw new HttpError(409,'Report belongs to a different archive. Reconcile the source before opening.');
+  if(a.study.study_instance_uid!==record.study_instance_uid) throw new HttpError(409,'Report Study Instance UID conflicts with the archive. Reconciliation is required.');
   const identityChanged=record.identity.patientIdentifier!==a.identity.patientIdentifier||record.identity.accession!==a.identity.accession;
   if(identityChanged)a={...a,freshness:{...a.freshness,fresh:false}};
   const report=(await pool.query<ReportRow>('select * from native_reports where id=$1',[id])).rows[0];
@@ -237,7 +238,16 @@ export async function deleteWorkspaceDraft(actor:Actor,id:number,body:Record<str
     const count=(await db.query('select count(*)::int count from native_report_contributors where report_id=$1',[id])).rows[0].count;
     if(recover?!supervisor(a.me)||!report.deleted_at||report.status!=='draft':!canDelete(a,report,count)) throw new HttpError(403,'Draft deletion/recovery is not permitted. Withdraw review first; shared contributions require a supervisor.');
     const reason=String(body.reason||'').trim();if(body.confirmed!==true||!reason||reason.length>2000) throw new HttpError(400,'Confirm and provide a deletion/recovery reason.');
-    const saved=(await db.query<ReportRow>(`update native_reports set revision=revision+1,deleted_at=case when $2::boolean then null else now() end,deleted_by=case when $2::boolean then null else $3::bigint end,deletion_reason=case when $2::boolean then null else $4::text end,legacy_primary=false,updated_at=now() where id=$1 returning *`,[id,recover,actor.userId,reason])).rows[0];
+    if(recover) {
+      // The registry and appointment locks are already held. Never recover over
+      // a replacement or silently transfer legacy appointment ownership.
+      const replacement=await db.query(`select 1 from native_reports n left join native_report_study_links l on l.report_id=n.id
+        where n.id<>$1 and n.deleted_at is null and (l.study_id=$2 or n.appointment_id=$3) limit 1`,[id,study.id,report.appointment_id]);
+      if(replacement.rowCount)throw new HttpError(409,'A replacement report exists for this study or appointment. Reconcile it before recovering this draft.');
+      await verifyExternalOwnership(a.study,a.appointment?Number(a.appointment.id):null,db);
+    }
+    const saved=(await db.query<ReportRow>(`update native_reports set revision=revision+1,deleted_at=case when $2::boolean then null else now() end,deleted_by=case when $2::boolean then null else $3::bigint end,deletion_reason=case when $2::boolean then null else $4::text end,
+      legacy_primary=case when $2::boolean and appointment_id is not null then true else legacy_primary end,updated_at=now() where id=$1 returning *`,[id,recover,actor.userId,reason])).rows[0];
     await history(db,saved,actor,a.me.profile!.displayName,'draft');
     await logAuditEntry({entityType:'native_report',entityId:id,actionType:recover?'native_report_recovered':'native_report_deleted',newValues:{reason,revision:saved.revision},changedByUserId:actor.userId},db);
     return view(db,saved,a,study.orthanc_study_id);

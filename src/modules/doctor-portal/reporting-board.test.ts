@@ -142,9 +142,9 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(cacheService, /case when count\(distinct dp\.id\) = 1 then min\(dp\.id\) else null end/);
     assert.doesNotMatch(cacheService, /dp\.active\s*=\s*true/);
     assert.match(repository, /left join doctor_portal\.doctor_profiles assigned_doctor on assigned_doctor\.id = cta\.assigned_doctor_id/);
-    assert.match(repository, /left join doctor_portal\.doctor_profiles finalized_doctor on finalized_doctor\.id = cache\.finalized_by_doctor_id/);
+    assert.match(repository, /left join doctor_portal\.doctor_profiles finalized_doctor on finalized_doctor\.id = coalesce\(native_report\.finalized_by_doctor_id, cache\.finalized_by_doctor_id\)/);
     assert.match(repository, /assigned_doctor\.display_name as "assignedDoctorName"/);
-    assert.match(repository, /finalized_doctor\.display_name as "finalizedByDoctorName"/);
+    assert.match(repository, /coalesce\(native_report\.finalizer_name, finalized_doctor\.display_name\) as "finalizedByDoctorName"/);
   });
 
   it("adds Sonic assignment provenance, no-reassign auto sync, protected TAT, and independent finalizer filters", () => {
@@ -164,7 +164,7 @@ describe("Doctor Portal Reporting Assignment Board foundation", () => {
     assert.match(cacheService, /actorUserId: null/);
     assert.match(cacheService, /reporting_board_sonic_assignment_sync_failed/);
     assert.doesNotMatch(cacheService, /createAssignedToMeNotifications/);
-    assert.match(repository, /cache\.finalized_by_doctor_id = \$\$\{values\.length\}/);
+    assert.match(repository, /coalesce\(native_report\.finalized_by_doctor_id, cache\.finalized_by_doctor_id\) = \$\$\{values\.length\}/);
     assert.match(repository, /assignmentMatch === "mismatch"/);
     assert.match(service, /postHocAssignment/);
     assert.match(service, /completedToAssignedMinutes: null, assignedToFinalMinutes: null/);

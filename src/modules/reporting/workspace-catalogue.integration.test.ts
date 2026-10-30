@@ -9,6 +9,7 @@ import {pool} from '../../db/pool.js';
 import {env} from '../../config/env.js';
 import {nativeReportingRouter} from './reporting-routes.js';
 import {DEFAULT_REPORTING_POLICY} from './reporting-policy.js';
+import {DEFAULT_SONICDICOM_REPORT_SETTINGS} from '../../services/sonicdicom-report-settings.js';
 import {listWorkspaceStudies} from './workspace-study-service.js';
 import {authoritativeOrthancArchiveKey,__setAuthoritativeOrthancSettingsForTests,__setAuthoritativeOrthancFetchForTests,__resetAuthoritativeOrthancForTests} from '../../services/authoritative-orthanc-service.js';
 
@@ -20,8 +21,8 @@ test('large cached catalogue: counts, pagination, query plans and HTTP benchmark
   const db=await pool.connect();
   const settings={enabled:true,baseUrl:'http://127.0.0.1:19482',username:'synthetic',password:'synthetic',timeoutSeconds:2,verifyTls:true,displayName:'Synthetic',autoExportClinicalDocuments:false,autoRouteEnabled:false,autoRouteDestinationKey:'',autoRouteDestinationKeys:[]};
   const archiveKey=authoritativeOrthancArchiveKey(settings),prefix='wv2round1_',size=2000;
-  const captured:{sql:string;values:unknown[]}[]=[];
-  const spy=mock.method(pool,'query',(sql:string,values:unknown[]=[])=>{captured.push({sql,values:[...values]});return db.query(sql,values);});
+  const captured:{sql:string;values:unknown[];ms?:number}[]=[];
+  const spy=mock.method(pool,'query',(sql:string,values:unknown[]=[])=>{const entry={sql,values:[...values],ms:0},started=performance.now();captured.push(entry);return db.query(sql,values).then(result=>{entry.ms=performance.now()-started;return result;});});
   const app=express();app.use(cookieParser());app.use('/api/native-reporting',nativeReportingRouter);
   const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
@@ -36,6 +37,7 @@ test('large cached catalogue: counts, pagination, query plans and HTTP benchmark
     __setAuthoritativeOrthancFetchForTests(async()=>{throw new Error('Catalogue must use PostgreSQL without remote retrieval');});
     await db.query("update system_settings set setting_value=$1 where category='doctor_workspace' and setting_key='reporting_policy'",[JSON.stringify({...DEFAULT_REPORTING_POLICY,enabled:true})]);
     await db.query(`insert into system_settings(category,setting_key,setting_value) values('sonicdicom_reports','sonicdicom_reports_enabled','{"value":"enabled"}') on conflict(category,setting_key) do update set setting_value=excluded.setting_value`);
+    await db.query("update system_settings set setting_value=$1 where category='sonicdicom_reports' and setting_key='config'",[JSON.stringify({...DEFAULT_SONICDICOM_REPORT_SETTINGS,sonicDicomReportsEnabled:true,sonicDicomSqlEnabled:true,sonicDicomSqlServer:'synthetic-only'})]);
     await db.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=now(),last_error=null',[archiveKey]);
     const uid=(await db.query("insert into users(username,password_hash,full_name,role,is_active) values($1,'synthetic-only',$1,'doctor',true) returning id",[prefix+'doctor'])).rows[0].id;
     const doctor=(await db.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active,can_finalize_reports) values($1,$2,'consultant',true,true) returning id",[uid,prefix+'doctor'])).rows[0].id;
@@ -75,30 +77,31 @@ test('large cached catalogue: counts, pagination, query plans and HTTP benchmark
       assert.equal(res.status,200,await res.clone().text());return res.json();
     }
     const scenarios:Record<string,Record<string,string>>={all:{},deep:{offset:'1900'},search:{q:'Synthetic Patient 01999'},date_modality:{modality:'CT',from:'2026-10-29',to:'2026-10-29'},draft:{status:'draft'},my_reports:{status:'my_reports'},patient_sort:{sort:'patient',direction:'asc'}};
+    const pageSize=Number(process.env.WORKSPACE_BENCHMARK_PAGE_SIZE)||50;
     const measurements:Record<string,unknown>={};
     for(const [name,params] of Object.entries(scenarios)) {
-      const query={q:prefix,limit:'25',...params};await request(query);const apiMs:number[]=[];
+      const query={q:prefix,limit:String(pageSize),...params};await request(query);const apiMs:number[]=[];
       for(let run=0;run<3;run++){const start=performance.now();await request(query);apiMs.push(performance.now()-start);}
       captured.length=0;const result=await request(query);
-      if(name==='all'||name==='deep')assert.equal(result.total,size);
+      if(name==='all'||name==='deep'){assert.equal(result.total,size);assert.equal(result.studies.length,pageSize);assert.equal(result.limit,pageSize);}
       if(name==='search'){assert.equal(result.total,1);assert.equal(result.studies[0].orthanc_study_id,prefix+'1999');}
       const plans=[];
       for(const q of captured.filter(q=>q.sql.includes('catalogue')||q.sql.includes('historical_pacs_studies s'))) {
         const plan=(await db.query('explain (analyze,buffers,format json) '+q.sql,q.values)).rows[0]['QUERY PLAN'][0];
         plans.push({sql:q.sql,values:q.values,plan});
       }
-      measurements[name]={apiMs,medianApiMs:[...apiMs].sort((a,b)=>a-b)[1],total:result.total,plans};
+      measurements[name]={apiMs,medianApiMs:[...apiMs].sort((a,b)=>a-b)[1],total:result.total,queries:captured.map(q=>({sql:q.sql,ms:q.ms})),plans};
     }
-    if(process.env.WORKSPACE_BENCHMARK_BASELINE!=='1') {
+    if(process.env.WORKSPACE_BENCHMARK_BASELINE!=='1'&&process.env.WORKSPACE_BENCHMARK_MEASURE_ONLY!=='1') {
       // Exact filter semantics, independent native/external state, and complete
       // pagination with no duplicates or loss of PACS-only rows.
-      for(const [status,total] of Object.entries({no_report:1000,draft:400,in_review:200,final:200,additional_reports:200,my_reports:1000,my_drafts:600,external_draft:200,external_final:200,unknown:1400})) {
+      for(const [status,total] of Object.entries({no_report:1000,draft:400,in_review:200,final:200,additional_reports:200,my_reports:1000,my_drafts:600,external_draft:200,external_final:200,not_checked:1000,external_unavailable:400})) {
         const result=await request({q:prefix,status,limit:'100'});assert.equal(result.total,total,status);
       }
       const seen=new Set<string>();
       for(let offset=0;offset<size;offset+=100)for(const s of (await request({q:prefix,limit:'100',offset:String(offset)})).studies){assert.ok(!seen.has(s.orthanc_study_id));seen.add(s.orthanc_study_id);}
       assert.equal(seen.size,size);
-      for(const [i,native,external] of [[0,'no_report','unknown'],[1,'draft','unknown'],[2,'in_review','unknown'],[3,'final','unknown'],[4,'additional_reports','unknown'],[5,'no_report','external_draft'],[6,'no_report','external_final'],[7,'no_report','unknown'],[8,'no_report','no_report']] as const) {
+      for(const [i,native,external] of [[0,'no_report','not_checked'],[1,'draft','not_checked'],[2,'in_review','not_checked'],[3,'final','not_checked'],[4,'additional_reports','not_checked'],[5,'no_report','external_draft'],[6,'no_report','external_final'],[7,'no_report','external_unavailable'],[8,'no_report','external_no_report']] as const) {
         const row=(await request({q:prefix+'A'+i,sort:'patient',direction:'asc'})).studies[0];
         assert.equal(row.reporting_status,native);assert.equal(row.external_reporting_status,external);assert.equal(row.orthanc_study_id,prefix+i);
       }
@@ -106,8 +109,8 @@ test('large cached catalogue: counts, pagination, query plans and HTTP benchmark
       await db.query(`insert into study_source_resolutions(appointment_id,accession_number,study_instance_uid,source_kind,resolution_method)
         select id,$2||id,study_instance_uid,'authoritative_orthanc','persisted_uid_verified' from appointments_v2.bookings where policy_version_id=$1`,[version,prefix]);
       await db.query(`update appointments_v2.bookings set study_instance_uid=null where policy_version_id=$1 and split_part(study_instance_uid,'.',10)::int%10=8`,[version]);
-      const matched=await request({q:prefix,status:'external_draft'});assert.equal(matched.total,200);assert.equal(matched.studies.length,25);
-      assert.equal((await request({q:'Synthetic Patient 00008'})).studies[0].external_reporting_status,'no_report');
+      const matched=await request({q:prefix,status:'external_draft'});assert.equal(matched.total,200);assert.equal(matched.studies.length,50);
+      assert.equal((await request({q:'Synthetic Patient 00008'})).studies[0].external_reporting_status,'external_no_report');
       const actor={userId:Number(uid),appRole:'doctor' as const};
       assert.equal((await listWorkspaceStudies(actor,{q:prefix},true)).total,1000);
       assert.equal((await listWorkspaceStudies(actor,{q:prefix,status:'my_reports'},true)).total,200);

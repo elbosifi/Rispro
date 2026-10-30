@@ -24,6 +24,7 @@ export interface StudyReports {studyKey:string;identity:ReportIdentity;studyUid:
 export interface StudyListRow {
   orthanc_study_id:string;study_instance_uid:string;patient_id:string;patient_name_raw:string;accession_number:string;study_description:string;
   modalities_in_study:string[];study_date:string;series_count:number;reporting_status:string;external_reporting_status:string;report_count:number;assigned_doctor:string|null;
+  external_checked_at?:string|null;external_last_known_status?:string|null;external_error?:string|null;
   reports:{id:number;author:string;signer:string|null;status:string}[];
 }
 export interface ReportingAppointment {
@@ -70,9 +71,9 @@ export const post=<T>(path:string,body:unknown)=>api<T>(path,{method:'POST',body
 export const reportTypes:Record<string,string>={primary:'Primary Interpretation',second_opinion:'Second Opinion',additional_interpretation:'Additional Interpretation',peer_review:'Peer Review'};
 export function requestId() {const b=crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;}
 export function reportingReturn(value:string|null) {return value&&/^\/doctor\/(reporting|my-work)(\?|$)/.test(value)?value:'/doctor/reporting';}
-export type ReportingPreferences={status:string;modality:string;template:string;compact:boolean;dashboardDays:number};
-const defaults:ReportingPreferences={status:'all',modality:'',template:'blank',compact:false,dashboardDays:7};
+export type ReportingPreferences={status:string;modality:string;template:string;compact:boolean;dashboardDays:number;filtersVersion:number};
+const defaults:ReportingPreferences={status:'all',modality:'',template:'blank',compact:false,dashboardDays:7,filtersVersion:2};
 export function loadReportingPreferences(userId:number|undefined):ReportingPreferences {
-  try{return {...defaults,...JSON.parse(localStorage.getItem('rispro.reporting.preferences.'+userId)||'{}')};}catch{return defaults;}
+  try{const saved=JSON.parse(localStorage.getItem('rispro.reporting.preferences.'+userId)||'{}');return {...defaults,...saved,...(saved.filtersVersion===2?{}:{status:'all',modality:'',filtersVersion:2})};}catch{return defaults;}
 }
 export function saveReportingPreferences(userId:number|undefined,p:ReportingPreferences) {localStorage.setItem('rispro.reporting.preferences.'+userId,JSON.stringify(p));}

@@ -4,7 +4,8 @@ import { HttpError } from '../../utils/http-error.js';
 import { authoritativeOrthancArchiveKey,readAuthoritativeOrthancSettings,createAuthoritativeOrthancClient } from '../../services/authoritative-orthanc-service.js';
 import { HISTORICAL_PACS_INDEX_FRESHNESS_MS } from '../../services/historical-pacs-index-service.js';
 import { readSonicDicomReportSettings } from '../../services/sonicdicom-report-settings.js';
-import { checkSonicDicomReportStatus } from '../../services/sonicdicom-report-service.js';
+import { checkSonicDicomReportStatus,checkSonicDicomStudyStatusesBatch } from '../../services/sonicdicom-report-service.js';
+import {enqueueWorkspaceSonicStudies,workspaceSonicSourceKey,workspaceSonicMetadata} from '../../services/workspace-sonicdicom-cache-service.js';
 import { requireRosterDoctor } from '../doctor-portal/roster-service.js';
 import type { Actor } from '../doctor-portal/reporting-board-service.js';
 import { isValidDicomUid } from '../ohif-viewer/validation.js';
@@ -63,16 +64,24 @@ export function studyIdentity(s:WorkspaceStudy):Identity {
   return {patientName:s.patient_name_raw||'',patientIdentifier:s.patient_id,accession:s.accession_number||'',examination:s.study_description||s.modalities_in_study.join('/'),studyDate:s.study_date||''};
 }
 export async function verifyLiveStudy(s:WorkspaceStudy) {
-  const remote=await (await createAuthoritativeOrthancClient()).getStudyForIndex(s.orthanc_study_id);
+  let remote;
+  try{remote=await (await createAuthoritativeOrthancClient()).getStudyForIndex(s.orthanc_study_id);}
+  catch{throw new HttpError(503,'Live archive verification is unavailable. Retry after Orthanc connectivity recovers. No reporting changes were applied.');}
   if(!remote || remote.studyInstanceUid!==s.study_instance_uid || remote.patientId!==s.patient_id || (remote.accessionNumber||'')!==(s.accession_number||'')) throw new HttpError(409,'Archive patient/study identity changed. Reconcile and synchronize before reporting.');
+  const diagnostic=(codes:string[])=>[...new Set(codes.map(modality).filter(c=>!['SR','PR','SEG','KO','DOC'].includes(c)))].sort().join('/');
+  if(diagnostic(remote.modalitiesInStudy)!==diagnostic(s.modalities_in_study))throw new HttpError(409,'The live study modalities changed. Synchronize the catalogue and recheck reporting permission before proceeding.');
   return remote;
 }
 export async function verifyExternalOwnership(s:WorkspaceStudy,appointmentId:number|null,db:Db) {
   const settings=await readSonicDicomReportSettings();
+  const archiveKey=authoritativeOrthancArchiveKey(await readAuthoritativeOrthancSettings());
+  const retained=await db.query(`select 1 from doctor_portal.workspace_sonicdicom_cache where archive_key=$1 and study_instance_uid=$2
+    and (report_status in ('draft','final') or ($3::boolean and (last_error is not null or last_attempt_at is not null and last_success_at is null))) limit 1`,[archiveKey,s.study_instance_uid,!settings.sonicDicomReportsEnabled]);
+  if(retained.rowCount)throw new HttpError(409,'External reporting ownership or an unverifiable retained observation must be reconciled first.');
   if(settings.sonicDicomReportsEnabled) {
-    // Zero is a lookup-only cache discriminator; no booking or patient is fabricated.
-    const external=await checkSonicDicomReportStatus({bookingId:appointmentId??0,accessionNumber:s.accession_number||'',studyInstanceUid:s.study_instance_uid,requiresReport:true,status:'completed'},{useCache:false});
-    if(!['no_report','study_not_found'].includes(external.state)) throw new HttpError(409,'External reporting owns this study or its status cannot be verified.');
+    // PACS-only ownership uses the exact UID and never an appointment discriminator.
+    const external=appointmentId?await checkSonicDicomReportStatus({bookingId:appointmentId,accessionNumber:s.accession_number||'',studyInstanceUid:s.study_instance_uid,requiresReport:true,status:'completed'},{useCache:false}):(await checkSonicDicomStudyStatusesBatch([s.study_instance_uid])).get(s.study_instance_uid)!;
+    if(!external||!['no_report','study_not_found'].includes(external.state)) throw new HttpError(409,'External reporting owns this study or its status cannot be verified.');
   }
   if(appointmentId) {
     const ownership=await db.query(`select 1 from doctor_portal.reporting_board_manual_final_overrides where appointment_id=$1 and cleared_at is null
@@ -83,12 +92,13 @@ export async function verifyExternalOwnership(s:WorkspaceStudy,appointmentId:num
 }
 
 export async function listWorkspaceStudies(actor:Actor,input:Record<string,unknown>,assignedOnly=false) {
-  const me=await reportingDoctor(actor),policy=await readReportingPolicy(),freshness=await archiveStatus();
+  const [me,policy,freshness,sonic]=await Promise.all([reportingDoctor(actor),readReportingPolicy(),archiveStatus(),readSonicDicomReportSettings()]);
   if(!policy.enabled) throw new HttpError(404,'Doctor Workspace V2 is disabled.');
-  if(!freshness.available) return {studies:[],total:0,limit:25,offset:0,freshness,modalities:[]};
+  if(!freshness.available) return {studies:[],total:0,limit:50,offset:0,freshness,modalities:[]};
   const codes=[...new Set(me.allowedModalities.filter(p=>p.active&&p.canReport).map(p=>modality(p.modalityCode||'')))];
-  const limit=Math.min(100,Math.max(1,Math.trunc(Number(input.limit)||25))),offset=Math.max(0,Math.trunc(Number(input.offset)||0));
-  const values:unknown[]=[codes,freshness.archiveKey,actor.userId,me.profile!.id];
+  const limit=Math.min(100,Math.max(1,Math.trunc(Number(input.limit)||50))),offset=Math.max(0,Math.trunc(Number(input.offset)||0));
+  const sonicKey=workspaceSonicSourceKey(sonic);
+  const values:unknown[]=[codes,freshness.archiveKey,actor.userId,me.profile!.id,sonicKey,sonic.sonicDicomReportsEnabled,sonic.sonicDicomReadinessMode==='sql_server'&&sonic.sonicDicomSqlEnabled];
   const where=[`$4::bigint > 0`,`s.modalities_in_study && $1::text[]`,`not exists(select 1 from unnest(s.modalities_in_study) m where m not in ('SR','PR','SEG','KO','DOC') and (case when m='MRI' then 'MR' else m end)<>all($1::text[]))`];
   const param=(v:unknown)=>{values.push(v);return '$'+values.length;};
   if(input.q) where.push(`(coalesce(s.patient_name_raw,'') || ' ' || coalesce(s.patient_id,'') || ' ' || coalesce(s.accession_number,'') || ' ' || coalesce(s.study_description,'') || ' ' || coalesce(s.study_instance_uid,'')) ilike ${param('%'+String(input.q).slice(0,200)+'%')}`);
@@ -114,6 +124,7 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
   // Two indexed UID lookups replace scanning bookings with OR / EXISTS for each
   // archive row. UNION removes a booking found through both verified paths.
   const appointmentJoin=` left join lateral(select b.id appointment_id,cta.assigned_doctor_id,cta.assigned_at,d.display_name assigned_doctor,rp.name_en priority,
+    cache.last_attempt_at external_attempt_at,cache.last_success_at external_success_at,cache.last_error external_cache_error,cache.report_status external_cache_status,
     case when mf.id is not null or cache.report_status='final' then 'external_final'
       when cache.report_status='draft' then 'external_draft'
       when cache.report_status in ('no_report','study_not_found') then 'no_report' else 'unknown' end external_reporting_status
@@ -124,14 +135,24 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
     left join doctor_portal.doctor_profiles d on d.id=cta.assigned_doctor_id left join reporting_priorities rp on rp.id=b.reporting_priority_id
     left join doctor_portal.reporting_board_sonicdicom_cache cache on cache.appointment_id=b.id
     left join doctor_portal.reporting_board_manual_final_overrides mf on mf.appointment_id=b.id and mf.cleared_at is null) a on true`;
+  const externalJoin=` left join lateral(select cached.* from doctor_portal.workspace_sonicdicom_cache cached where cached.archive_key=$2 and cached.sonic_source_key=$5 and cached.study_instance_uid=s.study_instance_uid
+    and cached.orthanc_study_id=s.orthanc_study_id and cached.patient_id=s.patient_id and cached.metadata_key=${workspaceSonicMetadata('s')} limit 1) sc on true`;
+  const externalStatus=`case when a.external_reporting_status in ('external_final','external_draft') then a.external_reporting_status
+    when sc.last_error is not null then 'external_unavailable'
+    when sc.report_status='final' then 'external_final' when sc.report_status='draft' then 'external_draft'
+    when not $6::boolean then 'external_disabled' when not $7::boolean then 'external_not_applicable'
+    when sc.report_status='no_report' then 'external_no_report' when sc.report_status='study_not_found' then 'external_not_found'
+    when a.external_cache_status='unavailable' and a.external_attempt_at is not null then 'external_unavailable'
+    when a.external_reporting_status='no_report' then 'external_no_report' else 'not_checked' end`;
   const nativeStatus=`case when r.primary_final then 'final' when r.in_review then 'in_review' when r.active_draft then 'draft'
     when r.report_count>0 then 'additional_reports' else 'no_report' end`;
   const filter=String(input.status||'all');
   let filterJoins='';
   if(assignedOnly){filterJoins+=appointmentJoin;where.push('a.assigned_doctor_id=$4');}
-  if(['unknown','external_draft','external_final'].includes(filter)) {
+  if(['unknown','not_checked','external_no_report','external_not_found','external_unavailable','external_disabled','external_not_applicable','external_draft','external_final'].includes(filter)) {
     if(!assignedOnly)filterJoins+=appointmentJoin;
-    where.push(`coalesce(a.external_reporting_status,'unknown')=${param(filter)}`);
+    filterJoins+=externalJoin;
+    where.push(`(${externalStatus})=${param(filter==='unknown'?'not_checked':filter)}`);
   } else if(filter==='my_reports'||filter==='my_drafts') {
     filterJoins+=registryJoin+' '+reportJoin(false);
     where.push(filter==='my_drafts'?'coalesce(r.my_draft,false)':'coalesce(r.mine,false)');
@@ -142,14 +163,29 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
   const order=({date:'study_date',patient:'patient_name_raw',accession:'accession_number',modality:'modalities_in_study'} as Record<string,string>)[String(input.sort)]||'study_date';
   const direction=input.direction==='asc'?'asc':'desc';
   // Keep $2/$3 typed even when no reporting joins are required by the count.
-  const filtered=`from historical_pacs_studies s ${filterJoins} where $2::text is not null and $3::bigint>0 and ${where.join(' and ')}`;
+  const filtered=`from historical_pacs_studies s ${filterJoins} where $2::text is not null and $3::bigint>0 and $5::text is not null and $6::boolean is not null and $7::boolean is not null and ${where.join(' and ')}`;
   const count=(await pool.query(`select count(*)::int total ${filtered}`,values)).rows[0].total;
-  const page=`select s.* ${filtered} order by s.${order} ${direction} nulls last,s.orthanc_study_id limit ${param(limit)} offset ${param(offset)}`;
+  const sortExpression=order==='study_date'?'workspace_study_date(s.study_date)':`s.${order}`;
+  const page=`select s.* ${filtered} order by ${sortExpression} ${direction} nulls last,s.orthanc_study_id limit ${param(limit)} offset ${param(offset)}`;
   const rows=(await pool.query(`with page as materialized (${page})
-    select s.*,st.id registry_id,a.appointment_id,a.assigned_doctor_id,a.assigned_at,a.assigned_doctor,a.priority,
+    select s.orthanc_study_id,s.study_instance_uid,s.patient_id,s.patient_name_raw,s.accession_number,s.study_description,s.modalities_in_study,s.study_date,s.series_count,
+      st.id registry_id,a.appointment_id,a.assigned_doctor_id,a.assigned_at,a.assigned_doctor,a.priority,
       coalesce(r.report_count,0) report_count,coalesce(r.reports,'[]'::jsonb) reports,r.mine,r.my_draft,
-      (${nativeStatus}) reporting_status,coalesce(a.external_reporting_status,'unknown') external_reporting_status
-    from page s ${registryJoin} ${reportJoin(true)} ${appointmentJoin}
-    order by s.${order} ${direction} nulls last,s.orthanc_study_id`,values)).rows;
-  return {studies:rows,total:count,limit,offset,freshness,modalities:codes};
+      (${nativeStatus}) reporting_status,(${externalStatus}) external_reporting_status,coalesce(sc.last_success_at,a.external_success_at) external_checked_at,sc.report_status external_last_known_status,coalesce(sc.last_error,a.external_cache_error) external_error,sc.study_instance_uid external_cache_uid
+    from page s ${registryJoin} ${reportJoin(true)} ${appointmentJoin} ${externalJoin}
+    order by ${sortExpression} ${direction} nulls last,s.orthanc_study_id`,values)).rows;
+  if(sonic.sonicDicomReportsEnabled&&sonic.sonicDicomReadinessMode==='sql_server'&&sonic.sonicDicomSqlEnabled)await enqueueWorkspaceSonicStudies(freshness.archiveKey,sonicKey,rows.filter(r=>!r.external_cache_uid).map(r=>r.orthanc_study_id));
+  return {studies:rows.map(({external_cache_uid:_queued,...row})=>row),total:count,limit,offset,freshness,modalities:codes};
+}
+
+export async function backfillWorkspaceExternalStatus(actor:Actor,input:Record<string,unknown>) {
+  const me=await reportingDoctor(actor),policy=await readReportingPolicy(),freshness=await archiveStatus(),sonic=await readSonicDicomReportSettings();
+  if(!supervisor(me))throw new HttpError(403,'Supervisor permission is required.');
+  if(!policy.enabled||!freshness.available||!sonic.sonicDicomReportsEnabled||!sonic.sonicDicomSqlEnabled||sonic.sonicDicomReadinessMode!=='sql_server')throw new HttpError(409,'Enable the workspace and SonicDICOM SQL integration with a source-bound catalogue first.');
+  const limit=Math.max(1,Math.min(200,Math.trunc(Number(input.limit)||100))),cursor=String(input.cursor||'');
+  const codes=me.allowedModalities.filter(p=>p.active&&p.canReport).map(p=>modality(p.modalityCode||''));
+  const keys=(await pool.query(`select orthanc_study_id from historical_pacs_studies s where orthanc_study_id>$1 and s.modalities_in_study&&$2::text[]
+    and not exists(select 1 from unnest(s.modalities_in_study) m where m not in ('SR','PR','SEG','KO','DOC') and (case when m='MRI' then 'MR' else m end)<>all($2::text[])) order by orthanc_study_id limit $3`,[cursor,codes,limit])).rows.map(r=>r.orthanc_study_id);
+  const enqueued=await enqueueWorkspaceSonicStudies(freshness.archiveKey,workspaceSonicSourceKey(sonic),keys);
+  return {examined:keys.length,enqueued,nextCursor:keys.length===limit?keys.at(-1):null};
 }

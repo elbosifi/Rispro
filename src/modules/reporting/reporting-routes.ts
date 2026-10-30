@@ -7,7 +7,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { buildNativeReportHtml } from "../../services/generated-print-html-service.js";
 import { resolveReportContext, getReport, createReport, saveDraft, finalizeReport, addAddendum, getReportHistory, uploadKeyImage, updateKeyImages, getKeyImage } from "./reporting-service.js";
 import { readReportingPolicy,updateReportingPolicy,REPORTING_PRESETS } from './reporting-policy.js';
-import { listWorkspaceStudies,archiveStatus } from './workspace-study-service.js';
+import { listWorkspaceStudies,archiveStatus,backfillWorkspaceExternalStatus } from './workspace-study-service.js';
 import { getDoctorReportingAppointments } from '../doctor-portal/cases-service.js';
 import { doctorDashboard,assignedWork } from './workspace-dashboard-service.js';
 import { getMyPublishedRosterForDoctor } from '../doctor-portal/roster-service.js';
@@ -43,6 +43,7 @@ nativeReportingRouter.get('/workspace/config',asyncRoute(async(_req,res)=>{const
 nativeReportingRouter.get('/workspace/policies',requireSupervisor,asyncRoute(async(_req,res)=>res.json({policy:await readReportingPolicy(),presets:REPORTING_PRESETS})));
 nativeReportingRouter.put('/workspace/policies',requireSupervisor,requireRecentSupervisorReauth,asyncRoute(async(req,res)=>res.json({policy:await updateReportingPolicy(actor(req),req.body)})));
 nativeReportingRouter.get('/workspace/studies',asyncRoute(async(req,res)=>res.json(await listWorkspaceStudies(actor(req),req.query))));
+nativeReportingRouter.post('/workspace/external-status/backfill',requireSupervisor,asyncRoute(async(req,res)=>res.json(await backfillWorkspaceExternalStatus(actor(req),asUnknownRecord(req.body)))));
 nativeReportingRouter.get('/workspace/appointments',asyncRoute(async(req,res)=>{
   if(!(await readReportingPolicy()).enabled)throw new HttpError(404,'Doctor Workspace V2 is disabled.');
   const freshness=await archiveStatus();

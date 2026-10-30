@@ -993,7 +993,7 @@ async function prepareHistoricalPacsSync(db: PoolClient, forceFull: boolean): Pr
     || Date.now() - lastFull >= FULL_RECONCILIATION_INTERVAL_MS ? "full" : "incremental";
   await db.query(
     `update historical_pacs_sync_state set sync_run_status='running',sync_mode=$1,sync_started_at=now(),sync_progress_at=now(),
-       sync_processed=0,sync_total=null,last_attempt_at=now(),last_error=null,updated_at=now() where singleton_key=true`,
+       sync_processed=0,sync_total=null,last_attempt_at=now(),updated_at=now() where singleton_key=true`,
     [mode],
   );
   return mode;
