@@ -167,6 +167,7 @@ export async function putOhifAdminConfiguration(value: unknown, userId: UserId) 
     settings: {
       enabled,
       nativeReportingEnabled: bool(settingsInput.nativeReportingEnabled, false),
+      progressiveLoadingEnabled: bool(settingsInput.progressiveLoadingEnabled, previous.settings.progressiveLoadingEnabled === true),
       ohifPublicBaseUrl: normalizeViewerBasePath(settingsInput.ohifPublicBaseUrl, env.ohifPublicBaseUrl),
       selectedPacsNodeId,
       accessStrategy: accessStrategy as OhifAccessStrategy,
@@ -379,10 +380,11 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   // OHIF initializes and classifies every StudyInstanceUIDs entry as current.
   // Only genuine priors remain in the authorized browser for explicit loading.
   const delivery = env.ohifNativeDeliveryEnabled && session.accessStrategy === "authoritative_orthanc" ? "&risproDelivery=native" : "";
+  const loadingProfile = delivery && configuration.settings.progressiveLoadingEnabled === true ? "&risproLoadingProfile=progressive" : "";
   const studySelector = session.accessStrategy === "authoritative_orthanc"
     ? "&risproSessionStudies=1"
     : (priors ? `&risproPriorStudyUIDs=${priors}` : "");
-  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${studySelector}&risproContext=${session.reportContextId}${delivery}${session.reportId?'&risproReportId='+session.reportId:''}`;
+  return `${basePath}/viewer?StudyInstanceUIDs=${primary}${studySelector}&risproContext=${session.reportContextId}${delivery}${loadingProfile}${session.reportId?'&risproReportId='+session.reportId:''}`;
 }
 
 export async function authorizeViewerDicomWebRequest(input: {

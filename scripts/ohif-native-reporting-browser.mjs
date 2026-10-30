@@ -37,6 +37,7 @@ if(new URL(env.databaseUrl).href!==dbUrl.href)throw Error('Runtime database safe
 const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
 const nativeDelivery=env.ohifNativeDeliveryEnabled;
 const nativeBenchmark=process.env.OHIF_NATIVE_BENCHMARK==='1';
+const progressive=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='progressive';
 const transportCounts={proxyFrames:0,authorizations:0};
 let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
@@ -58,8 +59,9 @@ try{
     docker('network','connect','--alias','rispro-test-postgres',networkName,'rispro-test-postgres');dbNetworkConnected=true;
     const backendDb=new URL(dbUrl);backendDb.hostname='rispro-test-postgres';backendDb.port='5432';
     const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:'true',OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
+    if(progressive)vars.OHIF_LOADING_PROFILE_BENCHMARK='progressive';
     benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets'].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
-    let ready=false;for(let attempt=0;attempt<40;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
+    let ready=false;for(let attempt=0;attempt<120;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
     if(!ready)throw Error('Synthetic Docker backend did not start: '+dockerLogs(prefix+'-backend'));
   }
   writeFileSync(join(temp,'orthanc.json'),JSON.stringify({Name:'SYNTHETIC NATIVE REPORTING',RemoteAccessAllowed:true,AuthenticationEnabled:true,RegisteredUsers:{synthetic:'synthetic-only'},DicomServerEnabled:false,Plugins:['/usr/share/orthanc/plugins'],DicomWeb:{Enable:true,EnableMetadataCache:true,StudiesMetadata:'Full',SeriesMetadata:'Full'},}));
@@ -89,7 +91,7 @@ try{
     const stressSize=process.env.OHIF_RENDER_SMOKE==='1'?256:512,stressSlices=process.env.OHIF_RENDER_SMOKE==='1'?40:800;
     if(renderingStress)Object.assign(c,{size:stressSize,slices:stressSlices});
     const template=renderingStress?Uint16Array.from({length:stressSize*stressSize},(_,i)=>{const x=i%stressSize,y=Math.floor(i/stressSize),r=((x-stressSize/2)/(stressSize*.36))**2+((y-stressSize/2)/(stressSize*.3))**2;return r<1?700+Math.round(220*Math.sin(x/19)+180*Math.cos(y/23)):20;}):null;
-    for(let seriesNo=renderingStress?0:1;seriesNo<=4;seriesNo++)for(let slice=0;slice<(reliability&&modality==='CT'&&seriesNo===1?512:renderingStress?(seriesNo===0?1:seriesNo<=2?stressSlices:Math.min(96,stressSlices)):16);slice++){
+    for(let seriesNo=renderingStress?0:1;seriesNo<=4;seriesNo++)for(let slice=0;slice<(progressive&&seriesNo===1?2:reliability&&modality==='CT'&&seriesNo===1?512:renderingStress?(seriesNo===0?1:seriesNo<=2?stressSlices:Math.min(96,stressSlices)):16);slice++){
       if(!renderingStress && seriesNo===4 && (modality!=='MR' || slice!==0))continue;
       const size=renderingStress?stressSize:modality==='CT'?256:192;const pixels=renderingStress?template.slice():reliability&&modality==='CT'?new Int16Array(size*size):new Uint16Array(size*size);
       if(renderingStress){for(let i=0;i<pixels.length;i++)if(pixels[i]>20)pixels[i]+=(slice%16)*8+seriesNo*20;}
@@ -98,6 +100,11 @@ try{
       const sop=c.study+'.'+seriesNo+'.'+(slice+1);
       const ds={_vrMap:{PixelData:'OW'},SOPClassUID:sopClass,SOPInstanceUID:sop,StudyInstanceUID:c.study,SeriesInstanceUID:c.study+'.'+seriesNo,FrameOfReferenceUID:c.study+'.9',PatientName:'SYNTHETIC^'+modality,PatientID:identifier,PatientBirthDate:'19860101',PatientSex:'O',StudyDate:new Date().toISOString().slice(0,10).replaceAll('-',''),StudyTime:'120000',StudyDescription:'SYNTHETIC '+modality,AccessionNumber:'V2-'+String(appointmentId).padStart(6,'0'),Modality:modality,SeriesNumber:seriesNo,SeriesDescription:'SYNTHETIC '+modality+' SERIES '+seriesNo,InstanceNumber:slice+1,ImageType:['ORIGINAL','PRIMARY','AXIAL'],Rows:size,Columns:size,SamplesPerPixel:1,PhotometricInterpretation:'MONOCHROME2',BitsAllocated:16,BitsStored:16,HighBit:15,PixelRepresentation:0,ImageOrientationPatient:[1,0,0,0,1,0],ImagePositionPatient:[0,0,slice*2],PixelSpacing:[1,1],SliceThickness:2,SpacingBetweenSlices:2,WindowCenter:700,WindowWidth:1800,RescaleIntercept:0,RescaleSlope:1,PixelData:pixels.buffer};
       if(reliability&&modality==='CT')ds.PixelRepresentation=1;
+      if(progressive&&modality==='CT'){
+        ds.PixelRepresentation=1;ds.RescaleIntercept=-1024;
+        pixels[0]=64536; // Signed int16 -1000, preserved byte-for-byte in PixelData.
+      }
+      if(progressive&&seriesNo===1)Object.assign(ds,{SeriesDescription:'SYNTHETIC LOCALIZER',ImageType:['ORIGINAL','PRIMARY','LOCALIZER']});
       // Distinct stored VOIs expose cross-series window leakage and cached
       // presentation restoration. Keep the established regression fixtures intact.
       if(responsive && seriesNo===2)Object.assign(ds,{WindowCenter:420,WindowWidth:900});
@@ -116,7 +123,7 @@ try{
       assert.equal((await archiveRequest('/instances',{method:'POST',headers:{'Content-Type':'application/dicom'},body:Buffer.from(dict.write())})).status,200);
       if(renderingStress && slice%200===0)console.log(JSON.stringify({syntheticFixture:{series:seriesNo,uploaded:slice+1,dimensions:[size,size]}}));
     }
-    if(reliability && modality==='CT'){
+    if((reliability||progressive) && modality==='CT'){
       // Explicit SOP classes: a supported scanned image, unsupported encapsulated
       // CDA, and a supported PDF. Labels alone never determine compatibility.
       const {addReliabilityDocuments}=await import('./ohif-responsive-browser.mjs');
@@ -149,6 +156,7 @@ try{
   writeFileSync(join(temp,'edge.conf'),nginx);
   const nativeMounts=nativeDelivery?['--tmpfs','/etc/nginx/ohif-native:mode=0700','-e','OHIF_NATIVE_AUTH_SECRET='+env.ohifNativeAuthSecret,'-e','NGINX_ENVSUBST_FILTER=^OHIF_NATIVE_AUTH_SECRET$','-e','NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/ohif-native','-v',join(root,'docker/ohif/native-location.conf')+':/etc/nginx/templates/native.conf.template:ro']:[];
   const edgeOrigin='http://127.0.0.1:'+start(prefix+'-edge','nginx:1.27.5-alpine',80,['--network',networkName,...nativeMounts,'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']);
+  const uncompressedOrigin=progressive?'http://127.0.0.1:'+start(prefix+'-uncompressed','nginx:1.27.5-alpine',80,['--network',networkName,...nativeMounts.map(value=>value.replace('native-location.conf','native-location.uncompressed.conf')),'-v',join(temp,'edge.conf')+':/etc/nginx/nginx.conf:ro']):null;
   let baselineOrigin,quickOrigin;
   if(nativeDelivery)docker('exec',prefix+'-edge','test','-s','/etc/nginx/ohif-native/native.conf');
   docker('exec',prefix+'-edge','nginx','-t');
@@ -178,7 +186,11 @@ try{
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(multiStudy){
+  if(progressive){
+    const {runProgressiveBenchmark}=await import('./ohif-progressive-benchmark.mjs');
+    await runProgressiveBenchmark({browser,cases,origin,uncompressedOrigin,backendOrigin:'http://127.0.0.1:'+appPort,archiveRequest,pool,env,temp,login,userId,
+      launch:async(c,ctx)=>{const response=await ctx.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});
+  }else if(multiStudy){
     const {runMultiStudyAcceptance}=await import('./ohif-multi-study-browser.mjs');
     await runMultiStudyAcceptance({context,cases,origin,temp,pool,nativeDelivery,backendOrigin:'http://127.0.0.1:'+appPort,
       launch:async(c,includePriors)=>{

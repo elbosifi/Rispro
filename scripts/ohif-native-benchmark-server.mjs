@@ -40,7 +40,12 @@ const server = createServer((req, res) => {
     const start = performance.now(), current = metrics;
     res.once('finish', () => current.authorizationMs.push(performance.now() - start));
   }
-  app(req, res);
+  // Synthetic slow non-selected series; delay authorization, leaving Nginx's
+  // native Orthanc bytes/compression intact and browser HTTP caches enabled.
+  if (process.env.OHIF_LOADING_PROFILE_BENCHMARK === 'progressive' &&
+      req.url?.startsWith('/api/ohif/native/') && /\/series\/[^/]+\.13\/metadata(?:\?|$)/.test(String(req.headers['x-rispro-native-uri'] || ''))) {
+    setTimeout(() => app(req, res), 5000);
+  } else app(req, res);
 });
 await new Promise(r => server.listen(docker?3000:0, docker?'0.0.0.0':'127.0.0.1', r));
 if(process.send)process.send({ port: server.address().port });

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { configureResponsive } = require('./configure-responsive.cjs');
 const { configureSeriesWindowing } = require('./configure-series-windowing.cjs');
+const { configureProgressive } = require('./configure-progressive.cjs');
 
 async function getStudiesForPatientByMRN(dataSource, currentStudies) {
   if (!currentStudies?.length) return [];
@@ -132,6 +133,8 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
         if (alive) setState('error');
       }
     };
+    const exhausted = () => { if (alive) setState('error'); };
+    document.addEventListener('rispro-initial-image-failed', exhausted);
     // Render events are element-local and do not bubble; capture also covers
     // elements created after this effect. The readiness check covers warm opens.
     document.addEventListener(Enums.Events.IMAGE_RENDERED, check, true);
@@ -143,6 +146,7 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
     return () => {
       alive = false;
       document.removeEventListener(Enums.Events.IMAGE_RENDERED, check, true);
+      document.removeEventListener('rispro-initial-image-failed', exhausted);
       document.removeEventListener(Enums.Events.IMAGE_LOAD_ERROR, failure, true);
       eventTarget.removeEventListener(Enums.Events.IMAGE_LOAD_FAILED, failure);
       subscription.unsubscribe();
@@ -366,6 +370,7 @@ function configureUsability(root) {
 }
 
 function configureViewer(root) {
+  configureProgressive(root, diagnosticSeriesRules, isDiagnosticReady);
   configureUsability(root);
   configureLoading(root);
   configureResponsive(root);

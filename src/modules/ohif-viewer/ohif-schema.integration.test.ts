@@ -9,6 +9,20 @@ const { pool } = await import("../../db/pool.js");
 after(async () => { await pool.end(); });
 
 describe("OHIF schema integration", () => {
+  it("defaults progressive loading OFF and persists ON/OFF in existing viewer settings", async () => {
+    const column = (await pool.query("select column_default,is_nullable from information_schema.columns where table_schema='public' and table_name='ohif_viewer_settings' and column_name='progressive_loading_enabled'")).rows[0];
+    assert.match(column.column_default, /false/);
+    assert.equal(column.is_nullable, 'NO');
+    const { readOhifViewerConfiguration } = await import('./repository.js');
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      for (const enabled of [true, false]) {
+        await client.query('update ohif_viewer_settings set progressive_loading_enabled=$1 where singleton_key=true', [enabled]);
+        assert.equal((await readOhifViewerConfiguration(client)).settings.progressiveLoadingEnabled, enabled);
+      }
+    } finally { await client.query('rollback'); client.release(); }
+  });
   it("persists current acquisitions separately from the complete authorization allowlist", async () => {
     const column = (await pool.query("select data_type,column_default,is_nullable from information_schema.columns where table_schema='public' and table_name='viewer_launch_sessions' and column_name='current_study_uids'")).rows[0];
     assert.equal(column.data_type, "jsonb");

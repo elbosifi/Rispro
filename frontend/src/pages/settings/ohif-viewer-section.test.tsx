@@ -55,11 +55,14 @@ describe("OhifViewerSection", () => {
     expect(screen.getByText(/Independent of the general RISpro default PACS/)).toBeTruthy();
     expect(screen.getByDisplayValue("OHIF_DICOMWEB_PASSWORD")).toBeTruthy();
     expect(screen.queryByDisplayValue("secret")).toBeNull();
+    expect((screen.getByRole('checkbox', { name: 'Progressive OHIF Loading' }) as HTMLInputElement).checked).toBe(false);
+    await user.click(screen.getByRole('checkbox', { name: 'Progressive OHIF Loading' }));
     await user.click(screen.getByRole("checkbox", { name: "Enable OHIF Viewer" }));
     await user.click(screen.getByRole("button", { name: "Save OHIF Viewer settings" }));
 
     await waitFor(() => expect(api).toHaveBeenCalledWith("/ohif/admin/configuration", expect.objectContaining({ method: "PUT" })));
     const call = vi.mocked(api).mock.calls.find(([path, options]) => path === "/ohif/admin/configuration" && options?.method === "PUT");
+    expect(JSON.parse(String(call?.[1]?.body)).settings.progressiveLoadingEnabled).toBe(true);
     const payload = JSON.parse(String(call?.[1]?.body || "{}"));
     expect(payload.settings.enabled).toBe(true);
     expect(payload.settings.selectedPacsNodeId).toBe(5);

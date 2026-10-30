@@ -51,6 +51,7 @@ describe("OHIF runtime configuration", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     for (const [query, limits] of [
       [`risproContext=${id}&risproDelivery=native`, [100, 4, 25]],
+      [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=progressive`, [100, 1, 1]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=current`, [4, 4, 1]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=current&risproThumbnailProfile=unknown`, [4, 4, 1]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=unknown`, [100, 4, 25]],
@@ -59,6 +60,7 @@ describe("OHIF runtime configuration", () => {
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream`, [100, 75, 25]],
       [`risproContext=${id}&risproDelivery=native&risproLoadingProfile=upstream&risproThumbnailProfile=current`, [100, 4, 25]],
       [`risproContext=${id}&risproDelivery=proxy`, [4, 1, 1]],
+      [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=progressive`, [4, 1, 1]],
       [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=current`, [4, 1, 1]],
       [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=upstream`, [4, 1, 1]],
       [`risproContext=${id}&risproDelivery=proxy&risproLoadingProfile=upstream&risproThumbnailProfile=current`, [4, 1, 1]],
@@ -76,7 +78,7 @@ describe("OHIF runtime configuration", () => {
       const { interaction, thumbnail, prefetch } = context.window.config.maxNumRequests;
       assert.deepEqual([interaction, thumbnail, prefetch], limits);
       assert.equal(context.window.config.dataSources[0].configuration.enableStudyLazyLoad, true);
-      assert.equal(context.window.config.dataSources[0].configuration.thumbnailRendering, thumbnail === 1 ? "wadors" : "rendered");
+      assert.equal(context.window.config.dataSources[0].configuration.thumbnailRendering, query.includes(`risproContext=${id}&risproDelivery=native`) ? "rendered" : "wadors");
     }
   });
   it("keeps scoped multi-study discovery and transport selection identical across loading profiles", async () => {
@@ -84,7 +86,7 @@ describe("OHIF runtime configuration", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     for (const delivery of ["native", "proxy"]) {
       let baseline;
-      for (const selector of ["", "&risproLoadingProfile=current", "&risproLoadingProfile=upstream&risproThumbnailProfile=current", "&risproLoadingProfile=unknown&risproThumbnailProfile=unknown"]) {
+      for (const selector of ["", "&risproLoadingProfile=progressive", "&risproLoadingProfile=current", "&risproLoadingProfile=upstream&risproThumbnailProfile=current", "&risproLoadingProfile=unknown&risproThumbnailProfile=unknown"]) {
         const context = { window: { location: { search: `?risproContext=${id}&risproDelivery=${delivery}&StudyInstanceUIDs=1.2.3&risproPriorStudyUIDs=1.2.4,invalid&risproSessionStudies=1${selector}` }, config: {} as {
           dataSources: { configuration: { qidoRoot: string; wadoRoot: string; wadoUriRoot: string; risproStudyInstanceUIDs: string[]; risproStudyListUrl: string } }[];
         } }, URLSearchParams };

@@ -34,6 +34,12 @@ export async function runMultiStudyAcceptance({context,cases,origin,temp,pool,na
       const params=new URL(page.url()).searchParams;
       assert.deepEqual(new Set(params.get('StudyInstanceUIDs').split(',')),new Set([c.study,c.additionalStudy]));
       const contextId=params.get('risproContext');
+      if(params.get('risproLoadingProfile')==='progressive'){
+        // Explicit selection in the second current study must outrank the
+        // primary study's diagnostic series during progressive initialization.
+        const selected=new URL(page.url());selected.searchParams.set('initialSeriesInstanceUID',c.study+'.2');
+        await page.goto(selected.href);await rendered(page,c.additionalStudy);
+      }
       for(const label of ['Skip all']){
         const button=page.getByText(label,{exact:true});
         try{await button.waitFor({state:'visible',timeout:3000});await button.click();}catch(error){if(error.name!=='TimeoutError')throw error;}

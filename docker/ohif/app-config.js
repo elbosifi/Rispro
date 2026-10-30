@@ -8,14 +8,16 @@ const risproStudyInstanceUIDs = [...new Set([
 const risproDicomWebRoot = /^[a-f0-9-]{36}$/i.test(risproContext || '')
   ? '/ohif-dicomweb/context/' + risproContext : '/ohif-dicomweb';
 const risproNativeDelivery = risproParams.get('risproDelivery') === 'native' && /^[a-f0-9-]{36}$/i.test(risproContext || '');
+const risproProgressiveLoading = risproNativeDelivery && risproParams.get('risproLoadingProfile') === 'progressive';
 const risproWadoRoot = risproNativeDelivery ? '/ohif-native/context/' + risproContext : risproDicomWebRoot;
-// Native defaults to the hospital-tested 100/4/25 profile; current restores 4/4/1.
-// Per-tab selectors change request limits only; server-side study authorization is unchanged.
+// Native defaults to the existing 100/4/25 profile; current restores 4/4/1.
+// Per-tab profiles affect loading only; server-side study authorization is unchanged.
 const risproFastLoading = risproNativeDelivery && risproParams.get('risproLoadingProfile') !== 'current';
 // Retain the explicit upstream experiment, including its optional thumbnail bound.
 const risproBoundedThumbnails = risproParams.get('risproLoadingProfile') !== 'upstream'
   || risproParams.get('risproThumbnailProfile') === 'current';
 window.config = {
+  risproProgressiveLoading,
   routerBasename: '/ohif',
   showStudyList: false,
   showLoadingIndicator: true,
@@ -30,7 +32,13 @@ window.config = {
   },
   // v3.12.6 platform/app/public/config/default.js (not init.tsx's fallbacks).
   // Stack context prefetch and the retrieval pool remain entirely upstream.
-  maxNumRequests: risproFastLoading ? {
+  // Bound competing image work in the experimental profile as well as metadata.
+  // Interaction stays upstream/native; OFF retains its deployed request limits.
+  maxNumRequests: risproProgressiveLoading ? {
+    interaction: 100,
+    thumbnail: 1,
+    prefetch: 1,
+  } : risproFastLoading ? {
     interaction: 100,
     thumbnail: risproBoundedThumbnails ? 4 : 75,
     prefetch: 25,

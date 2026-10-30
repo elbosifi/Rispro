@@ -16,6 +16,7 @@ function settingsRow(row: Row): OhifViewerSettings {
   return {
     enabled: row.enabled === true,
     nativeReportingEnabled: row.native_reporting_enabled === true,
+    progressiveLoadingEnabled: row.progressive_loading_enabled === true,
     ohifPublicBaseUrl: String(row.ohif_public_base_url || "/ohif"),
     selectedPacsNodeId: row.selected_pacs_node_id == null ? null : Number(row.selected_pacs_node_id),
     accessStrategy: String(row.access_strategy || "native_dicomweb") as OhifViewerSettings["accessStrategy"],
@@ -88,12 +89,13 @@ export async function saveOhifViewerConfiguration(input: {
       `update ohif_viewer_settings set enabled=$1, ohif_public_base_url=$2, selected_pacs_node_id=$3,
        access_strategy=$4, orthanc_gateway_enabled=$5, orthanc_modality_key=$6, open_mode=$7,
        allow_prior_studies=$8, max_prior_studies=$9, launch_token_ttl_seconds=$10,
-       cache_retention_hours=$11, retrieval_timeout_seconds=$12, updated_by_user_id=$13, native_reporting_enabled=$14, updated_at=now()
+       cache_retention_hours=$11, retrieval_timeout_seconds=$12, updated_by_user_id=$13, native_reporting_enabled=$14,
+       progressive_loading_enabled=$15, updated_at=now()
        where singleton_key=true`,
       [settings.enabled, settings.ohifPublicBaseUrl, settings.selectedPacsNodeId, settings.accessStrategy,
        settings.orthancGatewayEnabled, settings.orthancModalityKey, settings.openMode, settings.allowPriorStudies,
        settings.maxPriorStudies, settings.launchTokenTtlSeconds, settings.cacheRetentionHours,
-       settings.retrievalTimeoutSeconds, input.userId, settings.nativeReportingEnabled === true]
+       settings.retrievalTimeoutSeconds, input.userId, settings.nativeReportingEnabled === true, settings.progressiveLoadingEnabled === true]
     );
     if (settings.selectedPacsNodeId && input.endpoint) {
       const endpoint = input.endpoint;

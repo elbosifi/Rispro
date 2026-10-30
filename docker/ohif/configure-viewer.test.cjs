@@ -1,6 +1,105 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { getStudiesForPatientByMRN, diagnosticSeriesRules } = require('./configure-viewer.cjs');
+const { prioritizeSeries, loadProgressively, waitForDiagnosticImage } = require('./configure-progressive.cjs');
+
+test('progressive QIDO priority preserves sidebar input, explicit series, count evidence and stable ties', () => {
+  const series = [
+    { SeriesInstanceUID: '1', Modality: 'MR', SeriesDescription: 'localizer', NumberOfSeriesRelatedInstances: 3 },
+    { SeriesInstanceUID: '2', Modality: 'SR' },
+    { SeriesInstanceUID: '3', Modality: 'MR', NumberOfSeriesRelatedInstances: 40 },
+    { SeriesInstanceUID: '4', Modality: 'MR', SeriesDescription: 'unknown', NumberOfSeriesRelatedInstances: 1 },
+    { SeriesInstanceUID: '5', Modality: 'MR', NumberOfFrames: 100 },
+    { SeriesInstanceUID: '6', Modality: 'MR', ImageType: ['ORIGINAL', 'LOCALIZER'] },
+  ];
+  assert.deepEqual(prioritizeSeries(series, diagnosticSeriesRules).map(s => s.SeriesInstanceUID), ['3', '5', '4', '1', '6', '2']);
+  assert.equal(series[0].SeriesInstanceUID, '1');
+  assert.equal(prioritizeSeries(series, diagnosticSeriesRules, '?initialSeriesInstanceUID=5')[0].SeriesInstanceUID, '5');
+  assert.equal(prioritizeSeries(series, diagnosticSeriesRules, '?initialseriesinstanceuid=1')[0].SeriesInstanceUID, '1');
+  assert.equal(prioritizeSeries([
+    { SeriesInstanceUID: 'short', Modality: 'MR', NumberOfSeriesRelatedInstances: 2 },
+    { SeriesInstanceUID: 'stack', Modality: 'MR', NumberOfSeriesRelatedInstances: 32 },
+  ], diagnosticSeriesRules)[0].SeriesInstanceUID, 'stack');
+  const studies = [
+    { metadata: { StudyInstanceUID: '1', SeriesInstanceUID: '1.1', Modality: 'MR', NumberOfSeriesRelatedInstances: 32 } },
+    { metadata: { StudyInstanceUID: '2', SeriesInstanceUID: '2.1', Modality: 'MR', NumberOfSeriesRelatedInstances: 16 } },
+  ];
+  assert.equal(prioritizeSeries(studies, diagnosticSeriesRules, '?initialSeriesInstanceUID=2.1', p => p.metadata)[0], studies[1]);
+});
+
+test('progressive metadata waits for real pixels, falls back from failed/unsupported series and is serial after render', async () => {
+  const trace = [], sets = [], releases = [];
+  let resolveRender;
+  const rendered = new Promise(resolve => { resolveRender = resolve; });
+  const promises = ['failed', 'document', 'diagnostic', 'background', 'last'].map(uid => ({
+    metadata: { SeriesInstanceUID: uid },
+    start() {
+      if (this.internalPromise) return this.internalPromise;
+      trace.push(uid);
+      this.internalPromise = uid === 'failed' ? Promise.reject(Error('synthetic metadata failure'))
+        : uid === 'background' ? new Promise(resolve => releases.push(resolve)) : Promise.resolve();
+      if (uid !== 'failed') sets.push({ SeriesInstanceUID: uid, unsupported: uid === 'document', numImageFrames: 10 });
+      return this.internalPromise;
+    },
+  }));
+  const stop = await loadProgressively({ promises, services: {
+    displaySetService: { getActiveDisplaySets: () => sets },
+    cornerstoneViewportService: { getCornerstoneViewport: () => ({}) },
+    viewportGridService: { getActiveViewportId: () => 'v' },
+    uiNotificationService: { show: assert.fail },
+  }, apply: uid => trace.push('hang:' + uid),
+  waitForImage: () => ({ promise: rendered, cancel() {} }), isReady: () => true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(trace, ['failed', 'document', 'diagnostic', 'hang:diagnostic']);
+  resolveRender(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(trace.at(-1), 'background');
+  assert.ok(!trace.includes('last'));
+  releases[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(trace.at(-1), 'last');
+  stop();
+});
+
+test('render gate ignores metadata/blank renders, releases on pixels or error and cleans listeners', async () => {
+  const target = new EventTarget(), eventTarget = new EventTarget();
+  const core = { Enums: { Events: { IMAGE_RENDERED: 'render', IMAGE_LOAD_ERROR: 'error', IMAGE_LOAD_FAILED: 'failed' } }, eventTarget };
+  let pixels = false;
+  const viewport = { getImageIds: () => ['/series/1/frames/1'], getCurrentImageId: () => '/series/1/frames/1' };
+  const waiting = waitForDiagnosticImage(() => viewport, '1', core, () => pixels, target);
+  let settled = false; waiting.promise.then(() => { settled = true; });
+  target.dispatchEvent(new Event('render'));
+  await Promise.resolve(); assert.equal(settled, false);
+  pixels = true; target.dispatchEvent(new Event('render'));
+  assert.equal(await waiting.promise, true);
+  const failure = waitForDiagnosticImage(() => viewport, '1', core, () => false, target);
+  eventTarget.dispatchEvent(new CustomEvent('failed', { detail: { imageId: '/series/1/frames/1' } }));
+  assert.equal(await failure.promise, false);
+  const canceled = waitForDiagnosticImage(() => viewport, '1', core, () => false, target);
+  canceled.cancel(); assert.equal(await canceled.promise, false);
+});
+
+test('exhausted progressive candidates show a terminal error and unmount prevents later metadata starts', async () => {
+  const previousDocument = global.document, target = new EventTarget();
+  global.document = target;
+  let exhausted = false, notified = false;
+  target.addEventListener('rispro-initial-image-failed', () => { exhausted = true; });
+  const services = { displaySetService: { getActiveDisplaySets: () => [] },
+    cornerstoneViewportService: {}, viewportGridService: {}, uiNotificationService: { show: () => { notified = true; } } };
+  try {
+    const stop = await loadProgressively({ promises: [], services, apply() {}, waitForImage() {}, isReady() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(exhausted, true); assert.equal(notified, true); stop();
+    let release, started = 0;
+    const promises = [
+      { metadata: {}, start: () => new Promise(resolve => { release = resolve; }) },
+      { metadata: {}, start: () => { started++; return Promise.resolve(); } },
+    ];
+    const cancel = await loadProgressively({ promises, services, apply() {}, waitForImage() {}, isReady() {} });
+    cancel(); release(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(started, 0);
+  } finally { global.document = previousDocument; }
+});
 const { protectBootstrapHtml } = require('./verify-browser-build.cjs');
 const { verifyMinifiedOnnxGuard } = require('./verify-browser-build.cjs');
 

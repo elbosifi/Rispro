@@ -52,7 +52,7 @@ export async function waitPixels(page, series, since = 0) {
   return page.evaluate(({ series, since }) => window.__nativeBench.renders.find(r => r.atMs >= since && (!series || r.imageId.includes('/series/' + series + '/'))).atMs, { series, since });
 }
 
-async function fixture(c, seriesNo, slices, size, archiveRequest) {
+export async function fixture(c, seriesNo, slices, size, archiveRequest) {
   let firstId;
   for (let slice = 0; slice < slices; slice++) {
     const pixels = new Uint16Array(size * size); let seed = slice + seriesNo * 173;
@@ -72,7 +72,7 @@ async function fixture(c, seriesNo, slices, size, archiveRequest) {
   return firstId;
 }
 
-async function raw(url, headers) {
+export async function raw(url, headers) {
   const started = performance.now();
   return new Promise((resolve, reject) => request(url, { headers }, response => {
     const ttfbMs = performance.now() - started, chunks = [];
@@ -81,7 +81,7 @@ async function raw(url, headers) {
     response.on('error', reject);
   }).on('error', reject).end());
 }
-function frameBytes(body, type) {
+export function frameBytes(body, type) {
   const boundary = /boundary="?([^";]+)/.exec(type)?.[1]; assert.ok(boundary);
   return body.subarray(body.indexOf('\r\n\r\n') + 4, body.lastIndexOf('\r\n--' + boundary));
 }

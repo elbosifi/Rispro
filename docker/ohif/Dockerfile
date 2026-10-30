@@ -28,6 +28,7 @@ COPY docker/ohif/rispro-reporting extensions/rispro-reporting
 COPY frontend/src/hooks/use-audio-recorder.ts frontend/src/hooks/use-dictation-shortcuts.ts frontend/src/lib/dictation-preferences.ts frontend/src/lib/dictation-target.ts frontend/src/lib/medical-dictation-cleanup.ts extensions/rispro-reporting/src/dictation-shared/
 COPY docker/ohif/register-reporting.cjs /tmp/register-reporting.cjs
 COPY docker/ohif/configure-viewer.cjs /tmp/configure-viewer.cjs
+COPY docker/ohif/configure-progressive.cjs /tmp/configure-progressive.cjs
 COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.cjs
 COPY docker/ohif/configure-responsive.cjs /tmp/configure-responsive.cjs
 COPY docker/ohif/configure-cornerstone-compat.cjs /tmp/configure-cornerstone-compat.cjs
