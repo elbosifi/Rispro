@@ -93,6 +93,9 @@ parse_deployment_args() {
         EXPECTED_SHA="$2"
         shift 2
         ;;
+      --reconfigure|reconfigure)
+        shift
+        ;;
       *)
         err "Unsupported deployment argument: $1"
         exit 1
@@ -127,22 +130,7 @@ should_reconfigure() {
   return 1
 }
 
-main() {
-  parse_deployment_args "$@"
-  print_header
-  require_cmd git
-  require_cmd docker
-  detect_compose
-
-  if [ ! -f "${ENV_FILE}" ]; then
-    err "Missing .env file at ${ENV_FILE}. Run ./scripts/setup-docker.sh first."
-    exit 1
-  fi
-
-  load_existing_config
-  git_update_started_at="$(deploy_now_ms)"
-  check_git_repo
-  log_deploy_timing 'git_update' "${git_update_started_at}"
+deploy_checked_out_commit() {
   load_existing_config
 
   if should_reconfigure "$@"; then
@@ -186,11 +174,53 @@ main() {
     exit 1
   fi
   log_deploy_timing 'qz_readiness' "${qz_started_at}"
+  verify_ohif_readiness
   report_internal_orthanc_worklists
   log 'Migration diagnostics from rispro-app startup:'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --no-color app 2>/dev/null | grep -E 'Running database migrations|Applied migration:|Latest applied migration:|Migrations completed successfully' | tail -n 20 || warn 'Migration log lines were not available; inspect rispro-app logs.'
   ensure_teaching_anatomy_assets
   print_deployment_summary 'Update complete.'
+}
+
+main() {
+  local checked_out_sha=''
+  if [ "${1:-}" = --deploy-checked-out ]; then
+    checked_out_sha="${2:-}"
+    if [[ ! "$checked_out_sha" =~ ^[0-9a-f]{40}$ ]]; then
+      err 'Post-checkout deployment requires a full commit SHA.'
+      exit 1
+    fi
+    shift 2
+  fi
+  parse_deployment_args "$@"
+  require_cmd git
+  require_cmd docker
+  detect_compose
+  if [ ! -f "${ENV_FILE}" ]; then
+    err "Missing .env file at ${ENV_FILE}. Run ./scripts/setup-docker.sh first."
+    exit 1
+  fi
+
+  if [ -n "$checked_out_sha" ]; then
+    EXPECTED_SHA="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
+    if [ "$(git rev-parse HEAD)" != "$checked_out_sha" ] || { [ -n "$EXPECTED_SHA" ] && [ "$EXPECTED_SHA" != "$checked_out_sha" ]; }; then
+      err 'Post-checkout deployment SHA does not match HEAD or the expected SHA.'
+      exit 1
+    fi
+    EXPECTED_SHA="$checked_out_sha"
+    DEPLOY_COMMIT_SHA="$checked_out_sha"
+    log "Running deployment functions from checked-out commit ${DEPLOY_COMMIT_SHA}."
+    deploy_checked_out_commit "$@"
+    return
+  fi
+
+  print_header
+  git_update_started_at="$(deploy_now_ms)"
+  check_git_repo
+  log_deploy_timing 'git_update' "${git_update_started_at}"
+  # Replace this shell once: sourced functions and parsed function bodies still
+  # belong to the pre-checkout version. The second phase never updates Git.
+  exec bash "${PROJECT_ROOT}/scripts/update-docker.sh" --deploy-checked-out "$DEPLOY_COMMIT_SHA" "$@"
 }
 
 main "$@"

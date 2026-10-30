@@ -59,7 +59,7 @@ printf '%s\n' "${worker_block}" | grep -Fq 'image: ${RISPRO_APP_IMAGE:-rispro-ap
 printf '%s\n' "${worker_block}" | grep -Fq 'pull_policy: never' || fail 'Request Scan worker does not require the local image'
 pass 'App builds the shared RISpro image exactly once for both runtime services'
 
-ordering_text="$(sed -n '/^main()/,$p' scripts/update-docker.sh)"
+ordering_text="$(sed -n '/^deploy_checked_out_commit()/,/^main()/p' scripts/update-docker.sh)"
 preflight_line="$(printf '%s\n' "${ordering_text}" | grep -n 'run_compose_preflight' | head -n1 | cut -d: -f1)"
 build_line="$(printf '%s\n' "${ordering_text}" | grep -n '^  build_and_restart$' | head -n1 | cut -d: -f1)"
 orthanc_ready_line="$(printf '%s\n' "${ordering_text}" | grep -n 'report_internal_orthanc_worklists' | head -n1 | cut -d: -f1)"
@@ -81,6 +81,9 @@ grep -q 'up -d --no-build --no-deps --force-recreate orthanc' scripts/docker-dep
 pass 'Orthanc uses a separate targeted deployment path'
 
 bash scripts/test-docker-startup-isolation.sh
+bash scripts/test-docker-update-handoff.sh
+bash scripts/test-docker-permissions.sh
+node --test scripts/verify-ohif-app-config.test.mjs
 
 grep -q '"StableAge": 10' scripts/docker-deployment-lib.sh || fail 'Internal Orthanc renderer is missing StableAge 10'
 pass 'Internal Orthanc renderer sets StableAge to 10 seconds'

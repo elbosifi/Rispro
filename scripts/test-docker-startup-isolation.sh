@@ -162,12 +162,13 @@ run_compose_preflight() { :; }
 wait_for_app_health() { assert_web_running; printf 'app health\n' >> "$calls"; [ "$fail_gate" != health ]; }
 verify_app_build_sha() { printf 'build SHA\n' >> "$calls"; [ "$fail_gate" != sha ]; }
 verify_qz_bootstrap_readiness() { printf 'QZ ready\n' >> "$calls"; [ "$fail_gate" != qz ]; }
+verify_ohif_readiness() { printf 'OHIF ready\n' >> "$calls"; [ "$fail_gate" != ohif ]; }
 ensure_teaching_anatomy_assets() { printf 'anatomy checked\n' >> "$calls"; }
 print_deployment_summary() { printf '%s\n' "$ORTHANC_MWL_DEPLOYMENT_STATUS"; }
-main > "$test_root/output"
+deploy_checked_out_commit > "$test_root/output"
 assert_web_running
 grep -q 'pending/unavailable' "$test_root/output"
-for gate in 'app health' 'build SHA' 'QZ ready' 'migrations complete' 'anatomy checked'; do
+for gate in 'app health' 'build SHA' 'QZ ready' 'OHIF ready' 'migrations complete' 'anatomy checked'; do
   grep -qx "$gate" "$calls" || fail "Update omitted $gate"
 done
 grep -qx 'up -d --no-deps --force-recreate gateway' "$calls"
@@ -175,11 +176,11 @@ pass 'Slow MWL does not skip gateway refresh, app health, SHA, QZ, migration dia
 
 # These expected failures must not emit the unexpected-error diagnostic.
 trap - ERR
-for gate in health sha qz; do
+for gate in health sha qz ohif; do
   reset_fixture
   fail_gate="$gate"
   set +e
-  (set -e; main; exit 99) > "$test_root/output" 2>&1
+  (set -e; deploy_checked_out_commit; exit 99) > "$test_root/output" 2>&1
   result=$?
   set -e
   [ "$result" = 1 ] || fail "Failed $gate gate returned $result"

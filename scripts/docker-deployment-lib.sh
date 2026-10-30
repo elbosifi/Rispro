@@ -719,7 +719,8 @@ preflight_validate_env() {
   fi
 }
 
-write_env_file() {
+# Keep the secret-file umask local even when rendering fails.
+write_env_file() (
   local env_dir generated temporary safety existing_key rendered_key
   env_dir="$(dirname "${ENV_FILE}")"
   generated="${env_dir}/.env.rispro-rendered.$$.tmp"
@@ -917,7 +918,7 @@ EOF_NODE
   # Best-effort directory fsync is unsupported on some hosts/filesystems.
   node -e 'const fs=require("fs"); try { const fd=fs.openSync(process.argv[1],"r"); fs.fsyncSync(fd); fs.closeSync(fd); } catch {}' "${env_dir}" || true
   rm -f "${generated}"
-}
+)
 
 render_orthanc_config() {
   mkdir -p "${ORTHANC_CONFIG_DIR}"
@@ -1033,6 +1034,7 @@ EOF_DICOM
     users_block="{\"$(json_escape "$ORTHANC_USERNAME")\": \"$(json_escape "$ORTHANC_PASSWORD")\"}"
   fi
 
+  (umask 077
   cat > "${temporary_config}" <<EOF_ORTHANC
 {
   "Name": "RISpro Orthanc",
@@ -1061,6 +1063,7 @@ ${orthanc_dicom_block}
   }
 }
 EOF_ORTHANC
+  )
 
   rendered_hash="$(sha256sum "${temporary_config}" | awk '{print $1}')"
   if [ "${previous_hash}" != "${rendered_hash}" ]; then
@@ -1131,7 +1134,7 @@ build_and_start_services() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --no-build "${runtime_services[@]}"
 }
 
-render_db_backup_access_config() {
+render_db_backup_access_config() (
   local entry cidr config_hash
   local -a entries=()
   [ "$RISPRO_DB_MODE" = "internal" ] && [ "$RISPRO_DB_BACKUP_ACCESS_ENABLED" = "true" ] || return 0
@@ -1172,7 +1175,7 @@ EOF_COMPOSE
   # network rules (no credentials), so it must remain container-readable.
   chmod 644 "$DB_BACKUP_ACCESS_HBA_FILE"
   chmod 600 "$DB_BACKUP_ACCESS_COMPOSE_FILE"
-}
+)
 
 build_compose_args() {
   COMPOSE_FILES=(-f docker-compose.yml)
@@ -1217,6 +1220,21 @@ prepare_qz_printing() {
   done
 }
 
+prepare_ohif_public_config() {
+  if [ "${OHIF_COMPOSE_PROFILES:-}" = ohif ]; then
+    # This public, read-only bind mount is served by Nginx's unprivileged worker.
+    # Repair earlier deployments too; never broaden permissions on secrets.
+    chmod 644 "${PROJECT_ROOT}/docker/ohif/app-config.js"
+  fi
+}
+
+verify_ohif_readiness() {
+  if [ "${OHIF_COMPOSE_PROFILES:-}" = ohif ]; then
+    local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+    node "${PROJECT_ROOT}/scripts/verify-ohif-app-config.mjs" "${base_url%/api/health}/ohif/app-config.js"
+  fi
+}
+
 run_compose_preflight() {
   log "Running deployment preflight validation..."
   mkdir -p "${SANTE_HL7_HOST_OUTBOX_DIR}"
@@ -1225,6 +1243,7 @@ run_compose_preflight() {
   write_env_file
   render_db_backup_access_config
   render_orthanc_config
+  prepare_ohif_public_config
   build_compose_args
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" config >/dev/null
   ok "Deployment configuration is valid."

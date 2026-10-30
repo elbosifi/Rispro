@@ -101,7 +101,7 @@ services:
     volumes:
       - ./docker/ohif/app-config.js:/usr/share/nginx/html/ohif/app-config.js:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/ohif/"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ohif/ >/dev/null && wget -qO- http://127.0.0.1/ohif/app-config.js | grep -Fq 'window.config'"]
       interval: 30s
       timeout: 10s
       start_period: 20s
