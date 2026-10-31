@@ -12,7 +12,7 @@ import { isRuntimeSecretEncryptionConfigured } from "../../services/runtime-secr
 import { HttpError } from "../../utils/http-error.js";
 import type { UserId } from "../../types/http.js";
 import { bootstrapCaddyConfiguration, caddyConfiguration, HTTPS_CATEGORY, INITIAL_HOSTNAME, requiredCname, validateHttpsConfiguration, type HttpsConfiguration } from "./https-configuration.js";
-import { accountCredentials, checkCname, updateProvider } from "./https-provider.js";
+import { accountCredentials, checkCname, checkCloudflare, cloudflareToken, updateProvider } from "./https-provider.js";
 import { equalSecret, gatewayIdentity, httpsRuntimeDirectory } from "./https-transport.js";
 
 interface CertificateStatus { issuer: string; expiresAt: string }
@@ -22,6 +22,7 @@ interface HttpsState {
   phase: "idle" | "pending" | "error";
   lastError: string | null;
   certificate: CertificateStatus | null;
+  providers?: Partial<Record<"acmedns" | "cloudflare", HttpsConfiguration>>;
 }
 const emptyState = (): HttpsState => ({ draft: null, active: null, phase: "idle", lastError: null, certificate: null });
 const LOCK = 719821993;
@@ -34,11 +35,17 @@ async function readState(db: Pick<PoolClient, "query"> = pool): Promise<HttpsSta
 
 function display(state: HttpsState) {
   const value = state.draft;
-  return { enabled: value?.enabled ?? true, redirectHttpToHttps: value?.redirectHttpToHttps ?? false, httpRedirectActive: Boolean(state.active?.redirectHttpToHttps), hostname: value?.hostname || INITIAL_HOSTNAME, serverUrl: value?.serverUrl || "",
+  const provider = value?.provider || "acmedns";
+  const acmedns = provider === "acmedns" ? value : state.providers?.acmedns;
+  const cloudflare = provider === "cloudflare" ? value : state.providers?.cloudflare;
+  return { provider, providerConfigurations: {
+      acmedns: acmedns ? { serverUrl: acmedns.serverUrl, subdomain: acmedns.subdomain, fullDomain: acmedns.fullDomain, credentialsConfigured: true } : null,
+      cloudflare: cloudflare ? { credentialsConfigured: true } : null },
+    enabled: value?.enabled ?? true, redirectHttpToHttps: value?.redirectHttpToHttps ?? false, httpRedirectActive: Boolean(state.active?.redirectHttpToHttps), hostname: value?.hostname || INITIAL_HOSTNAME, serverUrl: value?.serverUrl || "",
     subdomain: value?.subdomain || "", fullDomain: value?.fullDomain || "", credentialsConfigured: Boolean(value?.credentials),
     encryptionReady: isRuntimeSecretEncryptionConfigured(), provisioned: process.env.RISPRO_HTTPS_PROVISIONED === "true",
-    cname: value ? requiredCname(value) : null, status: state.phase === "error" ? "Error" : state.active && state.phase !== "pending" ? "Active" : "Pending",
-    activeHostname: state.active?.hostname || null, issuer: state.certificate?.issuer || null, expiresAt: state.certificate?.expiresAt || null,
+    cname: value && provider === "acmedns" ? requiredCname(value) : null, status: state.phase === "error" ? "Error" : state.active && state.phase !== "pending" ? "Active" : "Pending",
+    activeHostname: state.active?.hostname || null, activeProvider: state.active ? state.active.provider || "acmedns" : null, issuer: state.certificate?.issuer || null, expiresAt: state.certificate?.expiresAt || null,
     renewal: state.active ? "Managed automatically by Caddy; provider access and DNS delegation must remain valid." : "Pending activation",
     lastError: state.lastError, activationPending: state.phase === "pending" };
 }
@@ -69,15 +76,16 @@ async function lock(): Promise<PoolClient> {
 }
 async function unlock(client: PoolClient) { try { await client.query("select pg_advisory_unlock($1)", [LOCK]); } finally { client.release(); } }
 
-async function atomicJson(filename: string, value: unknown) {
+async function atomicFile(filename: string, value: string) {
   const directory = httpsRuntimeDirectory();
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const target = path.join(directory, filename);
   const temporary = `${target}.tmp`;
   const file = await open(temporary, "w", 0o600);
-  try { await file.writeFile(JSON.stringify(value)); await file.sync(); } finally { await file.close(); }
+  try { await file.writeFile(value); await file.sync(); } finally { await file.close(); }
   await rename(temporary, target);
 }
+async function atomicJson(filename: string, value: unknown) { await atomicFile(filename, JSON.stringify(value)); }
 
 async function applyHttpRedirect(config: HttpsConfiguration | null) {
   if (process.env.RISPRO_HTTPS_PROVISIONED !== "true") return;
@@ -89,6 +97,11 @@ function staging(): boolean { return process.env.NODE_ENV !== "production"; }
 
 async function runtimeConfiguration(config: HttpsConfiguration | null) {
   if (!config) return bootstrapCaddyConfiguration();
+  if (config.provider === "cloudflare") {
+    const filename = `cloudflare-${config.id}.token`;
+    await atomicFile(filename, cloudflareToken(config));
+    return caddyConfiguration(config, path.join(httpsRuntimeDirectory(), filename), gatewayIdentity(), staging());
+  }
   const credentialsPath = path.join(httpsRuntimeDirectory(), `account-${config.id}.json`);
   await atomicJson(`account-${config.id}.json`, { ...accountCredentials(config), subdomain: config.subdomain,
     // The plugin never contacts administrator-supplied URLs. This limited relay
@@ -153,9 +166,12 @@ export async function saveHttpsSettings(input: unknown, userId: UserId) {
   const client = await lock();
   try {
     const state = await readState(client);
-    const draft = validateHttpsConfiguration(input, state.draft);
+    const requested = (input && typeof input === "object" && "provider" in input ? input.provider : "acmedns") === "cloudflare" ? "cloudflare" : "acmedns";
+    const previous = (state.draft?.provider || "acmedns") === requested ? state.draft : state.providers?.[requested];
+    const draft = validateHttpsConfiguration(input, previous);
     if (state.phase === "pending") throw new HttpError(409, "HTTPS activation is already running.");
-    const next = { ...state, draft, phase: "idle" as const, lastError: null };
+    const providers = { ...state.providers, ...(state.draft ? { [state.draft.provider || "acmedns"]: state.draft } : {}), [draft.provider || "acmedns"]: draft };
+    const next = { ...state, providers, draft, phase: "idle" as const, lastError: null };
     if (!draft.enabled && state.active) {
       const previous = await runtimeConfiguration(state.active);
       const bootstrap = bootstrapCaddyConfiguration();
@@ -189,8 +205,16 @@ export async function saveHttpsSettings(input: unknown, userId: UserId) {
 export async function checkHttpsDns() {
   const state = await readState();
   if (!state.draft) throw new HttpError(409, "Save the ACME-DNS configuration first.");
+  if (state.draft.provider === "cloudflare") throw new HttpError(400, "Use Test Connection for Cloudflare DNS.");
   await checkCname(state.draft);
   return { valid: true, cname: requiredCname(state.draft) };
+}
+
+export async function checkHttpsConnection() {
+  const state = await readState();
+  if (!state.draft || state.draft.provider !== "cloudflare") throw new HttpError(409, "Save a Cloudflare configuration first.");
+  await checkCloudflare(state.draft);
+  return { valid: true };
 }
 
 export async function activateHttps(userId: UserId) {
@@ -200,7 +224,7 @@ export async function activateHttps(userId: UserId) {
   let state: HttpsState;
   try {
     state = await readState(client);
-    if (!state.draft?.enabled) throw new HttpError(409, "Save and enable the ACME-DNS configuration first.");
+    if (!state.draft?.enabled) throw new HttpError(409, "Save and enable the HTTPS configuration first.");
     await persist({ ...state, phase: "pending", lastError: null }, userId, "https_activation_started");
   } catch (error) { await unlock(client); throw error; }
   const candidate = state.draft!;
@@ -209,7 +233,8 @@ export async function activateHttps(userId: UserId) {
     try {
       const oldRuntime = await runtimeConfiguration(state.active);
       await activateWithRollback({
-        credentials: () => updateProvider(candidate), dns: () => checkCname(candidate),
+        credentials: () => candidate.provider === "cloudflare" ? checkCloudflare(candidate) : updateProvider(candidate),
+        dns: () => candidate.provider === "cloudflare" ? Promise.resolve() : checkCname(candidate),
         apply: async () => loadCaddy(await runtimeConfiguration(candidate)),
         verify: async () => {
           if (staging()) throw new HttpError(409, "Staging certificate requested. Public trust activation requires a production deployment; staging is never treated as trusted.");
@@ -251,7 +276,7 @@ export async function getHttpsStatus() {
 
 export async function relayAcmeDnsUpdate(req: Request, res: Response) {
   const state = await readState();
-  const config = [state.active, state.draft].find((item) => item && item.id === req.params.id);
+  const config = [state.active, state.draft].find((item) => item && item.provider !== "cloudflare" && item.id === req.params.id);
   if (!config) throw new HttpError(404, "Not found.");
   const credentials = accountCredentials(config);
   if (!equalSecret(String(req.headers["x-api-user"] || ""), credentials.username) || !equalSecret(String(req.headers["x-api-key"] || ""), credentials.password)) throw new HttpError(403, "Forbidden.");

@@ -3,11 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
 import AutomaticHttpsSection from "./automatic-https-section";
-import { activateAutomaticHttps, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, type AutomaticHttpsSettings } from "@/lib/api/settings";
+import { activateAutomaticHttps, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, testAutomaticHttpsConnection, type AutomaticHttpsSettings } from "@/lib/api/settings";
 
-vi.mock("@/lib/api/settings", () => ({ activateAutomaticHttps: vi.fn(), checkAutomaticHttpsDns: vi.fn(), fetchAutomaticHttpsSettings: vi.fn(), saveAutomaticHttpsSettings: vi.fn() }));
-const settings: AutomaticHttpsSettings = { enabled: true, redirectHttpToHttps: false, httpRedirectActive: false, hostname: "rispro.nccb.com.ly", serverUrl: "https://provider.example.org", subdomain: "actual-account", fullDomain: "actual-account.provider.example.org", credentialsConfigured: true, encryptionReady: true, provisioned: true, managementTransportReady: true,
-  cname: { type: "CNAME", name: "_acme-challenge.rispro.nccb.com.ly", target: "actual-account.provider.example.org" }, status: "Pending", activeHostname: null, issuer: null, expiresAt: null, renewal: "Pending activation", lastError: null, activationPending: false };
+vi.mock("@/lib/api/settings", () => ({ activateAutomaticHttps: vi.fn(), checkAutomaticHttpsDns: vi.fn(), fetchAutomaticHttpsSettings: vi.fn(), saveAutomaticHttpsSettings: vi.fn(), testAutomaticHttpsConnection: vi.fn() }));
+const settings: AutomaticHttpsSettings = { provider: "acmedns", providerConfigurations: { acmedns: { serverUrl: "https://provider.example.org", subdomain: "actual-account", fullDomain: "actual-account.provider.example.org", credentialsConfigured: true }, cloudflare: null }, enabled: true, redirectHttpToHttps: false, httpRedirectActive: false, hostname: "rispro.nccb.com.ly", serverUrl: "https://provider.example.org", subdomain: "actual-account", fullDomain: "actual-account.provider.example.org", credentialsConfigured: true, encryptionReady: true, provisioned: true, managementTransportReady: true,
+  cname: { type: "CNAME", name: "_acme-challenge.rispro.nccb.com.ly", target: "actual-account.provider.example.org" }, status: "Pending", activeHostname: null, activeProvider: null, issuer: null, expiresAt: null, renewal: "Pending activation", lastError: null, activationPending: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -15,7 +15,24 @@ beforeEach(() => {
   vi.mocked(fetchAutomaticHttpsSettings).mockResolvedValue(settings);
   vi.mocked(saveAutomaticHttpsSettings).mockResolvedValue(settings);
   vi.mocked(checkAutomaticHttpsDns).mockResolvedValue({ valid: true });
+  vi.mocked(testAutomaticHttpsConnection).mockResolvedValue({ valid: true });
   vi.mocked(activateAutomaticHttps).mockResolvedValue({ accepted: true });
+});
+
+it("shows Cloudflare token controls without ACME-DNS fields and requires a successful connection check", async () => {
+  const user = userEvent.setup();
+  vi.mocked(fetchAutomaticHttpsSettings).mockResolvedValue({ ...settings, provider: "cloudflare", cname: null, providerConfigurations: { ...settings.providerConfigurations, cloudflare: { credentialsConfigured: true } } });
+  show();
+  await screen.findByLabelText("Cloudflare DNS API Token");
+  expect((screen.getByLabelText("Cloudflare DNS API Token") as HTMLInputElement).value).toBe("");
+  expect(screen.queryByLabelText("ACME-DNS password")).toBeNull();
+  expect(screen.queryByText("Required public DNS record")).toBeNull();
+  expect((screen.getByRole("button", { name: "Activate HTTPS" }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Test Connection" }));
+  await waitFor(() => expect(testAutomaticHttpsConnection).toHaveBeenCalledOnce());
+  expect((screen.getByRole("button", { name: "Activate HTTPS" }) as HTMLButtonElement).disabled).toBe(false);
+  await user.selectOptions(screen.getByLabelText("Certificate Provider"), "acmedns");
+  expect((screen.getByLabelText("ACME-DNS server URL") as HTMLInputElement).value).toBe("https://provider.example.org");
 });
 function show() { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}><AutomaticHttpsSection onReAuthRequired={vi.fn()} reauthVersion={0} /></QueryClientProvider>); }
 

@@ -16,14 +16,24 @@ function docker(args) {
   return result.stdout;
 }
 
-test("pinned Caddy includes ACME-DNS and validates the staging DNS-only template without network access", async () => {
+test("pinned Caddy includes both DNS providers and validates file placeholders without network access", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-caddy-validation-"));
   try {
     const config = { id: "synthetic", enabled: true, hostname: "rispro.nccb.com.ly", serverUrl: "https://provider.example.org", subdomain: "synthetic", fullDomain: "synthetic.provider.example.org", credentials: {} };
     await writeFile(path.join(directory, "account.json"), JSON.stringify({ username: "synthetic-user", password: "synthetic-password", subdomain: config.subdomain, server_url: "http://app:3000/api/internal/automatic-https/acmedns/synthetic" }));
     await writeFile(path.join(directory, "config.json"), JSON.stringify(caddyConfiguration(config, "/validation/account.json", "a".repeat(64), true)));
     assert.match(docker(["run", "--rm", "--network", "none", "--entrypoint", "caddy", caddyImage, "list-modules"]), /^dns\.providers\.acmedns$/m);
+    assert.match(docker(["run", "--rm", "--network", "none", "--entrypoint", "caddy", caddyImage, "list-modules"]), /^dns\.providers\.cloudflare$/m);
     docker(["run", "--rm", "--network", "none", "--tmpfs", "/run/rispro-https", "--mount", `type=bind,source=${directory},target=/validation,readonly`, "--entrypoint", "caddy", caddyImage, "validate", "--config", "/validation/config.json"]);
+    const token = `synthetic_${"x".repeat(30)}`;
+    await writeFile(path.join(directory, "token"), token);
+    const cloud = caddyConfiguration({ ...config, provider: "cloudflare" }, "/validation/token", "a".repeat(64), true);
+    await writeFile(path.join(directory, "cloudflare.json"), JSON.stringify(cloud));
+    assert.equal(JSON.stringify(cloud).includes(token), false);
+    docker(["run", "--rm", "--network", "none", "--tmpfs", "/run/rispro-https", "--mount", `type=bind,source=${directory},target=/validation,readonly`, "--entrypoint", "caddy", caddyImage, "validate", "--config", "/validation/cloudflare.json"]);
+    await rm(path.join(directory, "token"));
+    const missing = spawnSync("docker", ["run", "--rm", "--network", "none", "--tmpfs", "/run/rispro-https", "--mount", `type=bind,source=${directory},target=/validation,readonly`, "--entrypoint", "caddy", caddyImage, "validate", "--config", "/validation/cloudflare.json"], { cwd: root, encoding: "utf8", timeout: 60_000 });
+    assert.notEqual(missing.status, 0, "Caddy must read the token file when provisioning Cloudflare");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

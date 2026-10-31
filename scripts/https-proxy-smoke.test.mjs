@@ -2,7 +2,7 @@
 // fallback and does not prove public certificate issuance or renewal.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -31,6 +31,8 @@ test("synthetic TLS streams OHIF/native frames, dictation, documents and large D
     const openssl = process.platform === "win32" ? "C:/Program Files/Git/usr/bin/openssl.exe" : "openssl";
     command(openssl, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(directory, "key.pem"), "-out", path.join(directory, "cert.pem"), "-days", "1", "-subj", "/CN=rispro.nccb.com.ly", "-addext", "subjectAltName=DNS:rispro.nccb.com.ly"]);
     await writeFile(path.join(directory, "identity"), token);
+    // Docker's Linux entrypoint needs the same LF shell script as a Linux checkout.
+    await writeFile(path.join(directory, "https-headers.sh"), (await readFile("docker/reverse-proxy/https-headers.sh", "utf8")).replace(/\r\n/g, "\n"), { mode: 0o755 });
     await writeFile(path.join(directory, "backend.mjs"), `
 import {randomBytes} from 'node:crypto';
 const database=new URL(process.env.DATABASE_URL||'invalid:');
@@ -106,7 +108,7 @@ assert.equal((await request('/headers',{secure:false})).status,200);console.log(
       "--env", `OHIF_NATIVE_AUTH_SECRET=${"b".repeat(64)}`, "--env", "NGINX_ENVSUBST_FILTER=^OHIF_NATIVE_AUTH_SECRET$", "--env", "NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/ohif-native",
       ...["ohif-native", "https-identity", "https-bootstrap", "https-listen"].flatMap((folder) => ["--tmpfs", `/etc/nginx/${folder}:mode=0700`]),
       ...mount(path.resolve("docker/reverse-proxy/nginx.conf"), "/etc/nginx/nginx.conf"),
-      ...mount(path.resolve("docker/reverse-proxy/https-headers.sh"), "/docker-entrypoint.d/40-https-headers.sh"),
+      ...mount(path.join(directory, "https-headers.sh"), "/docker-entrypoint.d/40-https-headers.sh"),
       ...mount(path.resolve("docker/ohif/native-location.conf"), "/etc/nginx/templates/native.conf.template"),
       ...mount(path.join(directory, "identity"), "/run/secrets/https_gateway_identity"), "nginx:1.27.5-alpine"]);
     docker(["run", "-d", "--name", containers[2], "--network", name, "--network-alias", "caddy", "--publish", "127.0.0.1::443", "--tmpfs", "/run/rispro-https:mode=0700", ...fixtureMount,
@@ -133,6 +135,7 @@ assert.equal((await request('/headers',{secure:false})).status,200);console.log(
     await secure.goto(`https://rispro.nccb.com.ly:${httpsPort}/settings?section=deployment_identity`);
     await secure.getByRole("heading", { name: "Automatic HTTPS", exact: true }).waitFor();
     assert.equal(await secure.getByLabel("Redirect HTTP to HTTPS").isChecked(), false);
+    await secure.getByLabel("Hostname", { exact: true }).fill("rispro.nccb.com.ly");
     await secure.getByLabel("ACME-DNS server URL").fill("https://provider.example.org");
     await secure.getByLabel("ACME-DNS username").fill("synthetic-browser-user");
     await secure.getByLabel("ACME-DNS password").fill("synthetic-browser-secret");
@@ -143,6 +146,18 @@ assert.equal((await request('/headers',{secure:false})).status,200);console.log(
     assert.equal(await secure.getByLabel("ACME-DNS password").inputValue(), "");
     const saved = await secure.evaluate(() => fetch("/api/settings/https").then((response) => response.text()));
     assert.equal(saved.includes("synthetic-browser-secret"), false);
+    await secure.getByLabel("Certificate Provider").selectOption("cloudflare");
+    assert.equal(await secure.getByLabel("ACME-DNS password").count(), 0);
+    const cloudToken = `synthetic_${"x".repeat(30)}`;
+    await secure.getByLabel("Cloudflare DNS API Token").fill(cloudToken);
+    await secure.getByRole("button", { name: "Save Configuration" }).click();
+    await secure.getByText("Configuration saved. Credentials are never displayed.").waitFor();
+    assert.equal(await secure.getByLabel("Cloudflare DNS API Token").inputValue(), "");
+    const cloudSaved = await secure.evaluate(() => fetch("/api/settings/https").then((response) => response.text()));
+    assert.equal(cloudSaved.includes(cloudToken), false);
+    await secure.route("**/api/settings/https/test-connection", (route) => route.fulfill({ json: { valid: true } }));
+    await secure.getByRole("button", { name: "Test Connection" }).click();
+    await secure.getByText("The token can read the Cloudflare zone for this hostname.").waitFor();
     const cookieName = process.env.COOKIE_NAME || "rispro_session";
     const cookies = await context.cookies();
     assert.equal(cookies.find((cookie) => cookie.name === cookieName)?.secure, false);
@@ -158,6 +173,8 @@ assert.equal((await request('/headers',{secure:false})).status,200);console.log(
     await secure.evaluate(() => { window.scrollTo(0, 0); document.querySelectorAll("*").forEach((element) => { if (element.scrollTop) element.scrollTop = 0; }); });
     assert.equal(await secure.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await secure.screenshot({ path: path.join(screenshots, "https-settings-mobile.png"), fullPage: true });
+    await secure.getByLabel("Certificate Provider").selectOption("acmedns");
+    assert.equal(await secure.getByLabel("ACME-DNS server URL").inputValue(), "https://provider.example.org");
   } catch (error) {
     for (const container of containers.slice(0, 3)) {
       const logs = spawnSync("docker", ["logs", "--tail", "12", container], { encoding: "utf8" });

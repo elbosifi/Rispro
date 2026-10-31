@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pool } from "../../db/pool.js";
-import { activateWithRollback, getHttpsSettings, recoverHttpsConfiguration, saveHttpsSettings } from "./https-service.js";
+import { activateHttps, activateWithRollback, getHttpsSettings, recoverHttpsConfiguration, saveHttpsSettings } from "./https-service.js";
+import { validateHttpsConfiguration } from "./https-configuration.js";
 import { decryptRuntimeSecret } from "../../services/runtime-secret-crypto.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../../services/settings-service.js";
 import express from "express";
@@ -14,6 +15,7 @@ import path from "node:path";
 import os from "node:os";
 import { readToken, readSupervisorReauthToken } from "../../middleware/auth.js";
 import http from "node:http";
+import https from "node:https";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 
@@ -40,13 +42,35 @@ test("encrypted account persists across reads, remains absent from generic setti
     assert.deepEqual(reread, saved);
     await saveHttpsSettings({ ...input, username: "", password: "" }, userId);
     assert.equal((await getHttpsSettings()).credentialsConfigured, true);
+    // A pre-provider stored record behaves as ACME-DNS and survives switching.
+    await pool.query("update system_settings set setting_value = jsonb_set(setting_value, '{draft}', (setting_value->'draft') - 'provider') where category='automatic_https'");
+    assert.equal((await getHttpsSettings()).provider, "acmedns");
+    const token = `synthetic_${"c".repeat(30)}`;
+    const cloudInput = { provider: "cloudflare", enabled: true, hostname: input.hostname, token };
+    const cloud = await saveHttpsSettings(cloudInput, userId);
+    assert.equal(cloud.provider, "cloudflare");
+    assert.equal(cloud.cname, null);
+    assert.equal(JSON.stringify(cloud).includes(token), false);
+    const switched = (await pool.query("select setting_value from system_settings where category='automatic_https'")).rows[0].setting_value;
+    assert.equal(JSON.stringify(switched).includes(token), false);
+    assert.deepEqual(JSON.parse(decryptRuntimeSecret(switched.draft.credentials)), { token });
+    assert.deepEqual(JSON.parse(decryptRuntimeSecret(switched.providers.acmedns.credentials)), { username: input.username, password: input.password });
+    await saveHttpsSettings({ ...cloudInput, token: "" }, userId);
+    const rotated = `synthetic_${"d".repeat(30)}`;
+    await saveHttpsSettings({ ...cloudInput, token: rotated }, userId);
+    await saveHttpsSettings({ ...input, username: "", password: "" }, userId);
+    const recovered = (await pool.query("select setting_value from system_settings where category='automatic_https'")).rows[0].setting_value;
+    assert.deepEqual(JSON.parse(decryptRuntimeSecret(recovered.draft.credentials)), { username: input.username, password: input.password });
+    assert.deepEqual(JSON.parse(decryptRuntimeSecret(recovered.providers.cloudflare.credentials)), { token: rotated });
     assert.equal((await listSettingsCatalog()).automatic_https, undefined);
     await assert.rejects(getSettingsByCategory("automatic_https"), /dedicated endpoint/);
     await assert.rejects(upsertSettings("automatic_https", [{ key: "configuration", value: "bypass" }], userId), /dedicated endpoint/);
     const audit = await pool.query("select new_values from audit_log where entity_type='https_configuration' and changed_by_user_id=$1", [userId]);
-    assert.equal(audit.rows.length, 2);
+    assert.equal(audit.rows.length, 6);
     assert.equal(JSON.stringify(audit.rows).includes(input.password), false);
     assert.equal(JSON.stringify(audit.rows).includes(input.username), false);
+    assert.equal(JSON.stringify(audit.rows).includes(token), false);
+    assert.equal(JSON.stringify(audit.rows).includes(rotated), false);
   } finally {
     await pool.query("delete from audit_log where entity_type='https_configuration' and changed_by_user_id=$1", [userId]);
     await pool.query("delete from system_settings where category='automatic_https'");
@@ -67,6 +91,71 @@ test("activation order verifies trust and gateway before commit, and rolls back 
   }
 });
 
+test("failed Cloudflare activation restores the previous ACME-DNS runtime and active state", async () => {
+  const previous = await pool.query("select * from system_settings where category='automatic_https'");
+  const auditId = Number((await pool.query("select coalesce(max(id),0) as id from audit_log")).rows[0].id);
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-provider-rollback-"));
+  const names = ["RISPRO_SECRET_ENCRYPTION_KEY", "RISPRO_HTTPS_PROVISIONED", "RISPRO_HTTPS_RUNTIME_DIR", "RISPRO_HTTPS_GATEWAY_IDENTITY_FILE", "NODE_ENV"];
+  const before = names.map((name) => process.env[name]);
+  process.env.RISPRO_SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 5).toString("base64");
+  process.env.RISPRO_HTTPS_PROVISIONED = "true"; process.env.RISPRO_HTTPS_RUNTIME_DIR = directory;
+  process.env.RISPRO_HTTPS_GATEWAY_IDENTITY_FILE = path.join(directory, "identity"); process.env.NODE_ENV = "test";
+  await writeFile(path.join(directory, "identity"), "a".repeat(64));
+  const created = await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'HTTPS rollback administrator','test','super_admin',true) returning id", [`https_rollback_${Date.now()}`]);
+  const userId = Number(created.rows[0].id);
+  const applied: unknown[] = [];
+  const caddyMock = mock.method(http, "request", ((_options: unknown, callback: (response: { statusCode: number; resume: () => void }) => void) => {
+    const request = new EventEmitter();
+    return Object.assign(request, { setTimeout: () => request, end: (body: string) => { applied.push(JSON.parse(body)); callback({ statusCode: 200, resume: () => undefined }); return request; } });
+  }) as unknown as typeof http.request);
+  const cloudMock = mock.method(https, "request", ((_options: unknown, callback: (response: EventEmitter & { statusCode: number }) => void) => {
+    const request = new EventEmitter();
+    return Object.assign(request, { setTimeout: () => request, end: () => {
+      const response = Object.assign(new EventEmitter(), { statusCode: 200 }); callback(response);
+      response.emit("data", Buffer.from(JSON.stringify({ success: true, result: [{ name: "rispro.nccb.com.ly", status: "active" }] })));
+      response.emit("end"); return request;
+    } });
+  }) as unknown as typeof https.request);
+  try {
+    const active = validateHttpsConfiguration({ enabled: true, hostname: "rispro.nccb.com.ly", serverUrl: "https://provider.example.org", subdomain: "old", fullDomain: "old.provider.example.org", username: "old-user", password: "old-password" });
+    delete active.provider;
+    await pool.query("delete from system_settings where category='automatic_https'");
+    await pool.query("insert into system_settings(category,setting_key,setting_value) values('automatic_https','configuration',$1::jsonb)", [JSON.stringify({ draft: active, active, phase: "idle", lastError: null, certificate: null })]);
+    await saveHttpsSettings({ provider: "cloudflare", enabled: true, hostname: active.hostname, token: `synthetic_${"x".repeat(30)}` }, userId);
+    await activateHttps(userId);
+    let result = await getHttpsSettings();
+    for (let i = 0; result.activationPending && i < 100; i++) { await new Promise((resolve) => setTimeout(resolve, 20)); result = await getHttpsSettings(); }
+    assert.equal(result.status, "Error");
+    assert.match(result.lastError || "", /Staging certificate/);
+    const state = (await pool.query("select setting_value from system_settings where category='automatic_https'")).rows[0].setting_value;
+    assert.equal(state.active.provider, undefined);
+    assert.equal(state.active.id, active.id);
+    assert.equal(state.draft.provider, "cloudflare");
+    assert.equal(applied.length, 2);
+    const restored = JSON.parse(await readFile(path.join(directory, "current.json"), "utf8"));
+    assert.equal(restored.apps.tls.automation.policies[0].issuers[0].challenges.dns.provider.name, "acmedns");
+    assert.equal(JSON.stringify(restored).includes("synthetic_"), false);
+    // Startup recovery recreates a Cloudflare token file and a secret-free
+    // committed configuration for Caddy's next automatic renewal.
+    await pool.query("update system_settings set setting_value=$1::jsonb where category='automatic_https'", [JSON.stringify({ ...state, active: state.draft, phase: "idle" })]);
+    await recoverHttpsConfiguration();
+    const afterRestart = JSON.parse(await readFile(path.join(directory, "current.json"), "utf8"));
+    const provider = afterRestart.apps.tls.automation.policies[0].issuers[0].challenges.dns.provider;
+    assert.equal(provider.name, "cloudflare");
+    assert.equal(provider.api_token, `{file.${path.join(directory, `cloudflare-${state.draft.id}.token`)}}`);
+    assert.equal(await readFile(path.join(directory, `cloudflare-${state.draft.id}.token`), "utf8"), `synthetic_${"x".repeat(30)}`);
+    assert.equal(JSON.stringify(afterRestart).includes(`synthetic_${"x".repeat(30)}`), false);
+  } finally {
+    caddyMock.mock.restore(); cloudMock.mock.restore();
+    await pool.query("delete from audit_log where entity_type='https_configuration' and id>$1", [auditId]);
+    await pool.query("delete from system_settings where category='automatic_https'");
+    for (const row of previous.rows) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values($1,$2,$3::jsonb,$4)", [row.category, row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
+    await pool.query("delete from users where id=$1", [userId]);
+    for (let i = 0; i < names.length; i++) { if (before[i] === undefined) delete process.env[names[i]]; else process.env[names[i]] = before[i]; }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("HTTPS settings endpoints enforce authentication, super-admin role and recent reauthentication", async () => {
   const users = await pool.query(`insert into users(username,full_name,password_hash,role,is_active)
     values($1,'HTTPS synthetic administrator','test','super_admin',true),($2,'HTTPS synthetic supervisor','test','supervisor',true)
@@ -80,7 +169,7 @@ test("HTTPS settings endpoints enforce authentication, super-admin role and rece
     return `${env.cookieName}=${buildSessionToken(user)}${recent ? `; ${env.reauthCookieName}=${buildSupervisorReauthToken(user)}` : ""}`;
   };
   try {
-    for (const [method, route] of [["GET", ""], ["GET", "/status"], ["PUT", ""], ["POST", "/activate"], ["POST", "/check-dns"]]) {
+    for (const [method, route] of [["GET", ""], ["GET", "/status"], ["PUT", ""], ["POST", "/activate"], ["POST", "/check-dns"], ["POST", "/test-connection"]]) {
       const request = (credential?: string) => fetch(`http://127.0.0.1:${address.port}/api/settings/https${route}`, { method, headers: credential ? { Cookie: credential } : {} });
       assert.equal((await request()).status, 401, `${method} ${route} anonymous`);
       assert.equal((await request(cookie("supervisor", true))).status, 403, `${method} ${route} supervisor`);

@@ -9,6 +9,39 @@ export function accountCredentials(config: HttpsConfiguration): { username: stri
   return JSON.parse(decryptRuntimeSecret(config.credentials));
 }
 
+export function cloudflareToken(config: HttpsConfiguration): string {
+  return (JSON.parse(decryptRuntimeSecret(config.credentials)) as { token: string }).token;
+}
+
+// A read-only check confirms that the token can read a zone for this hostname.
+// DNS Edit permission is exercised by Caddy during the real DNS-01 challenge.
+export async function checkCloudflare(config: HttpsConfiguration): Promise<void> {
+  const token = cloudflareToken(config);
+  const labels = config.hostname.split(".");
+  for (let index = 0; index < labels.length - 1; index++) {
+    const zone = labels.slice(index).join(".");
+    const result = await new Promise<{ success?: boolean; result?: Array<{ name?: string; status?: string }> }>((resolve, reject) => {
+      const request = https.request({ hostname: "api.cloudflare.com", port: 443, path: `/client/v4/zones?name=${encodeURIComponent(zone)}&status=active`, method: "GET", agent: false,
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, rejectUnauthorized: true }, (response) => {
+        let body = "";
+        response.on("data", (chunk: Buffer) => { body += chunk.toString(); if (body.length > 65536) request.destroy(); });
+        response.on("end", () => {
+          try {
+            const value = JSON.parse(body);
+            if (response.statusCode !== 200 || value.success !== true || !Array.isArray(value.result)) throw new Error();
+            resolve(value);
+          } catch { reject(new HttpError(400, "Cloudflare rejected the token or zone lookup. Check the token and Zone Read permission.")); }
+        });
+      });
+      request.setTimeout(15_000, () => request.destroy());
+      request.on("error", () => reject(new HttpError(400, "Cloudflare HTTPS connection failed.")));
+      request.end();
+    });
+    if (result.result?.some((item) => item.name?.toLowerCase() === zone && item.status === "active")) return;
+  }
+  throw new HttpError(400, "No active Cloudflare zone for this hostname is accessible to the token.");
+}
+
 // No redirects or ambient proxy settings. Pin the validated address in this
 // connection, retaining the provider hostname for TLS verification and SNI.
 export async function updateProvider(config: HttpsConfiguration, txt = randomBytes(32).toString("base64url")): Promise<void> {

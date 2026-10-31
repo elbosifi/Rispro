@@ -6,7 +6,8 @@ test("super administrator sees HTTPS configuration and protected-bootstrap guida
   expect((await page.request.post("http://127.0.0.1:3100/api/auth/re-auth", { data: { password: E2E_PASSWORD } })).ok()).toBeTruthy();
   await page.goto("/settings?section=deployment_identity");
   await expect(page.getByRole("heading", { name: "Automatic HTTPS", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Hostname", { exact: true })).toHaveValue("rispro.nccb.com.ly");
+  await expect(page.getByLabel("Hostname", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Certificate Provider")).toHaveValue("acmedns");
   await expect(page.getByLabel("ACME-DNS password")).toHaveValue("");
   await expect(page.getByLabel("Redirect HTTP to HTTPS")).not.toBeChecked();
   await expect(page.getByLabel("ACME-DNS password")).toBeDisabled();

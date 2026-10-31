@@ -4,12 +4,13 @@ import { encryptRuntimeSecret, type RuntimeSecretBundle } from "../../services/r
 import { HttpError } from "../../utils/http-error.js";
 
 export const HTTPS_CATEGORY = "automatic_https";
-export const INITIAL_HOSTNAME = "rispro.nccb.com.ly";
+export const INITIAL_HOSTNAME = "";
 export const LE_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory";
 export const LE_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory";
 
 export interface HttpsConfiguration {
   id: string;
+  provider?: "acmedns" | "cloudflare";
   enabled: boolean;
   redirectHttpToHttps: boolean;
   hostname: string;
@@ -43,11 +44,24 @@ export function providerUrl(value: unknown): string {
 export function validateHttpsConfiguration(input: unknown, previous?: HttpsConfiguration | null): HttpsConfiguration {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new HttpError(400, "HTTPS configuration is required.");
   const body = input as Record<string, unknown>;
-  const allowed = ["enabled", "redirectHttpToHttps", "hostname", "serverUrl", "username", "password", "subdomain", "fullDomain"];
+  const allowed = ["enabled", "redirectHttpToHttps", "hostname", "provider", "serverUrl", "username", "password", "subdomain", "fullDomain", "token"];
   if (Object.keys(body).some((key) => !allowed.includes(key)) || typeof body.enabled !== "boolean") throw new HttpError(400, "Invalid HTTPS configuration fields.");
   if (body.redirectHttpToHttps !== undefined && typeof body.redirectHttpToHttps !== "boolean") throw new HttpError(400, "HTTP redirect must be enabled or disabled.");
-  if (typeof body.username !== "string" || typeof body.password !== "string") throw new HttpError(400, "ACME-DNS credential fields must be strings.");
+  const provider = body.provider ?? "acmedns";
+  if (provider !== "acmedns" && provider !== "cloudflare") throw new HttpError(400, "Invalid HTTPS certificate provider.");
   const hostname = dnsName(body.hostname);
+  if (provider === "cloudflare") {
+    if (["serverUrl", "username", "password", "subdomain", "fullDomain"].some((key) => body[key] !== undefined)) throw new HttpError(400, "Invalid Cloudflare configuration fields.");
+    if (typeof body.token !== "string") throw new HttpError(400, "Cloudflare token must be a string.");
+    const token = body.token;
+    // Match the pinned plugin's accepted token formats before it can log errors.
+    if (token && !/^(?:[A-Za-z0-9_-]{35,50}|cf(?:ut|at)_[A-Za-z0-9_-]{32,256})$/.test(token)) throw new HttpError(400, "Invalid Cloudflare API token format.");
+    if (!token && previous?.provider !== "cloudflare") throw new HttpError(400, "Enter a Cloudflare API token.");
+    return { id: randomUUID(), provider, enabled: body.enabled, redirectHttpToHttps: body.redirectHttpToHttps === true, hostname,
+      serverUrl: "", subdomain: "", fullDomain: "", credentials: token ? encryptRuntimeSecret(JSON.stringify({ token })) : previous!.credentials };
+  }
+  if (body.token !== undefined) throw new HttpError(400, "Invalid ACME-DNS configuration fields.");
+  if (typeof body.username !== "string" || typeof body.password !== "string") throw new HttpError(400, "ACME-DNS credential fields must be strings.");
   const serverUrl = providerUrl(body.serverUrl);
   const subdomain = typeof body.subdomain === "string" ? body.subdomain.toLowerCase() : "";
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) throw new HttpError(400, "Invalid ACME-DNS subdomain.");
@@ -56,9 +70,9 @@ export function validateHttpsConfiguration(input: unknown, previous?: HttpsConfi
   const username = typeof body.username === "string" ? body.username : "";
   const password = typeof body.password === "string" ? body.password : "";
   if (username.length > 256 || password.length > 1024 || /[^\x21-\x7e]/.test(username + password)) throw new HttpError(400, "Invalid ACME-DNS credentials.");
-  const sameAccount = previous && serverUrl === previous.serverUrl && subdomain === previous.subdomain && fullDomain === previous.fullDomain;
+  const sameAccount = previous && previous.provider !== "cloudflare" && serverUrl === previous.serverUrl && subdomain === previous.subdomain && fullDomain === previous.fullDomain;
   if ((!username || !password) && (!sameAccount || username || password)) throw new HttpError(400, "Submit both ACME-DNS username and password for a new account.");
-  return { id: randomUUID(), enabled: body.enabled, redirectHttpToHttps: body.redirectHttpToHttps === true, hostname, serverUrl, subdomain, fullDomain,
+  return { id: randomUUID(), provider, enabled: body.enabled, redirectHttpToHttps: body.redirectHttpToHttps === true, hostname, serverUrl, subdomain, fullDomain,
     credentials: username && password ? encryptRuntimeSecret(JSON.stringify({ username, password })) : previous!.credentials };
 }
 
@@ -99,7 +113,7 @@ export function caddyConfiguration(config: HttpsConfiguration, credentialsPath: 
     ...bootstrapCaddyConfiguration(),
     apps: {
       tls: { certificates: { automate: [config.hostname] }, automation: { policies: [{ subjects: [config.hostname], issuers: [{ module: "acme", ca: staging ? LE_STAGING : LE_PRODUCTION,
-        challenges: { http: { disabled: true }, "tls-alpn": { disabled: true }, dns: { resolvers: ["1.1.1.1:53", "8.8.8.8:53"], provider: { name: "acmedns", config_file_path: credentialsPath } } } }] }] } },
+        challenges: { http: { disabled: true }, "tls-alpn": { disabled: true }, dns: { resolvers: ["1.1.1.1:53", "8.8.8.8:53"], provider: config.provider === "cloudflare" ? { name: "cloudflare", api_token: `{file.${credentialsPath}}` } : { name: "acmedns", config_file_path: credentialsPath } } } }] }] } },
       http: { servers: { rispro: { listen: [":443"], automatic_https: { disable_redirects: true },
         routes: [{ match: [{ host: [config.hostname] }], handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "gateway:8080" }],
           flush_interval: -1, headers: { request: { set: { "X-Rispro-Https-Gateway": [gatewayToken] } }, response: { set: { "X-Rispro-Https-Gateway": ["caddy"] } } },

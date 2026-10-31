@@ -50,3 +50,30 @@ test("Caddy template uses DNS-only ACME, restricted credentials and streaming ex
   assert.equal(JSON.stringify(config).includes("synthetic-secret"), false);
   assert.deepEqual(config.apps.tls.automation.policies[0].issuers[0].challenges.http, { disabled: true });
 });
+
+test("Cloudflare token is validated, encrypted, retained on rotation and referenced only by file placeholder", () => {
+  const previousKey = process.env.RISPRO_SECRET_ENCRYPTION_KEY;
+  process.env.RISPRO_SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  const token = "synthetic_" + "a".repeat(30);
+  const cloudflare = { provider: "cloudflare", enabled: true, hostname: "ris.example.org", token };
+  try {
+    const saved = validateHttpsConfiguration(cloudflare);
+    assert.equal(saved.provider, "cloudflare");
+    assert.equal(saved.redirectHttpToHttps, false);
+    assert.equal(JSON.stringify(saved).includes(token), false);
+    assert.deepEqual(JSON.parse(decryptRuntimeSecret(saved.credentials)), { token });
+    assert.deepEqual(validateHttpsConfiguration({ ...cloudflare, token: "" }, saved).credentials, saved.credentials);
+    assert.throws(() => validateHttpsConfiguration({ ...cloudflare, token: "bad" }), /token format/);
+    assert.throws(() => validateHttpsConfiguration({ ...cloudflare, token: "" }), /Enter a Cloudflare/);
+    assert.throws(() => validateHttpsConfiguration({ ...cloudflare, serverUrl: "https://unsafe.example.org" }), /fields/);
+    const config = caddyConfiguration(saved, "/run/rispro-https/cloudflare-token", "a".repeat(64), true);
+    const provider = config.apps.tls.automation.policies[0].issuers[0].challenges.dns.provider;
+    assert.deepEqual(provider, { name: "cloudflare", api_token: "{file./run/rispro-https/cloudflare-token}" });
+    assert.equal(JSON.stringify(config).includes(token), false);
+    assert.match(JSON.stringify(config), /acme-staging-v02/);
+    const legacy = { ...validateHttpsConfiguration(input), provider: undefined };
+    assert.equal(caddyConfiguration(legacy, "/account", "a".repeat(64)).apps.tls.automation.policies[0].issuers[0].challenges.dns.provider.name, "acmedns");
+  } finally {
+    if (previousKey === undefined) delete process.env.RISPRO_SECRET_ENCRYPTION_KEY; else process.env.RISPRO_SECRET_ENCRYPTION_KEY = previousKey;
+  }
+});

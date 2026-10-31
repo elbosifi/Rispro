@@ -13,6 +13,8 @@ import type {
 type RawRecord = Record<string, unknown>;
 
 export interface AutomaticHttpsSettings {
+  provider: "acmedns" | "cloudflare";
+  providerConfigurations: { acmedns: { serverUrl: string; subdomain: string; fullDomain: string; credentialsConfigured: boolean } | null; cloudflare: { credentialsConfigured: boolean } | null };
   enabled: boolean;
   redirectHttpToHttps: boolean;
   httpRedirectActive: boolean;
@@ -27,16 +29,23 @@ export interface AutomaticHttpsSettings {
   cname: { type: "CNAME"; name: string; target: string } | null;
   status: "Active" | "Pending" | "Error";
   activeHostname: string | null;
+  activeProvider: "acmedns" | "cloudflare" | null;
   issuer: string | null;
   expiresAt: string | null;
   renewal: string;
   lastError: string | null;
   activationPending: boolean;
 }
-export type AutomaticHttpsInput = Pick<AutomaticHttpsSettings, "enabled" | "redirectHttpToHttps" | "hostname" | "serverUrl" | "subdomain" | "fullDomain"> & { username: string; password: string };
+export type AutomaticHttpsInput = Pick<AutomaticHttpsSettings, "enabled" | "redirectHttpToHttps" | "hostname" | "serverUrl" | "subdomain" | "fullDomain" | "provider"> & { username: string; password: string; token: string };
 export function fetchAutomaticHttpsSettings() { return api<AutomaticHttpsSettings>("/settings/https/status"); }
-export function saveAutomaticHttpsSettings(input: AutomaticHttpsInput) { return api<AutomaticHttpsSettings>("/settings/https", { method: "PUT", body: JSON.stringify(input) }); }
+export function saveAutomaticHttpsSettings(input: AutomaticHttpsInput) {
+  const { provider, enabled, redirectHttpToHttps, hostname } = input;
+  const payload = provider === "cloudflare" ? { provider, enabled, redirectHttpToHttps, hostname, token: input.token }
+    : { provider, enabled, redirectHttpToHttps, hostname, serverUrl: input.serverUrl, subdomain: input.subdomain, fullDomain: input.fullDomain, username: input.username, password: input.password };
+  return api<AutomaticHttpsSettings>("/settings/https", { method: "PUT", body: JSON.stringify(payload) });
+}
 export function checkAutomaticHttpsDns() { return api<{ valid: boolean }>("/settings/https/check-dns", { method: "POST" }); }
+export function testAutomaticHttpsConnection() { return api<{ valid: boolean }>("/settings/https/test-connection", { method: "POST" }); }
 export function activateAutomaticHttps() { return api<{ accepted: boolean }>("/settings/https/activate", { method: "POST" }); }
 
 export interface DeploymentIdentitySettings {

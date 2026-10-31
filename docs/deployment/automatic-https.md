@@ -1,37 +1,48 @@
 # Automatic HTTPS
 
 Standard Docker setup/update installs Caddy 2.11.7 with the pinned community
-[ACME-DNS module](https://github.com/caddy-dns/acmedns). Caddy listens on port 443
+[ACME-DNS module](https://github.com/caddy-dns/acmedns) and
+[Cloudflare DNS module](https://github.com/caddy-dns/cloudflare). Caddy listens on port 443
 and forwards to the existing Nginx gateway. HTTP port 3000 stays published and
 working. **Redirect HTTP to HTTPS is disabled by default.** Activation does not
 change the public application URL or external tunnel configuration.
 
 ## Administrator setup
 
-1. Obtain an account from a trusted managed ACME-DNS provider: HTTPS server URL,
-   username, password, subdomain and full domain. RISpro does not register accounts.
+1. Choose a DNS provider. For ACME-DNS, obtain the HTTPS server URL, username,
+   password, subdomain and full domain from a trusted managed provider. For
+   Cloudflare DNS, create a token scoped to the hostname's zone with **Zone →
+   Zone → Read** and **Zone → DNS → Edit** permissions.
 2. Open **Settings → Deployment & Application Identity → Automatic HTTPS** as a
    super administrator and complete password reauthentication. Initial credential
    entry requires verified HTTPS or the protected local bootstrap at
    `http://localhost:3001`. Port 3001 binds only to VM loopback. A remote
    administrator can use `ssh -L 3001:127.0.0.1:3001 <administrator>@<rispro-vm>`.
    Do not publish this bootstrap port through a public proxy.
-3. Enter the managed account and hostname (initially `rispro.nccb.com.ly`), leave
+3. Select the provider, enter its credentials and your hostname, leave
    **Redirect HTTP to HTTPS** unchecked, and select **Save Configuration**.
-   Saved username/password fields remain blank. Leaving both blank retains the
-   same account; changing account identity requires both credentials again.
-4. Ask the public DNS administrator to create the **exact CNAME displayed by
-   RISpro**: `_acme-challenge.rispro.nccb.com.ly` pointing to the account's actual
-   full domain. Select **Check DNS** after propagation.
-5. Hospital DNS must resolve `rispro.nccb.com.ly` to the VM for LAN clients.
-   Allow LAN TCP 443, outbound HTTPS to Let's Encrypt and the managed provider,
+   Saved credential fields remain blank. A blank token retains the saved token;
+   for ACME-DNS leave both username and password blank to retain the same account.
+4. For ACME-DNS, create the **exact CNAME displayed by RISpro** and select
+   **Check DNS** after propagation. For Cloudflare, no CNAME is needed; select
+   **Test Connection** to check the token's zone read access. The DNS Edit
+   permission is exercised during the actual challenge, not by this read-only test.
+   When switching from ACME-DNS, coordinate any existing `_acme-challenge` CNAME
+   with the DNS administrator: a delegation to the old provider can prevent
+   Cloudflare from creating the challenge in its zone. Restore that delegation
+   if rolling back to ACME-DNS.
+5. Hospital DNS must resolve the configured hostname to the VM for LAN clients.
+   Allow LAN TCP 443, outbound HTTPS to Let's Encrypt and the chosen provider,
    and public DNS access. Public inbound access is unnecessary for DNS-01.
-6. Select **Activate HTTPS**. RISpro checks credentials and public CNAME delegation,
+6. Select **Activate HTTPS**. RISpro checks provider access and, for ACME-DNS, public CNAME delegation,
    applies its fixed Caddy template through a permissioned Unix socket, and
    verifies certificate trust, hostname and RISpro health by connecting directly
    to the internal Caddy service. It never follows public hostname resolution to
    the external tunnel. A failure restores the previous configuration. Staging
-   certificates are never activated as trusted.
+   certificates are never activated as trusted. Saved settings for each provider
+   are retained when switching; activation changes the active provider only after
+   gateway verification. If an existing certificate is reused, a successful zone
+   read does not establish that DNS Edit will succeed at the next renewal.
 7. Open the HTTPS settings link and sign in. HTTP sessions retain their existing
    cookie names and attributes. HTTPS session, reauthentication, passkey and
    viewer cookies use separate names with `Secure`, preserving HTTP sessions on
@@ -112,7 +123,7 @@ disposable test containers; there is no self-signed or internal-CA fallback.
 Local mocks do not prove real issuance/renewal, hospital DNS, physical devices or
 production tunnel compatibility. Those require separate authorized acceptance.
 
-## Local validation for this patch
+## Local validation for the initial ACME-DNS patch
 
 | Check | Result |
 | --- | --- |
