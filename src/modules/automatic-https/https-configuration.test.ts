@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decryptRuntimeSecret } from "../../services/runtime-secret-crypto.js";
-import { caddyConfiguration, cnameMatches, isPublicAddress, requiredCname, validateHttpsConfiguration } from "./https-configuration.js";
+import { caddyConfiguration, cnameMatches, isPublicAddress, requiredCname, temporaryBootstrapConfiguration, validateHttpsConfiguration } from "./https-configuration.js";
 
 const input = { enabled: true, hostname: "rispro.nccb.com.ly", serverUrl: "https://acmedns.provider.org", username: "test-user", password: "synthetic-secret", subdomain: "account-id", fullDomain: "account-id.acmedns.provider.org" };
+
+test("bootstrap accepts a unicast server IP without trusting its subnet, and permits only an explicit client IP", () => {
+  const identity = "a".repeat(64);
+  const config = temporaryBootstrapConfiguration("192.9.101.250", identity, "192.9.101.42");
+  assert.deepEqual(config.apps.tls.certificates.automate, ["192.9.101.250"]);
+  for (const match of config.apps.http.servers.bootstrap.routes[0].match!) {
+    assert.ok(match.remote_ip.ranges.includes("192.9.101.42/32"));
+    assert.equal(match.remote_ip.ranges.includes("192.9.101.0/24"), false);
+  }
+  assert.equal(JSON.stringify(temporaryBootstrapConfiguration("192.9.101.250", identity)).includes("192.9.101.42"), false);
+  for (const ip of ["0.0.0.0", "127.0.0.1", "169.254.1.1", "224.0.0.1", "255.255.255.255", "192.9.101.999"]) {
+    assert.throws(() => temporaryBootstrapConfiguration(ip, identity), /Invalid HTTPS bootstrap identity/, ip);
+    assert.throws(() => temporaryBootstrapConfiguration("192.9.101.250", identity, ip), /Invalid HTTPS bootstrap identity/, ip);
+  }
+});
 
 test("strict configuration validation encrypts credentials and retains them only for the same account", () => {
   const previousKey = process.env.RISPRO_SECRET_ENCRYPTION_KEY;

@@ -1,4 +1,5 @@
 import { mkdir, open, rename, rm } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import https from "node:https";
@@ -11,9 +12,10 @@ import { logSecurityAuditEntry } from "../../services/audit-service.js";
 import { isRuntimeSecretEncryptionConfigured } from "../../services/runtime-secret-crypto.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { UserId } from "../../types/http.js";
-import { bootstrapCaddyConfiguration, caddyConfiguration, temporaryBootstrapConfiguration, HTTPS_CATEGORY, INITIAL_HOSTNAME, requiredCname, validateHttpsConfiguration, type HttpsConfiguration } from "./https-configuration.js";
+import { bootstrapCaddyConfiguration, caddyConfiguration, isBootstrapAddress, temporaryBootstrapConfiguration, HTTPS_CATEGORY, INITIAL_HOSTNAME, requiredCname, validateHttpsConfiguration, type HttpsConfiguration } from "./https-configuration.js";
 import { accountCredentials, checkCname, checkCloudflare, cloudflareToken, updateProvider } from "./https-provider.js";
-import { bootstrapIp, equalSecret, gatewayIdentity, httpsRuntimeDirectory } from "./https-transport.js";
+import { bootstrapIp, bootstrapIpError, equalSecret, gatewayIdentity, httpsRuntimeDirectory } from "./https-transport.js";
+import { BootstrapError } from "./https-bootstrap.js";
 
 interface CertificateStatus { issuer: string; expiresAt: string }
 interface HttpsState {
@@ -29,6 +31,7 @@ const LOCK = 719821993;
 let activation: Promise<void> | null = null;
 let bootstrapListenerActive = false;
 let bootstrapMonitorStarted = false;
+let loadedBootstrapClient: string | null = null;
 
 async function readState(db: Pick<PoolClient, "query"> = pool): Promise<HttpsState> {
   const result = await db.query<{ setting_value: HttpsState }>("select setting_value from system_settings where category=$1 and setting_key='configuration'", [HTTPS_CATEGORY]);
@@ -98,9 +101,16 @@ async function applyHttpRedirect(config: HttpsConfiguration | null) {
 
 function staging(): boolean { return process.env.NODE_ENV !== "production"; }
 
+function bootstrapClient(): string | null {
+  try {
+    const value = JSON.parse(readFileSync(path.join(httpsRuntimeDirectory(), "bootstrap-client.json"), "utf8"));
+    return typeof value.ip === "string" && isBootstrapAddress(value.ip) && Number.isFinite(value.expiresAt) && value.expiresAt > Date.now() ? value.ip : null;
+  } catch { return null; }
+}
+
 async function runtimeConfiguration(config: HttpsConfiguration | null, includeBootstrap = !config) {
   const ip = process.env.RISPRO_HTTPS_PROVISIONED === "true" && includeBootstrap ? bootstrapIp() : null;
-  const temporary = ip ? temporaryBootstrapConfiguration(ip, gatewayIdentity()) : null;
+  const temporary = ip ? temporaryBootstrapConfiguration(ip, gatewayIdentity(), bootstrapClient()) : null;
   if (!config) return temporary || bootstrapCaddyConfiguration();
   let publicConfig: ReturnType<typeof caddyConfiguration>;
   if (config.provider === "cloudflare") {
@@ -128,8 +138,9 @@ async function loadCaddy(configuration: unknown): Promise<void> {
       headers: { "Content-Type": "application/json" } }, (response) => {
       response.resume();
       if (response.statusCode === 200) {
-        const value = configuration as { apps?: { http?: { servers?: { bootstrap?: unknown } } } };
+        const value = configuration as { apps?: { http?: { servers?: { bootstrap?: { routes?: Array<{ match?: Array<{ remote_ip?: { ranges?: string[] } }> }> } } } } };
         bootstrapListenerActive = Boolean(value.apps?.http?.servers?.bootstrap);
+        loadedBootstrapClient = value.apps?.http?.servers?.bootstrap?.routes?.[0]?.match?.[0]?.remote_ip?.ranges?.[4]?.replace(/\/32$/, "") || null;
         resolve();
       }
       else reject(new HttpError(503, "Caddy rejected the HTTPS configuration."));
@@ -138,6 +149,33 @@ async function loadCaddy(configuration: unknown): Promise<void> {
     request.on("error", () => reject(new HttpError(503, "The private Caddy reload interface is unavailable.")));
     request.end(JSON.stringify(configuration));
   });
+}
+
+// Invoked only from the trusted server console, never through the HTTP API.
+export async function allowBootstrapClient(ip: string) {
+  if (!isBootstrapAddress(ip)) throw new BootstrapError("The client address must be a unicast IPv4 address.");
+  if (!bootstrapIp()) throw new BootstrapError(bootstrapIpError());
+  const client = await lock();
+  const filename = path.join(httpsRuntimeDirectory(), "bootstrap-client.json");
+  let previous: string | null = null;
+  try {
+    const state = await readState(client);
+    if (state.active) {
+      if (await verifyHttpsGateway(state.active.hostname).then(() => true, () => false)) throw new BootstrapError("A trusted HTTPS certificate is already active; use its hostname.");
+    }
+    try { previous = readFileSync(filename, "utf8"); } catch { /* no previous entry */ }
+    await atomicJson("bootstrap-client.json", { ip, expiresAt: Date.now() + 5 * 60_000 });
+    try { await loadCaddy(await runtimeConfiguration(state.active, true)); }
+    catch {
+      if (previous === null) await rm(filename, { force: true }); else await atomicFile("bootstrap-client.json", previous);
+      try { await loadCaddy(await runtimeConfiguration(state.active, true)); }
+      catch {
+        await atomicFile("bootstrap-client-reload", "required");
+        throw new BootstrapError("The Caddy reload and restoration failed; check Caddy and firewall restrictions.");
+      }
+      throw new BootstrapError("The private Caddy configuration could not be reloaded; the previous source restriction was restored.");
+    }
+  } finally { await unlock(client); }
 }
 
 export async function verifyHttpsGateway(hostname: string): Promise<CertificateStatus> {
@@ -331,24 +369,36 @@ export async function recoverHttpsConfiguration() {
   } finally { await unlock(client); }
 }
 
+// The advisory lock prevents a monitor reload during activation.
+export async function reconcileHttpsBootstrap() {
+  if (!bootstrapIp()) return;
+  let client: PoolClient;
+  try { client = await lock(); } catch { return; }
+  try {
+    const state = await readState(client);
+    if (state.phase === "pending") return;
+    const allowedClient = bootstrapClient();
+    const clientFile = path.join(httpsRuntimeDirectory(), "bootstrap-client.json");
+    const retryFile = path.join(httpsRuntimeDirectory(), "bootstrap-client-reload");
+    if (existsSync(retryFile) || (bootstrapListenerActive && (allowedClient !== loadedBootstrapClient || (!allowedClient && existsSync(clientFile))))) {
+      await loadCaddy(await runtimeConfiguration(state.active, true));
+      if (!allowedClient) await rm(clientFile, { force: true });
+      await rm(retryFile, { force: true });
+    }
+    if (!state.active) return;
+    let trusted = false;
+    try { await verifyHttpsGateway(state.active.hostname); trusted = true; } catch { /* recovery remains protected */ }
+    if (!trusted && !bootstrapListenerActive) await loadCaddy(await runtimeConfiguration(state.active, true));
+    else if (trusted && bootstrapListenerActive && state.phase !== "error") await loadCaddy(await runtimeConfiguration(state.active));
+  } finally { await unlock(client); }
+}
+
 // Keep recovery available if a previously trusted certificate later becomes
-// unverifiable. The advisory lock prevents a monitor reload during activation.
+// unverifiable, and remove an expired console-supplied source address.
 export function startHttpsBootstrapMonitor() {
   if (bootstrapMonitorStarted || process.env.RISPRO_HTTPS_PROVISIONED !== "true") return;
   bootstrapMonitorStarted = true;
   setInterval(() => {
-    void (async () => {
-      if (!bootstrapIp()) return;
-      let client: PoolClient;
-      try { client = await lock(); } catch { return; }
-      try {
-        const state = await readState(client);
-        if (!state.active || state.phase === "pending") return;
-        let trusted = false;
-        try { await verifyHttpsGateway(state.active.hostname); trusted = true; } catch { /* recovery remains protected */ }
-        if (!trusted && !bootstrapListenerActive) await loadCaddy(await runtimeConfiguration(state.active, true));
-        else if (trusted && bootstrapListenerActive && state.phase !== "error") await loadCaddy(await runtimeConfiguration(state.active));
-      } finally { await unlock(client); }
-    })().catch(() => console.error("Automatic HTTPS bootstrap monitoring failed; check the private Caddy service."));
+    void reconcileHttpsBootstrap().catch(() => console.error("Automatic HTTPS bootstrap monitoring failed; check the private Caddy service."));
   }, 60_000).unref();
 }

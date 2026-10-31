@@ -2,19 +2,26 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createHash } from "node:crypto";
-import { isIP } from "node:net";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import type { Request, Response, NextFunction } from "express";
 import { HttpError } from "../../utils/http-error.js";
+import { isBootstrapAddress } from "./https-configuration.js";
 
 export function httpsRuntimeDirectory(): string { return process.env.RISPRO_HTTPS_RUNTIME_DIR || "storage/automatic-https"; }
 export function gatewayIdentity(): string { return readFileSync(process.env.RISPRO_HTTPS_GATEWAY_IDENTITY_FILE || "/run/secrets/https_gateway_identity", "utf8").trim(); }
 export function bootstrapIp(): string | null {
   try {
     const value = readFileSync(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE || "/run/secrets/https_bootstrap_ip", "utf8").trim();
-    return isIP(value) === 4 && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(value) ? value : null;
+    return isBootstrapAddress(value) ? value : null;
   } catch { return null; }
+}
+export function bootstrapIpError(): string {
+  try {
+    const value = readFileSync(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE || "/run/secrets/https_bootstrap_ip", "utf8").trim();
+    const reasons: Record<string, string> = { "!route-unavailable": "The server routing table could not be read.", "!no-default-route": "No eligible default route was found.", "!ambiguous-routes": "Multiple default routes have the same lowest metric.", "!ambiguous-addresses": "The default interface has multiple eligible IPv4 addresses.", "!no-unicast-address": "The default interface has no eligible unicast IPv4 address." };
+    return reasons[value] || "The bootstrap IP file is empty or invalid; rerun the supported setup or update.";
+  } catch { return "The bootstrap IP file is unavailable; rerun the supported setup or update."; }
 }
 export function equalSecret(a: string, b: string): boolean {
   const left = Buffer.from(a); const right = Buffer.from(b);

@@ -6,32 +6,38 @@ import { env } from "../../config/env.js";
 import { pool } from "../../db/pool.js";
 import { HttpError } from "../../utils/http-error.js";
 import { logSecurityAuditEntry } from "../../services/audit-service.js";
-import { BOOTSTRAP_COOKIE, bootstrapIp, bootstrapSessionHash, temporaryBootstrapRequest } from "./https-transport.js";
+import { BOOTSTRAP_COOKIE, bootstrapIp, bootstrapIpError, bootstrapSessionHash, temporaryBootstrapRequest } from "./https-transport.js";
 
 const CODE_LIFETIME_MS = 5 * 60_000;
 const digest = (code: string) => createHash("sha256").update(code).digest("hex");
+export class BootstrapError extends Error {}
 
 // Called only by a trusted server-console command after fetching the actual
 // leaf certificate from the private Caddy service. The code itself is never stored.
 export async function issueBootstrapCode(): Promise<{ ip: string; fingerprint: string; code: string }> {
   const ip = bootstrapIp();
-  if (!ip) throw new Error("No unambiguous private bootstrap address is available.");
+  if (!ip) throw new BootstrapError(bootstrapIpError());
   const fingerprint = await new Promise<string>((resolve, reject) => {
     const socket = tls.connect({ host: "caddy", port: 3443, rejectUnauthorized: false }, () => {
       try {
         const peer = socket.getPeerCertificate();
         const certificate = new X509Certificate(peer.raw);
-        if (!certificate.checkIP(ip) || Date.parse(certificate.validFrom) > Date.now() || Date.parse(certificate.validTo) <= Date.now()) throw new Error("Caddy is not serving a current certificate for the expected IP.");
+        if (!certificate.checkIP(ip) || Date.parse(certificate.validFrom) > Date.now() || Date.parse(certificate.validTo) <= Date.now()) throw new BootstrapError("Caddy is not serving a current certificate for the expected IP.");
         resolve(certificate.fingerprint256);
-      } catch (error) { reject(error); } finally { socket.destroy(); }
+      } catch (error) { reject(error instanceof BootstrapError ? error : new BootstrapError("Caddy did not provide a readable bootstrap certificate.")); } finally { socket.destroy(); }
     });
-    socket.setTimeout(5000, () => socket.destroy(new Error("Bootstrap TLS connection timed out.")));
-    socket.on("error", reject);
+    socket.setTimeout(5000, () => socket.destroy(new BootstrapError("The temporary Caddy TLS connection timed out.")));
+    socket.on("error", (error: NodeJS.ErrnoException) => reject(error instanceof BootstrapError ? error : new BootstrapError(
+      error.code === "ECONNREFUSED" ? "The temporary Caddy TLS listener refused the connection." :
+      error.code === "ENOTFOUND" ? "The Caddy service name could not be resolved." :
+      "The temporary Caddy TLS connection failed; check the Caddy service.")));
   });
   const code = randomBytes(8).toString("hex");
-  await pool.query(`insert into system_settings(category, setting_key, setting_value) values('automatic_https','bootstrap_code',$1::jsonb)
-    on conflict(category,setting_key) do update set setting_value=excluded.setting_value,updated_at=now()`,
-  [JSON.stringify({ digest: digest(code), expiresAt: Date.now() + CODE_LIFETIME_MS })]);
+  try {
+    await pool.query(`insert into system_settings(category, setting_key, setting_value) values('automatic_https','bootstrap_code',$1::jsonb)
+      on conflict(category,setting_key) do update set setting_value=excluded.setting_value,updated_at=now()`,
+    [JSON.stringify({ digest: digest(code), expiresAt: Date.now() + CODE_LIFETIME_MS })]);
+  } catch { throw new BootstrapError("The bootstrap authorization code could not be saved to the RISpro database."); }
   return { ip, fingerprint, code };
 }
 

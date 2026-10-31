@@ -4,7 +4,27 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import express from "express";
-import { enforceAutomaticHttps, httpsTransportPolicy, requireHttpsManagementTransport } from "./https-transport.js";
+import { bootstrapIp, bootstrapIpError, enforceAutomaticHttps, httpsTransportPolicy, requireHttpsManagementTransport } from "./https-transport.js";
+
+test("bootstrap address file accepts unicast addresses and reports safe selection failures", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-bootstrap-address-"));
+  const previous = process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE;
+  process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE = path.join(directory, "ip");
+  try {
+    await writeFile(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE, "192.9.101.250");
+    assert.equal(bootstrapIp(), "192.9.101.250");
+    for (const ip of ["0.0.0.0", "127.0.0.1", "169.254.1.2", "224.0.0.1", "255.255.255.255"]) {
+      await writeFile(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE, ip);
+      assert.equal(bootstrapIp(), null, ip);
+    }
+    await writeFile(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE, "!ambiguous-routes");
+    assert.equal(bootstrapIp(), null);
+    assert.match(bootstrapIpError(), /Multiple default routes/);
+  } finally {
+    if (previous === undefined) delete process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE; else process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("only verified transport permits management; HTTP remains available until redirects are explicitly enabled", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-https-transport-"));

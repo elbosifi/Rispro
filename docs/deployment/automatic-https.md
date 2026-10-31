@@ -23,8 +23,24 @@ change the public application URL or external tunnel configuration.
    The existing HTTP settings page also links to the temporary URL, but provider
    credentials must be entered over HTTPS. The temporary listener permits only
    authentication, HTTPS settings and the frontend resources those screens need.
-   Allow port 3443 from the administrator's LAN and restrict it at the host or
-   network firewall elsewhere; Docker forwarding can obscure the original source IP.
+   Restrict TCP port 3443 at the host or network firewall to the specific
+   administrator workstation or other explicitly authorized sources. Docker
+   DNAT or a proxy can change the source address seen by Caddy; its built-in
+   RFC1918 source filter is not a substitute for that firewall restriction.
+   If Caddy sees a workstation source address outside those existing ranges,
+   provide that exact IPv4 address on the trusted server console:
+
+   ```sh
+   bash scripts/https-bootstrap.sh <administrator-workstation-ip>
+   ```
+
+   This adds only that address as a temporary `/32` source, not its subnet.
+   It expires after five minutes and is removed by the running app's periodic
+   check (normally within one additional minute); activation also removes the
+   listener. If the app stops before cleanup, firewall restrictions remain
+   essential. Use the address Caddy actually sees after any NAT or proxy; when
+   it sees a shared Docker gateway, the firewall must distinguish the original
+   clients before translation.
 3. Select the provider, enter its credentials and your hostname, leave
    **Redirect HTTP to HTTPS** unchecked, and select **Save Configuration**.
    Saved credential fields remain blank. A blank token retains the saved token;
@@ -55,8 +71,10 @@ change the public application URL or external tunnel configuration.
    viewer cookies use separate names with `Secure`, preserving HTTP sessions on
    the same hostname during testing.
 
-The address selection uses the private IPv4 address on the unique lowest-metric
-default interface. If routing or addresses are ambiguous, bootstrap fails closed
+The address selection uses a unicast IPv4 address on the unique lowest-metric
+default interface, including locally assigned non-RFC1918 addresses. This does
+not authorize clients from the address's subnet. Loopback, link-local, multicast,
+unspecified addresses and Docker bridge routes are excluded. If routing or addresses are ambiguous, bootstrap fails closed
 instead of choosing an interface. The address is refreshed by the supported setup
 or update scripts; after an address change, rerun the appropriate script before
 using temporary bootstrap. Loopback port 3001 remains available for recovery, but

@@ -98,6 +98,17 @@ app.listen(0,'0.0.0.0',function(){console.log('BOOTSTRAP_TEST_PORT='+this.addres
     await page.evaluate(() => { window.scrollTo(0, 0); document.querySelectorAll("*").forEach((element) => { if (element.scrollTop) element.scrollTop = 0; }); });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.resolve("test-results/https-bootstrap-mobile.png"), fullPage: true });
+    // Exercise the address-selection failure message without changing host networking.
+    await page.route("**/api/settings/https/status", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), bootstrapUrl: null, temporaryBootstrap: false, managementTransportReady: false } });
+    });
+    for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await page.reload();
+      await page.getByText(/unambiguous unicast server IPv4 address/).waitFor();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
   } finally {
     await browser?.close(); appProcess?.kill();
     for (const container of containers.reverse()) spawnSync("docker", ["rm", "-f", container], { encoding: "utf8" });

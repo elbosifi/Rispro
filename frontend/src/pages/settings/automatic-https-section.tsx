@@ -39,7 +39,7 @@ export default function AutomaticHttpsSection({ onReAuthRequired, reauthVersion,
       {data?.bootstrapUrl && !data.temporaryBootstrap ? <p><a className="underline" href={data.bootstrapUrl}>Open temporary HTTPS setup</a></p> : null}
       <p>Enter credentials using trusted HTTPS or the verified temporary HTTPS setup.</p>
       <p>On the trusted server console, run <code>bash scripts/https-bootstrap.sh</code>. Compare its SHA-256 certificate fingerprint with the browser certificate before accepting a temporary browser exception.</p>
-      {!data?.bootstrapUrl && !data?.temporaryBootstrap ? <p>Temporary HTTPS needs an unambiguous private server address. Local recovery remains available at http://localhost:3001.</p> : null}
+      {!data?.bootstrapUrl && !data?.temporaryBootstrap ? <p>Temporary HTTPS needs an unambiguous unicast server IPv4 address. Check the server console for details. Local recovery remains available at http://localhost:3001.</p> : null}
     </div> : null}
     {data?.temporaryBootstrap && !data.managementTransportReady ? <div className="space-y-2">
       <label htmlFor="https-bootstrap-code" className="block text-sm font-medium">Single-use bootstrap authorization code</label>

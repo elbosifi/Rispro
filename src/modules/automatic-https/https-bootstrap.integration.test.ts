@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -14,9 +14,64 @@ import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
 import { settingsRouter } from "../../routes/settings.js";
 import { buildSessionToken, buildSupervisorReauthToken } from "../../services/auth-service.js";
-import { activateHttps, getHttpsSettings, recoverHttpsConfiguration, saveHttpsSettings } from "./https-service.js";
+import { activateHttps, allowBootstrapClient, getHttpsSettings, reconcileHttpsBootstrap, recoverHttpsConfiguration, saveHttpsSettings } from "./https-service.js";
+import { issueBootstrapCode } from "./https-bootstrap.js";
 
 test.after(() => pool.end());
+
+test("console authorizes one source temporarily and expiry or reload failure restores restrictions", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-bootstrap-client-"));
+  const keys = ["RISPRO_HTTPS_PROVISIONED", "RISPRO_HTTPS_GATEWAY_IDENTITY_FILE", "RISPRO_HTTPS_BOOTSTRAP_IP_FILE", "RISPRO_HTTPS_RUNTIME_DIR"];
+  const before = keys.map((key) => process.env[key]);
+  process.env.RISPRO_HTTPS_PROVISIONED = "true"; process.env.RISPRO_HTTPS_RUNTIME_DIR = directory;
+  process.env.RISPRO_HTTPS_GATEWAY_IDENTITY_FILE = path.join(directory, "identity"); process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE = path.join(directory, "ip");
+  await writeFile(path.join(directory, "identity"), "c".repeat(64)); await writeFile(path.join(directory, "ip"), "192.9.101.250");
+  const previous = await pool.query("select * from system_settings where category='automatic_https' and setting_key='configuration'");
+  const applied: string[] = []; let status = 200;
+  const caddyMock = mock.method(http, "request", ((_options: unknown, callback: (response: { statusCode: number; resume: () => void }) => void) => {
+    const request = new EventEmitter();
+    return Object.assign(request, { setTimeout: () => request, end: (body: string) => { applied.push(body); callback({ statusCode: status, resume: () => undefined }); return request; } });
+  }) as unknown as typeof http.request);
+  try {
+    await pool.query("delete from system_settings where category='automatic_https' and setting_key='configuration'");
+    await writeFile(path.join(directory, "ip"), "!ambiguous-routes");
+    await assert.rejects(issueBootstrapCode(), /Multiple default routes have the same lowest metric/);
+    await writeFile(path.join(directory, "ip"), "192.9.101.250");
+    await assert.rejects(allowBootstrapClient("192.9.101.0/24"), /unicast IPv4/);
+    await allowBootstrapClient("192.9.101.42");
+    const clientFile = path.join(directory, "bootstrap-client.json");
+    const entry = JSON.parse(await readFile(clientFile, "utf8"));
+    assert.equal(entry.ip, "192.9.101.42");
+    assert.ok(entry.expiresAt > Date.now() && entry.expiresAt <= Date.now() + 300_000);
+    assert.match(applied.at(-1)!, /192\.9\.101\.42\/32/);
+    status = 500;
+    await assert.rejects(allowBootstrapClient("192.9.101.43"), /reload and restoration failed/);
+    assert.equal(JSON.parse(await readFile(clientFile, "utf8")).ip, "192.9.101.42");
+    status = 200;
+    await reconcileHttpsBootstrap();
+    assert.match(applied.at(-1)!, /192\.9\.101\.42\/32/);
+    assert.doesNotMatch(applied.at(-1)!, /192\.9\.101\.43\/32/);
+    await writeFile(clientFile, JSON.stringify({ ...entry, expiresAt: Date.now() - 1 }));
+    await reconcileHttpsBootstrap();
+    assert.doesNotMatch(applied.at(-1)!, /192\.9\.101\.42\/32/);
+    await assert.rejects(readFile(clientFile));
+    await recoverHttpsConfiguration();
+    assert.doesNotMatch(applied.at(-1)!, /192\.9\.101\.42\/32/);
+    // The console runs in a separate process, so the app may not know it
+    // loaded an address before the entry expired.
+    await writeFile(clientFile, JSON.stringify({ ...entry, expiresAt: Date.now() - 1 }));
+    const reloads = applied.length;
+    await reconcileHttpsBootstrap();
+    assert.equal(applied.length, reloads + 1);
+    assert.doesNotMatch(applied.at(-1)!, /192\.9\.101\.42\/32/);
+  } finally {
+    caddyMock.mock.restore();
+    await pool.query("delete from system_settings where category='automatic_https' and setting_key='configuration'");
+    for (const row of previous.rows) await pool.query("insert into system_settings(category,setting_key,setting_value,updated_by_user_id) values($1,$2,$3::jsonb,$4)", [row.category, row.setting_key, JSON.stringify(row.setting_value), row.updated_by_user_id]);
+    for (let index = 0; index < keys.length; index++) { if (before[index] === undefined) delete process.env[keys[index]]; else process.env[keys[index]] = before[index]; }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("temporary bootstrap requires super-admin reauthentication and an expiring, single-use, rate-limited code", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-bootstrap-auth-"));

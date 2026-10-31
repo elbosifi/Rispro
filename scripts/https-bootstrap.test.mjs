@@ -23,19 +23,58 @@ sed 's/\r$//' /source/scripts/docker-deployment-lib.sh > /tmp/rispro-ip/scripts/
 cp /source/docker/reverse-proxy/https-headers.sh /tmp/rispro-ip/docker/reverse-proxy/https-headers.sh
 cat > /tmp/rispro-ip/mock.cjs <<'EOF'
 const fs = require('node:fs'); const os = require('node:os'); const read = fs.readFileSync;
-os.networkInterfaces = () => ({ eth0: [{ family:'IPv4', internal:false, address:'192.168.8.10' }], eth1: [{ family:'IPv4', internal:false, address:'10.8.0.10' }] });
-fs.readFileSync = function(file,...args) { if (file === '/proc/net/route') return 'Iface Destination Gateway Flags RefCnt Use Metric Mask\neth0 00000000 01000000 0003 0 0 100 00000000\neth1 00000000 01000000 0003 0 0 '+(process.env.BOOTSTRAP_IP_FIXTURE === 'ambiguous' ? '100' : '200')+' 00000000\n'; return read.call(this,file,...args); };
+os.networkInterfaces = () => ({ eth0: [{ family:'IPv4', internal:false, address:process.env.FIXTURE_IP || '192.9.101.250' }], eth1: [{ family:'IPv4', internal:false, address:'10.8.0.10' }] });
+fs.readFileSync = function(file,...args) { if (file === '/proc/net/route') return process.env.BOOTSTRAP_IP_FIXTURE === 'docker' ? 'Iface Destination Gateway Flags RefCnt Use Metric Mask\ndocker0 00000000 01000000 0003 0 0 100 00000000\n' : 'Iface Destination Gateway Flags RefCnt Use Metric Mask\neth0 00000000 01000000 0003 0 0 100 00000000\neth1 00000000 01000000 0003 0 0 '+(process.env.BOOTSTRAP_IP_FIXTURE === 'ambiguous' ? '100' : '200')+' 00000000\n'; return read.call(this,file,...args); };
 EOF
 source /tmp/rispro-ip/scripts/docker-deployment-lib.sh
 export NODE_OPTIONS='--require /tmp/rispro-ip/mock.cjs'
 export BOOTSTRAP_IP_FIXTURE=preferred
 prepare_automatic_https
-[ "$(cat "$PROJECT_ROOT/secrets/https/bootstrap-ip")" = '192.168.8.10' ]
+[ "$(cat "$PROJECT_ROOT/secrets/https/bootstrap-ip")" = '192.9.101.250' ]
 export BOOTSTRAP_IP_FIXTURE=ambiguous
 prepare_automatic_https
-[ ! -s "$PROJECT_ROOT/secrets/https/bootstrap-ip" ]
+[ "$(cat "$PROJECT_ROOT/secrets/https/bootstrap-ip")" = '!ambiguous-routes' ]
+export BOOTSTRAP_IP_FIXTURE=docker
+prepare_automatic_https
+[ "$(cat "$PROJECT_ROOT/secrets/https/bootstrap-ip")" = '!no-default-route' ]
+export BOOTSTRAP_IP_FIXTURE=preferred
+for FIXTURE_IP in 127.0.0.1 169.254.1.1 224.0.0.1 0.0.0.0 255.255.255.255; do
+  export FIXTURE_IP
+  prepare_automatic_https
+  [ "$(cat "$PROJECT_ROOT/secrets/https/bootstrap-ip")" = '!no-unicast-address' ]
+done
 `;
   docker(["run", "--rm", "--network", "none", "--mount", `type=bind,source=${process.cwd()},target=/source,readonly`, "node:22-bookworm-slim", "bash", "-c", script]);
+});
+
+test("Caddy uses the non-RFC1918 server IP and allows only the explicitly authorized client", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "rispro-bootstrap-source-"));
+  const name = `rispro-bootstrap-source-${randomUUID()}`;
+  const gateway = `${name}-gateway`; const caddy = `${name}-caddy`;
+  const subnet = `198.18.${Math.floor(Math.random() * 200 + 20)}`;
+  const identity = "b".repeat(64); const serverIp = "192.9.101.250";
+  const fetchFrom = (ip, spoof = false) => docker(["run", "--rm", "--network", name, "--ip", ip, "node:22-bookworm-slim", "node", "-e", `
+    const https = require('node:https'); const { X509Certificate } = require('node:crypto');
+    let attempts = 0; function run() { const req = https.get({host: '${subnet}.2', port:3443, rejectUnauthorized:false,
+      headers:{host:'${serverIp}:3443'${spoof ? `, 'x-forwarded-for':'${subnet}.3'` : ""}}}, res => {
+      const cert = new X509Certificate(res.socket.getPeerCertificate().raw); res.resume(); res.on('end', () => console.log(JSON.stringify({ status:res.statusCode, ip:cert.checkIP('${serverIp}') })));
+    }); req.on('error', e => { if (++attempts < 40) setTimeout(run, 250); else { console.error(e.message); process.exit(1); } }); } run();
+  `]);
+  try {
+    await writeFile(path.join(directory, "config.json"), JSON.stringify(temporaryBootstrapConfiguration(serverIp, identity, `${subnet}.3`)));
+    docker(["network", "create", "--subnet", `${subnet}.0/24`, name]);
+    docker(["run", "-d", "--name", gateway, "--network", name, "--ip", `${subnet}.5`, "--network-alias", "gateway", "node:22-bookworm-slim", "node", "-e", "require('node:http').createServer((req,res)=>res.end('ok')).listen(8080,'0.0.0.0')"]);
+    docker(["run", "-d", "--name", caddy, "--network", name, "--ip", `${subnet}.2`, "--tmpfs", "/run/rispro-https", "--mount", `type=bind,source=${directory},target=/fixture,readonly`, "--entrypoint", "caddy", "rispro-caddy:https-validation", "run", "--config", "/fixture/config.json"]);
+    assert.deepEqual(JSON.parse(fetchFrom(`${subnet}.3`)), { status: 200, ip: serverIp });
+    assert.deepEqual(JSON.parse(fetchFrom(`${subnet}.4`, true)), { status: 404, ip: serverIp });
+    await writeFile(path.join(directory, "restricted.json"), JSON.stringify(temporaryBootstrapConfiguration(serverIp, identity)));
+    docker(["exec", caddy, "caddy", "reload", "--config", "/fixture/restricted.json", "--address", "unix//run/rispro-https/admin.sock"]);
+    assert.deepEqual(JSON.parse(fetchFrom(`${subnet}.3`)), { status: 404, ip: serverIp });
+  } finally {
+    spawnSync("docker", ["rm", "-f", caddy, gateway], { encoding: "utf8" });
+    spawnSync("docker", ["network", "rm", name], { encoding: "utf8" });
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 function docker(args) {

@@ -109,16 +109,23 @@ export function bootstrapCaddyConfiguration() {
 
 // This isolated listener exposes only the authentication and HTTPS settings
 // paths. The internal certificate is never used as a public-HTTPS fallback.
-export function temporaryBootstrapConfiguration(ip: string, gatewayToken: string) {
-  if (isIP(ip) !== 4 || !/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip) || !/^[a-f0-9]{64}$/.test(gatewayToken)) throw new Error("Invalid HTTPS bootstrap identity.");
+export function isBootstrapAddress(ip: string): boolean {
+  if (isIP(ip) !== 4) return false;
+  const [a, b] = ip.split(".").map(Number);
+  return a !== 0 && a !== 127 && a < 224 && !(a === 169 && b === 254);
+}
+
+export function temporaryBootstrapConfiguration(ip: string, gatewayToken: string, clientIp?: string | null) {
+  if (!isBootstrapAddress(ip) || (clientIp && !isBootstrapAddress(clientIp)) || !/^[a-f0-9]{64}$/.test(gatewayToken)) throw new Error("Invalid HTTPS bootstrap identity.");
+  const sources = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32", ...(clientIp ? [`${clientIp}/32`] : [])];
   return {
     admin: { listen: "unix//run/rispro-https/admin.sock|0600" },
     apps: {
       pki: { certificate_authorities: { local: { install_trust: false } } },
       tls: { certificates: { automate: [ip] }, automation: { policies: [{ subjects: [ip], issuers: [{ module: "internal" }] }] } },
       http: { servers: { bootstrap: { listen: [":3443"], automatic_https: { disable_redirects: true }, tls_connection_policies: [{ default_sni: ip }],
-        routes: [{ match: [{ host: [ip], remote_ip: { ranges: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"] }, path: ["/", "/login", "/settings", "/assets/*", "/favicon.ico", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/auth/re-auth", "/api/settings/https", "/api/settings/https/status", "/api/settings/https/bootstrap-authorize", "/api/settings/https/check-dns", "/api/settings/https/test-connection", "/api/settings/https/activate"] },
-          { host: [ip], remote_ip: { ranges: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"] }, path: ["/api/settings/users-and-roles/page-visibility", "/api/settings/deployment-identity"], method: ["GET"] }],
+        routes: [{ match: [{ host: [ip], remote_ip: { ranges: sources }, path: ["/", "/login", "/settings", "/assets/*", "/favicon.ico", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/auth/re-auth", "/api/settings/https", "/api/settings/https/status", "/api/settings/https/bootstrap-authorize", "/api/settings/https/check-dns", "/api/settings/https/test-connection", "/api/settings/https/activate"] },
+          { host: [ip], remote_ip: { ranges: sources }, path: ["/api/settings/users-and-roles/page-visibility", "/api/settings/deployment-identity"], method: ["GET"] }],
           handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "gateway:8080" }], headers: { request: { set: { "X-Rispro-Https-Gateway": [gatewayToken], "X-Rispro-Temporary-Bootstrap": [gatewayToken] } } } }], terminal: true },
           { handle: [{ handler: "static_response", status_code: 404 }], terminal: true }] } } },
     },
