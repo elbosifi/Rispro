@@ -71,6 +71,28 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
       pixel: window.cornerstone.cache.getImage(volume.getCurrentDimensionGroupImageIds()[0])?.getPixelData()[48 * 96 + 48] };
   });
   const tool = name => page.evaluate(name => { const s = window.services, id = s.viewportGridService.getActiveViewportId(); window.commandsManager.runCommand('setToolActive', { toolName: name, toolGroupId: s.toolGroupService.getToolGroupForViewport(id).id }); }, name);
+  const primary = () => page.evaluate(() => { const s = window.services; return s.toolGroupService.getToolGroupForViewport(s.viewportGridService.getActiveViewportId()).getActivePrimaryMouseButtonTool(); });
+  const roiUID = () => page.getByRole('region', { name: 'MRI enhancement curve' }).getAttribute('data-roi-uid');
+  const roiState = uid => page.evaluate(uid => {
+    const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), tools = window.cornerstoneTools;
+    return { points: tools.annotation.state.getAnnotation(uid)?.data.handles.points, uids: tools.annotation.state.getAnnotations('EllipticalROI', v.element).map(a => a.annotationUID), camera: v.getCamera() };
+  }, uid);
+  const visibleRoi = async uid => {
+    await page.waitForFunction(uid => {
+      if (document.querySelectorAll(`ellipse[data-id="${uid}-ellipse"]`).length !== 1) return false;
+      const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+      const points = window.cornerstoneTools.annotation.state.getAnnotation(uid).data.handles.points.map(p => v.worldToCanvas(p));
+      const [bottom, top, left, right] = points, shape = document.querySelector(`ellipse[data-id="${uid}-ellipse"]`);
+      const expected = { cx: (left[0] + right[0]) / 2, cy: (top[1] + bottom[1]) / 2, rx: Math.hypot(left[0] - right[0], left[1] - right[1]) / 2, ry: Math.hypot(top[0] - bottom[0], top[1] - bottom[1]) / 2 };
+      return Math.max(...Object.entries(expected).map(([key, value]) => Math.abs(Number(shape.getAttribute(key)) - value))) < .5;
+    }, uid);
+  };
+  const drawMouse = async (center, corner) => {
+    const rect = await page.locator('.cornerstone-viewport-element').first().boundingBox();
+    const points = await page.evaluate(({ center, corner }) => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), z = v.getCamera().focalPoint[2]; return [center, corner].map(p => v.worldToCanvas([p[0], p[1], z])); }, { center, corner });
+    await page.mouse.move(rect.x + points[0][0], rect.y + points[0][1]); await page.mouse.down();
+    await page.mouse.move(rect.x + points[1][0], rect.y + points[1][1], { steps: 10 }); await page.mouse.up();
+  };
   try {
     await page.goto(url.href, { waitUntil: 'domcontentloaded' });
     await Promise.race([page.getByRole('button', { name: 'Enhancement Curve', exact: true }).waitFor({ timeout: 120000 }), browserFailure]);
@@ -94,6 +116,11 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await page.evaluate(() => window.services.cineService.setIsCineEnabled(true));
     const cine = page.locator('[data-cy="cine-player-close"]').locator('..').locator('..');
     const slider = cine.getByRole('slider'); await slider.waitFor();
+    const firstPhase = async () => {
+      const track = await slider.locator('..').locator('..').boundingBox();
+      await page.mouse.click(track.x + 2, track.y + track.height / 2);
+      await page.waitForFunction(() => window.cornerstone.cache.getVolumes().some(v => v.isDynamicVolume?.() && v.dimensionGroupNumber === 1));
+    };
     await slider.focus(); await slider.press('Home');
     await page.waitForFunction(() => window.cornerstone.cache.getVolumes().some(v => v.isDynamicVolume?.() && v.dimensionGroupNumber === 1));
     await slider.press('ArrowRight');
@@ -109,6 +136,26 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     const chart = page.locator('.rispro-dynamic-mri svg[data-values]');
     await chart.waitFor({ timeout: 30000 });
     assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [100, 150, 125]);
+    const initialUID = await roiUID(); assert.ok(initialUID); assert.equal(await primary(), 'StackScroll');
+    assert.deepEqual((await roiState(initialUID)).uids, [initialUID]);
+    const originalRoi = await roiState(initialUID);
+    await firstPhase(); await visibleRoi(initialUID);
+    for (const phase of [2, 3]) {
+      await page.mouse.move(box.x + box.width * .15, box.y + box.height * .75); await page.mouse.down();
+      await page.mouse.move(box.x + box.width * .15 + 27, box.y + box.height * .75, { steps: 6 }); await page.mouse.up();
+      assert.equal((await state()).phase, phase); await visibleRoi(initialUID);
+      assert.deepEqual((await roiState(initialUID)).points, originalRoi.points);
+      assert.deepEqual((await roiState(initialUID)).uids, [initialUID]);
+    }
+    const acquisitionPlane = originalRoi.points[0][2];
+    await page.evaluate(z => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), camera = v.getCamera(); v.setCamera({ focalPoint: [camera.focalPoint[0], camera.focalPoint[1], z + 2], position: [camera.position[0], camera.position[1], camera.position[2] + z + 2 - camera.focalPoint[2]] }); v.render(); }, acquisitionPlane);
+    await page.waitForFunction(uid => !document.querySelector(`ellipse[data-id="${uid}-ellipse"]`), initialUID);
+    await page.evaluate(camera => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); v.setCamera(camera); v.render(); }, originalRoi.camera);
+    await visibleRoi(initialUID);
+    await page.evaluate(() => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), camera = v.getCamera(); v.setCamera({ parallelScale: camera.parallelScale * .8, focalPoint: [camera.focalPoint[0] + 3, camera.focalPoint[1] + 2, camera.focalPoint[2]], position: [camera.position[0] + 3, camera.position[1] + 2, camera.position[2]] }); v.render(); });
+    await visibleRoi(initialUID); assert.deepEqual((await roiState(initialUID)).points, originalRoi.points);
+    await page.evaluate(camera => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); v.setCamera(camera); v.render(); }, originalRoi.camera);
+    checks.push('completion selects StackScroll; mouse phase drags retain one native ROI on its plane through phase/zoom/pan changes');
     assert.equal(await page.evaluate(() => {
       const core = window.cornerstone, ds = window.services.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);
       return ds.dynamicVolumeInfo.timePoints.flat().every(id => core.metaData.get('instance', id).RealWorldValueMappingSequence?.[0]?.RealWorldValueSlope === 0.5);
@@ -205,6 +252,95 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await modify(true); await modify(false);
     await page.waitForFunction(() => document.querySelector('.rispro-dynamic-mri svg[data-values]')?.getAttribute('data-values') === '[0,50,25]');
     checks.push('unavailable phase is visibly incomplete, never zero, and recovers via authorized loader');
+    // Ownership is established only by the explicit curve drawing action.
+    const originalUID = await roiUID(), oldCount = await page.getByTestId('roi-summary').innerText();
+    const beforeOrdinary = (await roiState(originalUID)).uids;
+    await tool('EllipticalROI'); await drawMouse([72, 22], [75, 25]);
+    const ordinaryUID = (await roiState(originalUID)).uids.find(uid => !beforeOrdinary.includes(uid));
+    assert.ok(ordinaryUID); assert.equal(await roiUID(), originalUID); assert.equal(await primary(), 'EllipticalROI');
+    const ordinaryPoints = (await roiState(ordinaryUID)).points;
+    await tool('StackScroll'); checks.push('normal toolbar ROI remains independent of curve selection and tool restoration');
+    await page.getByRole('button', { name: 'Replace ROI', exact: true }).click();
+    assert.ok((await roiState(originalUID)).points); await drawMouse([60, 60], [65, 65]);
+    await page.waitForFunction(previous => { const uid = document.querySelector('[aria-label="MRI enhancement curve"]')?.getAttribute('data-roi-uid'); return uid && uid !== previous; }, originalUID);
+    const replacementUID = await roiUID(); assert.equal(await primary(), 'StackScroll');
+    const replaced = await roiState(replacementUID);
+    assert.deepEqual(replaced.uids.sort(), [replacementUID, ordinaryUID].sort());
+    assert.notEqual(await page.getByTestId('roi-summary').innerText(), oldCount);
+    assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [0, 50, 25]);
+    checks.push('validated replacement removes only the previous curve-owned UID and updates measurements');
+    await page.getByRole('button', { name: 'Replace ROI', exact: true }).click();
+    const cancelRect = await element.boundingBox();
+    await page.mouse.move(cancelRect.x + cancelRect.width * .2, cancelRect.y + cancelRect.height * .7); await page.mouse.down();
+    await page.mouse.move(cancelRect.x + cancelRect.width * .2 + 12, cancelRect.y + cancelRect.height * .7 + 12, { steps: 3 });
+    await page.keyboard.press('Escape'); await page.mouse.up();
+    assert.equal(await roiUID(), replacementUID); assert.deepEqual((await roiState(replacementUID)).uids.sort(), [replacementUID, ordinaryUID].sort());
+    assert.equal(await primary(), 'StackScroll'); checks.push('Escape cancels an unfinished replacement without deleting the original or unrelated ROI');
+    await page.getByRole('button', { name: 'Replace ROI', exact: true }).click();
+    const invalidPoints = await page.evaluate(() => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), z = v.getCamera().focalPoint[2]; return [[25, 65, z], [30, 70, z]].map(p => v.worldToCanvas(p)); });
+    await page.mouse.move(cancelRect.x + invalidPoints[0][0], cancelRect.y + invalidPoints[0][1]); await page.mouse.down();
+    await page.mouse.move(cancelRect.x + invalidPoints[1][0], cancelRect.y + invalidPoints[1][1], { steps: 6 });
+    await page.evaluate(existing => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); const candidate = window.cornerstoneTools.annotation.state.getAnnotations('EllipticalROI', v.element).find(a => !existing.includes(a.annotationUID)); candidate.data.handles.points[0][2] += 1; }, [replacementUID, ordinaryUID]);
+    await page.mouse.up(); await page.getByRole('status').filter({ hasText: 'Original ROI retained' }).waitFor();
+    assert.equal(await roiUID(), replacementUID); assert.deepEqual((await roiState(replacementUID)).uids.sort(), [replacementUID, ordinaryUID].sort());
+    checks.push('invalid replacement retains the original geometry and curve');
+    await page.getByRole('button', { name: 'Close enhancement curve' }).click();
+    await page.getByRole('button', { name: 'Enhancement Curve', exact: true }).click();
+    await chart.waitFor(); assert.equal(await roiUID(), replacementUID);
+    assert.deepEqual((await roiState(replacementUID)).uids.sort(), [replacementUID, ordinaryUID].sort());
+    checks.push('close and reopen reuse the same curve ROI without duplication');
+    const touch = await context.newCDPSession(page);
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await page.evaluate(() => {
+      window.__curveTouchEvents = [];
+      document.addEventListener('touchmove', event => window.__curveTouchEvents.push({ trusted: event.isTrusted, fingers: event.touches.length, target: event.target.className }), true);
+      document.addEventListener('CORNERSTONE_TOOLS_TOUCH_DRAG', event => window.__curveTouchEvents.push({ canvas: event.detail.currentPoints.canvas, start: event.detail.startPoints.canvas, fingers: event.detail.event.touches.length, interacting: window.cornerstoneTools.state.isInteractingWithTool }), true);
+    });
+    const swipe = async (x, y, dx, dy, fingers = 1) => {
+      const points = (deltaX, deltaY) => Array.from({ length: fingers }, (_, i) => ({ x: x + deltaX + i * 40, y: y + deltaY, id: i + 1, radiusX: 1, radiusY: 1, force: 1 }));
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(0, 0) });
+      for (let i = 1; i <= 8; i++) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(dx * i / 8, dy * i / 8) });
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    const navigationRect = await element.boundingBox(), navX = navigationRect.x + navigationRect.width * .12, navY = navigationRect.y + navigationRect.height * .75;
+    await firstPhase();
+    const touchCamera = (await state()).camera, touchPoints = (await roiState(replacementUID)).points;
+    for (const phase of [2, 3]) { await swipe(navX, navY, 27, 0); assert.equal((await state()).phase, phase); await visibleRoi(replacementUID); }
+    assert.deepEqual((await roiState(replacementUID)).points, touchPoints); assert.deepEqual((await state()).camera, touchCamera);
+    assert.deepEqual((await roiState(replacementUID)).uids.sort(), [replacementUID, ordinaryUID].sort());
+    await swipe(navX, navY - 250, 0, 220); assert.equal((await state()).phase, 3); assert.notDeepEqual((await state()).position, touchCamera.focalPoint);
+    await page.waitForFunction(uid => !document.querySelector(`ellipse[data-id="${uid}-ellipse"]`), replacementUID);
+    await page.evaluate(camera => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); v.setCamera(camera); v.render(); }, touchCamera);
+    await visibleRoi(replacementUID);
+    const pinchBefore = (await state()).camera;
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: navX, y: navY, id: 1 }, { x: navX + 80, y: navY, id: 2 }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: navX - 20, y: navY, id: 1 }, { x: navX + 100, y: navY, id: 2 }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    assert.equal((await state()).phase, 3); assert.notEqual((await state()).camera.parallelScale, pinchBefore.parallelScale);
+    await visibleRoi(replacementUID); assert.deepEqual((await roiState(replacementUID)).points, touchPoints);
+    assert.equal(await page.evaluate(() => window.__curveTouchEvents.some(event => event.trusted && event.fingers === 1)), true);
+    checks.push('trusted single-finger touch changes phases/slices without drawing; two-finger zoom retains native behavior');
+    await page.getByRole('button', { name: 'Delete ROI', exact: true }).focus(); await page.keyboard.press('Enter');
+    assert.equal(await roiUID(), null); assert.equal(await chart.count(), 0);
+    assert.deepEqual((await roiState(ordinaryUID)).uids, [ordinaryUID]); assert.deepEqual((await roiState(ordinaryUID)).points, ordinaryPoints);
+    await page.getByRole('button', { name: 'Draw ROI', exact: true }).waitFor();
+    checks.push('keyboard/desktop deletion clears owned ROI, measurements and baseline while preserving ordinary annotations');
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.getByRole('button', { name: 'Draw ROI', exact: true }).click();
+    const touchDrawRect = await element.boundingBox();
+    const touchDrawPoints = await page.evaluate(() => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), z = v.getCamera().focalPoint[2]; return [[30, 50, z], [35, 55, z]].map(p => v.worldToCanvas(p)); });
+    await swipe(touchDrawRect.x + touchDrawPoints[0][0], touchDrawRect.y + touchDrawPoints[0][1], touchDrawPoints[1][0] - touchDrawPoints[0][0], touchDrawPoints[1][1] - touchDrawPoints[0][1]);
+    await chart.waitFor(); assert.equal(await primary(), 'StackScroll');
+    const mobileUID = await roiUID(); assert.ok(mobileUID); await visibleRoi(mobileUID);
+    const deleteButton = await page.getByRole('button', { name: 'Delete ROI', exact: true }).boundingBox();
+    assert.ok(deleteButton.width >= 44 && deleteButton.height >= 44);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: deleteButton.x + deleteButton.width / 2, y: deleteButton.y + deleteButton.height / 2, id: 1 }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => !document.querySelector('[aria-label="MRI enhancement curve"]')?.getAttribute('data-roi-uid'));
+    assert.equal(await chart.count(), 0); assert.deepEqual((await roiState(ordinaryUID)).uids, [ordinaryUID]);
+    assert.deepEqual((await roiState(ordinaryUID)).points, ordinaryPoints);
+    checks.push('real touch drawing returns to StackScroll and a 44px touch Delete button removes only the curve ROI');
+    await touch.detach();
     await page.screenshot({ path: join(temp, 'dynamic-mri-desktop.png') });
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.screenshot({ path: join(temp, 'dynamic-mri-ipad.png') });
@@ -239,7 +375,10 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     checks.push('FAIL: ' + error.message); save();
     writeFileSync(join(temp, 'dynamic-mri-state.json'), JSON.stringify(await page.evaluate(() => {
       const s = window.services, core = window.cornerstone;
-      return { displaySets: s?.displaySetService.getActiveDisplaySets().map(ds => ({ uid: ds.displaySetInstanceUID, series: ds.SeriesInstanceUID, dynamic: ds.isDynamicVolume, reconstructable: ds.isReconstructable, info: ds.dynamicVolumeInfo })),
+      const v = s?.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), group = s?.toolGroupService.getToolGroupForViewport(v?.id);
+      return { touchEvents: window.__curveTouchEvents, toolOptions: group?.toolOptions, toolState: { interacting: window.cornerstoneTools?.state.isInteractingWithTool, multipart: window.cornerstoneTools?.state.isMultiPartToolActive }, camera: v?.getCamera(), touchAction: v && getComputedStyle(v.element).touchAction,
+        annotations: v && window.cornerstoneTools.annotation.state.getAnnotations('EllipticalROI', v.element).map(a => ({ uid: a.annotationUID, points: a.data.handles.points })),
+        displaySets: s?.displaySetService.getActiveDisplaySets().map(ds => ({ uid: ds.displaySetInstanceUID, series: ds.SeriesInstanceUID, dynamic: ds.isDynamicVolume, reconstructable: ds.isReconstructable, info: ds.dynamicVolumeInfo })),
         volumes: core?.cache.getVolumes().map(v => ({ id: v.volumeId, loaded: v.loadStatus, phase: v.dimensionGroupNumber, groups: v.numDimensionGroups, imageIds: v.imageIds.length })) };
     }).catch(() => null), null, 2));
     await page.screenshot({ path: join(temp, 'dynamic-mri-failure.png') }).catch(() => {});

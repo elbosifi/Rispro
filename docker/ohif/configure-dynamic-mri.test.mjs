@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { temporalContext, roiPlane, meanSignal, sampleCurve, curveStatus, curveValues, timeAxis } from './dynamic-mri/analysis.mjs';
-import { installPhaseNavigation } from './dynamic-mri/navigation.mjs';
+import { installPhaseNavigation, curveRoiOnPlane, installCurveRoiVisibility } from './dynamic-mri/navigation.mjs';
 const require = createRequire(import.meta.url);
 
 test('dynamic diagnostic readiness uses loaded voxels without requesting unsupported scalarData', () => {
@@ -173,6 +173,45 @@ test('gesture threshold, direction lock, clamping, tool ownership and cleanup pr
   const wheel = (dx, dy, ctrlKey = false) => { const event = new Event('wheel', { cancelable: true }); Object.assign(event, { deltaX: dx, deltaY: dy, deltaMode: 0, ctrlKey }); element.dispatchEvent(event); return event.defaultPrevented; };
   assert.equal(wheel(0, 50), false); assert.equal(wheel(-25, 0, true), false); assert.equal(wheel(-25, 0), true); assert.equal(volume.dimensionGroupNumber, 2);
   cleanup(); assert.equal(tool.mouseDragCallback, original); assert.equal(wheel(25, 0), false);
+});
+
+test('single-finger touch shares phase lock; vertical and multitouch callbacks remain native and both callbacks restore', () => {
+  const window = new EventTarget(), element = new EventTarget(); element.ownerDocument = { defaultView: window };
+  const calls = [], tool = { mouseDragCallback: () => calls.push('mouse'), touchDragCallback: event => calls.push(event.detail.deltaPoints.canvas) };
+  const mouse = tool.mouseDragCallback, touch = tool.touchDragCallback;
+  const volume = { dimensionGroupNumber: 1, numDimensionGroups: 3 }; let primary = 'StackScroll', editing = false;
+  const cleanup = installPhaseNavigation({ element, viewportId: 'v', volume, toolGroup: { getToolInstance: () => tool, getActivePrimaryMouseButtonTool: () => primary }, interacting: () => editing });
+  const drag = (x, y, fingers = 1) => tool.touchDragCallback({ detail: { viewportId: 'v', event: { touches: new Array(fingers) }, startPoints: { canvas: [0, 0] }, currentPoints: { canvas: [x, y] }, deltaPoints: { canvas: [x, y] } } });
+  drag(7, 0); assert.equal(volume.dimensionGroupNumber, 1);
+  drag(26, 1); assert.equal(volume.dimensionGroupNumber, 2); assert.equal(calls.length, 0);
+  window.dispatchEvent(new Event('touchend')); drag(-26, 0); assert.equal(volume.dimensionGroupNumber, 1);
+  window.dispatchEvent(new Event('touchend')); drag(0, 40); assert.deepEqual(calls.at(-1), [0, 40]);
+  drag(100, 0, 2); drag(100, 0, 3); assert.equal(volume.dimensionGroupNumber, 1); assert.equal(calls.length, 3);
+  primary = 'EllipticalROI'; drag(50, 0); assert.equal(volume.dimensionGroupNumber, 1);
+  primary = 'StackScroll'; editing = true; drag(50, 0); assert.equal(volume.dimensionGroupNumber, 1);
+  cleanup(); assert.equal(tool.mouseDragCallback, mouse); assert.equal(tool.touchDragCallback, touch);
+});
+
+test('one native ROI stays on its anatomical plane across phases and leaves unrelated native annotations alone', () => {
+  const f = fixture(), context = f.context(), originalPoints = structuredClone(f.annotation.data.handles.points);
+  f.annotation.annotationUID = 'owned'; f.annotation.isVisible = true;
+  let id = f.groups[0][1], focal = [5, 10, 3];
+  const viewport = { getCurrentImageId: () => id, getCamera: () => ({ focalPoint: focal, viewPlaneNormal: [0, 0, 1] }) };
+  for (let phase = 1; phase <= 3; phase++) {
+    f.volume.dimensionGroupNumber = phase; id = f.groups[phase - 1].find(id => f.metadata[id].ImagePositionPatient[2] === 3);
+    assert.equal(curveRoiOnPlane(context, f.annotation, viewport), true);
+  }
+  focal = [20, -30, 3]; assert.equal(curveRoiOnPlane(context, f.annotation, viewport), true);
+  const other = { annotationUID: 'ordinary' }, element = {};
+  const tool = { filterInteractableAnnotationsForElement: (_, list) => list.filter(annotation => annotation === other) }, original = tool.filterInteractableAnnotationsForElement;
+  const stop = installCurveRoiVisibility({ element, toolGroup: { getToolInstance: () => tool }, context, getViewport: () => viewport, getSelected: () => f.annotation });
+  assert.deepEqual(tool.filterInteractableAnnotationsForElement(element, [other, f.annotation]), [other, f.annotation]);
+  focal = [5, 10, 0]; id = f.groups[2][0];
+  assert.equal(curveRoiOnPlane(context, f.annotation, viewport), false);
+  assert.deepEqual(tool.filterInteractableAnnotationsForElement(element, [other, f.annotation]), [other]);
+  assert.deepEqual(tool.filterInteractableAnnotationsForElement({}, [other, f.annotation]), [other]);
+  assert.deepEqual(f.annotation.data.handles.points, originalPoints); assert.equal(f.annotation.annotationUID, 'owned');
+  stop(); assert.equal(tool.filterInteractableAnnotationsForElement, original);
 });
 
 test('guarded pinned viewport patch copies helpers and fails on upstream drift', () => {

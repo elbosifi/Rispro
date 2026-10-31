@@ -2,4 +2,6 @@
 .rispro-dynamic-mri section { max-height: calc(100vh - 280px); overflow: auto; }
 .rispro-dynamic-mri svg { width: 100%; max-height: 180px; }
 .rispro-dynamic-mri svg text { fill: currentColor; font-size: 10px; }
+.rispro-dynamic-mri .rispro-roi-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .5rem; }
+.rispro-dynamic-mri .rispro-roi-action { min-width: 44px; min-height: 44px; }
 @media (max-width: 768px) { .rispro-dynamic-mri { top: 2.75rem; right: .5rem; max-width: min(310px, calc(100% - 1rem)); } }
