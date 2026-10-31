@@ -2,6 +2,7 @@ import { readAuthoritativeOrthancSettings } from "../../services/authoritative-o
 import { Readable } from "node:stream";
 import { Router, type Request, type Response } from "express";
 import { env } from "../../config/env.js";
+import { httpsCookieName } from "../automatic-https/https-transport.js";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../../middleware/auth.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -130,7 +131,7 @@ ohifDicomWebProxyRouter.get(
         userId: current.sub,
         appRole: current.role,
         contextId: contextMatch?.[1],
-        launchToken: String(req.cookies?.[env.ohifSessionCookieName] || ""),
+        launchToken: String(req.cookies?.[httpsCookieName(env.ohifSessionCookieName, req)] || ""),
         relativePathWithQuery: contextMatch?.[2] ?? req.url,
         headers: { accept: String(req.headers.accept || ""), range: String(req.headers.range || "") },
         signal: controller.signal,

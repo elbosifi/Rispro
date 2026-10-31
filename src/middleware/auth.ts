@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { httpsCookieName } from "../modules/automatic-https/https-transport.js";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
@@ -21,11 +22,11 @@ function parseRole(value: unknown): Role {
 }
 
 export function readToken(req: AuthRequest): string {
-  return req.cookies?.[env.cookieName] ?? "";
+  return req.cookies?.[httpsCookieName(env.cookieName, req)] ?? "";
 }
 
 export function readSupervisorReauthToken(req: AuthRequest): string {
-  return req.cookies?.[env.reauthCookieName] ?? "";
+  return req.cookies?.[httpsCookieName(env.reauthCookieName, req)] ?? "";
 }
 
 function parseAuthVersion(value: unknown): number {

@@ -30,6 +30,7 @@ main() {
   print_header
   check_prerequisites
   load_existing_config
+  log 'Automatic HTTPS is provisioned with the stack; configure its managed ACME-DNS account in Settings.'
 
   if [ -f "${ENV_FILE}" ]; then
     warn ".env already exists at ${ENV_FILE}"

@@ -209,6 +209,7 @@ extract_db_url_name() {
 }
 
 load_existing_config() {
+  CURRENT_COOKIE_SECURE="$(read_env_value COOKIE_SECURE)"
   CURRENT_DB_MODE="$(normalize_db_mode "$(read_env_value RISPRO_DB_MODE)")"
   CURRENT_DICOM_MODE="$(normalize_dicom_mode "$(read_env_value RISPRO_DICOM_MODE)")"
   CURRENT_MPPS_MODE="$(normalize_mpps_mode "$(read_env_value RISPRO_MPPS_MODE)")"
@@ -322,7 +323,7 @@ hydrate_deployment_config_from_current_env() {
   PORT="3000"
   TRUST_PROXY="1"
   COOKIE_NAME="rispro_session"
-  COOKIE_SECURE="false"
+  COOKIE_SECURE="${CURRENT_COOKIE_SECURE:-false}"
   COOKIE_SAME_SITE="lax"
   SESSION_HOURS="8"
   SUPERVISOR_REAUTH_MINUTES="10"
@@ -482,7 +483,7 @@ collect_deployment_config() {
   PORT="3000"
   TRUST_PROXY="1"
   COOKIE_NAME="rispro_session"
-  COOKIE_SECURE="false"
+  COOKIE_SECURE="${CURRENT_COOKIE_SECURE:-false}"
   COOKIE_SAME_SITE="lax"
   SESSION_HOURS="8"
   SUPERVISOR_REAUTH_MINUTES="10"
@@ -1117,8 +1118,8 @@ recreate_internal_orthanc_if_changed() {
 }
 
 build_and_start_services() {
-  local build_services=(app)
-  local runtime_services=(app request-scan-worker gateway)
+  local build_services=(app caddy)
+  local runtime_services=(app request-scan-worker gateway caddy)
   if [ "${OHIF_COMPOSE_PROFILES:-}" = ohif ]; then
     build_services+=(ohif)
     runtime_services+=(ohif)
@@ -1195,7 +1196,36 @@ build_compose_args() {
     COMPOSE_FILES+=(-f docker-compose.mpps-bridge.yml)
   fi
   COMPOSE_FILES+=(-f docker-compose.ohif-native.yml)
+  COMPOSE_FILES+=(-f docker-compose.https.yml)
 }
+
+prepare_automatic_https() (
+  # Never rotate an existing runtime encryption key or gateway identity.
+  umask 077
+  local directory="${PROJECT_ROOT}/secrets/https"
+  mkdir -p "$directory"
+  chmod 700 "$directory"
+  HTTPS_SECRET_DIRECTORY="$directory" EXISTING_RUNTIME_KEY="$(read_env_value RISPRO_SECRET_ENCRYPTION_KEY)" node <<'EOF_HTTPS' || return 1
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const directory = process.env.HTTPS_SECRET_DIRECTORY;
+const keyPath = path.join(directory, 'runtime-secret-key');
+const existing = (process.env.EXISTING_RUNTIME_KEY || '').replace(/\s+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+const current = fs.existsSync(keyPath) ? fs.readFileSync(keyPath, 'utf8').trim() : '';
+const key = current || existing || crypto.randomBytes(32).toString('base64');
+if (Buffer.from(key, 'base64').length !== 32 || Buffer.from(key, 'base64').toString('base64') !== key) throw new Error('The existing runtime encryption key is invalid; it was not changed.');
+if (current && existing && current !== existing) throw new Error('Runtime encryption keys conflict; neither existing key was changed.');
+if (!fs.existsSync(keyPath)) fs.writeFileSync(keyPath, key, { flag: 'wx', mode: 0o600 });
+else if (!current) throw new Error('The existing runtime encryption key file is empty; it was not replaced.');
+const tokenPath = path.join(directory, 'gateway-identity');
+if (!fs.existsSync(tokenPath)) fs.writeFileSync(tokenPath, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(tokenPath, 'utf8').trim())) throw new Error('The existing HTTPS gateway identity is invalid; it was not changed.');
+fs.chmodSync(keyPath, 0o600);
+fs.chmodSync(tokenPath, 0o600);
+EOF_HTTPS
+  chmod 755 "${PROJECT_ROOT}/docker/reverse-proxy/https-headers.sh"
+)
 
 prepare_qz_printing() {
   local trust_mode="${QZ_TRUST_MODE:-${CURRENT_QZ_TRUST_MODE:-internal_ca}}"
@@ -1230,7 +1260,7 @@ prepare_ohif_public_config() {
 
 verify_ohif_readiness() {
   if [ "${OHIF_COMPOSE_PROFILES:-}" = ohif ]; then
-    local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+    local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3001/api/health}"
     node "${PROJECT_ROOT}/scripts/verify-ohif-app-config.mjs" "${base_url%/api/health}/ohif/app-config.js"
   fi
 }
@@ -1239,6 +1269,7 @@ run_compose_preflight() {
   log "Running deployment preflight validation..."
   mkdir -p "${SANTE_HL7_HOST_OUTBOX_DIR}"
   preflight_validate_env
+  prepare_automatic_https
   prepare_qz_printing
   write_env_file
   render_db_backup_access_config
@@ -1251,7 +1282,7 @@ run_compose_preflight() {
 }
 
 verify_qz_bootstrap_readiness() {
-  local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+  local base_url="${APP_HEALTH_URL:-http://127.0.0.1:3001/api/health}"
   local manifest_url="${QZ_BOOTSTRAP_MANIFEST_URL:-${base_url%/api/health}/api/public/printing-bootstrap/manifest}"
   local response
   response="$(curl --fail --silent --show-error "$manifest_url")" || { err "QZ bootstrap manifest is unreachable: ${manifest_url}"; return 1; }
@@ -1299,7 +1330,7 @@ wait_for_app_health() {
   local attempts="${APP_HEALTH_ATTEMPTS:-45}"
   local interval="${APP_HEALTH_INTERVAL_SECONDS:-2}"
   local attempt=1
-  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 
   log "Checking application health at ${health_url} (timeout $((attempts * interval))s, container rispro-app)..."
   while [ "$attempt" -le "$attempts" ]; do
@@ -1317,7 +1348,7 @@ wait_for_app_health() {
 
 verify_app_build_sha() {
   local expected_sha="${EXPECTED_SHA:-}"
-  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+  local health_url="${APP_HEALTH_URL:-http://127.0.0.1:3001/api/health}"
   local health_json
 
   if [[ ! "$expected_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then

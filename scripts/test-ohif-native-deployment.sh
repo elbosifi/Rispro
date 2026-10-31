@@ -73,6 +73,7 @@ EOF_ENV
         if [ "$dicom" = orthanc_internal ]; then expected+=(-f docker-compose.orthanc-internal.yml); fi
         if [ "$mpps" = internal_bridge ]; then expected+=(-f docker-compose.mpps-bridge.yml); fi
         expected+=(-f docker-compose.ohif-native.yml)
+        expected+=(-f docker-compose.https.yml)
         [ "${COMPOSE_FILES[*]}" = "${expected[*]}" ] || fail 'An existing deployment override was lost or reordered'
         # Real Compose merge/interpolation only: no build/up/exec, sockets, DB,
         # archive requests or production service access occurs in this test.

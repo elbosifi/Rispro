@@ -8,6 +8,7 @@ import type { Role } from "../types/domain.js";
 import type { UserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
 import { normalizeUsername } from "../utils/credentials.js";
+import { httpsCookieName, trustedHttpsRequest, type HttpsTransportRequest } from "../modules/automatic-https/https-transport.js";
 
 interface AuthUserRow {
   id: UserId;
@@ -22,14 +23,16 @@ interface AuthUserRow {
 }
 
 interface CookieResponse {
+  req?: HttpsTransportRequest;
   cookie: (name: string, value: string, options: object) => void;
 }
 
 interface ClearCookieResponse {
+  req?: HttpsTransportRequest;
   clearCookie: (name: string, options: object) => void;
 }
 
-interface CookieRequest {
+interface CookieRequest extends HttpsTransportRequest {
   cookies?: Record<string, string | undefined>;
 }
 
@@ -130,7 +133,7 @@ export function buildSupervisorReauthToken(user: Pick<AuthUserRow, "id" | "usern
   );
 }
 
-function sessionCookieOptions(): {
+function sessionCookieOptions(req?: HttpsTransportRequest): {
   httpOnly: boolean;
   sameSite: "lax" | "strict" | "none";
   secure: boolean;
@@ -140,13 +143,13 @@ function sessionCookieOptions(): {
   return {
     httpOnly: true,
     sameSite: env.cookieSameSite,
-    secure: env.cookieSecure,
+    secure: env.cookieSecure || Boolean(req && trustedHttpsRequest(req)),
     maxAge: env.sessionHours * 60 * 60 * 1000,
     path: "/"
   };
 }
 
-function reauthCookieOptions(): {
+function reauthCookieOptions(req?: HttpsTransportRequest): {
   httpOnly: boolean;
   sameSite: "lax" | "strict" | "none";
   secure: boolean;
@@ -156,13 +159,13 @@ function reauthCookieOptions(): {
   return {
     httpOnly: true,
     sameSite: env.cookieSameSite,
-    secure: env.cookieSecure,
+    secure: env.cookieSecure || Boolean(req && trustedHttpsRequest(req)),
     maxAge: env.supervisorReauthMinutes * 60 * 1000,
     path: "/"
   };
 }
 
-function passkeyChallengeCookieOptions(): {
+function passkeyChallengeCookieOptions(req?: HttpsTransportRequest): {
   httpOnly: boolean;
   sameSite: "lax" | "strict" | "none";
   secure: boolean;
@@ -172,38 +175,38 @@ function passkeyChallengeCookieOptions(): {
   return {
     httpOnly: true,
     sameSite: env.cookieSameSite,
-    secure: env.cookieSecure,
+    secure: env.cookieSecure || Boolean(req && trustedHttpsRequest(req)),
     maxAge: PASSKEY_CHALLENGE_TTL_SECONDS * 1000,
     path: "/"
   };
 }
 
 export function writeSessionCookie(res: CookieResponse, token: string): void {
-  res.cookie(env.cookieName, token, sessionCookieOptions());
+  res.cookie(httpsCookieName(env.cookieName, res.req), token, sessionCookieOptions(res.req));
 }
 
 export function writeSupervisorReauthCookie(res: CookieResponse, token: string): void {
-  res.cookie(env.reauthCookieName, token, reauthCookieOptions());
+  res.cookie(httpsCookieName(env.reauthCookieName, res.req), token, reauthCookieOptions(res.req));
 }
 
 export function clearSessionCookie(res: ClearCookieResponse): void {
-  res.clearCookie(env.cookieName, sessionCookieOptions());
+  res.clearCookie(httpsCookieName(env.cookieName, res.req), sessionCookieOptions(res.req));
 }
 
 export function clearSupervisorReauthCookie(res: ClearCookieResponse): void {
-  res.clearCookie(env.reauthCookieName, reauthCookieOptions());
+  res.clearCookie(httpsCookieName(env.reauthCookieName, res.req), reauthCookieOptions(res.req));
 }
 
 export function writePasskeyChallengeCookie(res: CookieResponse, challenge: PasskeyChallengeSession): void {
   const token = jwt.sign({ purpose: "passkey-challenge", ...challenge }, env.jwtSecret, {
     expiresIn: PASSKEY_CHALLENGE_TTL_SECONDS
   });
-  res.cookie(PASSKEY_CHALLENGE_COOKIE_NAME, token, passkeyChallengeCookieOptions());
+  res.cookie(httpsCookieName(PASSKEY_CHALLENGE_COOKIE_NAME, res.req), token, passkeyChallengeCookieOptions(res.req));
 }
 
 export function readPasskeyChallengeCookie(req: CookieRequest): PasskeyChallengeSession | null {
   try {
-    const token = req.cookies?.[PASSKEY_CHALLENGE_COOKIE_NAME];
+    const token = req.cookies?.[httpsCookieName(PASSKEY_CHALLENGE_COOKIE_NAME, req)];
     if (!token) return null;
     const payload = jwt.verify(token, env.jwtSecret) as Record<string, unknown>;
     if (
@@ -224,5 +227,5 @@ export function readPasskeyChallengeCookie(req: CookieRequest): PasskeyChallenge
 }
 
 export function clearPasskeyChallengeCookie(res: ClearCookieResponse): void {
-  res.clearCookie(PASSKEY_CHALLENGE_COOKIE_NAME, passkeyChallengeCookieOptions());
+  res.clearCookie(httpsCookieName(PASSKEY_CHALLENGE_COOKIE_NAME, res.req), passkeyChallengeCookieOptions(res.req));
 }

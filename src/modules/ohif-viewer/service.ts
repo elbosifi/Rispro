@@ -1,5 +1,6 @@
 import type { Response as ExpressResponse } from "express";
 import { env } from "../../config/env.js";
+import { httpsCookieName, trustedHttpsRequest } from "../automatic-https/https-transport.js";
 import { pool } from "../../db/pool.js";
 import { logAuditEntry } from "../../services/audit-service.js";
 import { recordDiagnosticEvent } from "../../services/system-diagnostics-service.js";
@@ -369,8 +370,8 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
   const viewerSessionExpiresAt = new Date(Date.now() + env.sessionHours * 60 * 60 * 1000);
   const session = await consumeViewerLaunchToken(launchTokenHash, userId, viewerSession.tokenHash, viewerSessionExpiresAt);
   if (!session) throw new HttpError(404, "Viewer launch session is invalid or expired.");
-  response.cookie(env.ohifSessionCookieName, viewerSession.token, {
-    httpOnly: true, secure: env.cookieSecure, sameSite: env.cookieSameSite, path: env.ohifDicomWebProxyPath,
+  response.cookie(httpsCookieName(env.ohifSessionCookieName, response.req), viewerSession.token, {
+    httpOnly: true, secure: env.cookieSecure || Boolean(response.req && trustedHttpsRequest(response.req)), sameSite: env.cookieSameSite, path: env.ohifDicomWebProxyPath,
     expires: new Date(session.expiresAt),
   });
   const configuration = await readOhifViewerConfiguration();

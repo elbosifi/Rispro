@@ -132,6 +132,7 @@ should_reconfigure() {
 
 deploy_checked_out_commit() {
   load_existing_config
+  log 'Retaining HTTPS settings and certificate volumes; provisioning Caddy through the standard overlay.'
 
   if should_reconfigure "$@"; then
     warn 'Reconfigure mode enabled. Prompting for deployment settings.'

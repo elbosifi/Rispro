@@ -4,6 +4,7 @@ import { Loader2, Save } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { fetchDeploymentIdentitySettings, saveDeploymentIdentitySettings } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
+import AutomaticHttpsSection from "./automatic-https-section";
 
 function browserOrigin(): string {
   if (typeof window === "undefined") return "";
@@ -66,6 +67,7 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
       </button>
       {mutation.isSuccess ? <p className="text-sm text-emerald-700">{text.saved}</p> : null}
       {mutation.error && !reauthError ? <p className="text-sm text-rose-700">{mutation.error instanceof Error ? mutation.error.message : "Could not save the setting."}</p> : null}
+      <AutomaticHttpsSection onReAuthRequired={onReAuthRequired} reauthVersion={reauthVersion} />
     </div>
   );
 }

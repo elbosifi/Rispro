@@ -1,0 +1,52 @@
+# Standard setup/update append this overlay. No public Caddy administration port.
+services:
+  app:
+    environment:
+      RISPRO_HTTPS_PROVISIONED: "true"
+      RISPRO_HTTPS_RUNTIME_DIR: /run/rispro-https
+      RISPRO_SECRET_ENCRYPTION_KEY_FILE: /run/secrets/runtime_secret_encryption_key
+    volumes:
+      - rispro-https-runtime:/run/rispro-https
+    secrets:
+      - https_gateway_identity
+      - runtime_secret_encryption_key
+  gateway:
+    ports:
+      # Protected local bootstrap, also usable over an SSH local port forward.
+      - "127.0.0.1:3001:8081"
+    tmpfs:
+      - /etc/nginx/https-identity:mode=0700
+      - /etc/nginx/https-bootstrap:mode=0700
+      - /etc/nginx/https-listen:mode=0700
+    volumes:
+      - ./docker/reverse-proxy/https-headers.sh:/docker-entrypoint.d/40-https-headers.sh:ro
+    secrets:
+      - https_gateway_identity
+  caddy:
+    build:
+      context: .
+      dockerfile: docker/caddy/Dockerfile
+    image: rispro-caddy:2.11.7-acmedns
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "443:443"
+    volumes:
+      - rispro-caddy-data:/data
+      - rispro-caddy-config:/config
+      - rispro-https-runtime:/run/rispro-https
+    networks:
+      - rispro-network
+
+volumes:
+  rispro-caddy-data:
+  rispro-caddy-config:
+  rispro-https-runtime:
+
+secrets:
+  https_gateway_identity:
+    file: ./secrets/https/gateway-identity
+  runtime_secret_encryption_key:
+    file: ./secrets/https/runtime-secret-key

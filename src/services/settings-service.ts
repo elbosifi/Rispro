@@ -112,7 +112,7 @@ export async function listSettingsCatalog(): Promise<GroupedSettings<SettingsRow
     `
       select id, category, setting_key, setting_value, updated_at
       from system_settings
-      where category not in ('medgemma','gamma_knife')
+      where category not in ('medgemma','gamma_knife','automatic_https')
       order by category asc, setting_key asc
     `
   );
@@ -131,6 +131,7 @@ export async function listSettingsCatalog(): Promise<GroupedSettings<SettingsRow
 }
 
 export async function getSettingsByCategory(category: string): Promise<SettingsRow[]> {
+  if (category === "automatic_https") throw new HttpError(404, "HTTPS settings have a dedicated endpoint.");
   if (category === "medgemma") throw new HttpError(404, "MedGemma settings have a dedicated endpoint.");
   if (category === 'gamma_knife') throw new HttpError(404, 'Gamma Knife settings have a dedicated endpoint.');
   const { rows } = await pool.query(
@@ -151,6 +152,7 @@ export async function upsertSettings(
   entries: SettingsEntryInput[],
   updatedByUserId: UserId
 ): Promise<SettingsRow[]> {
+  if (category === "automatic_https") throw new HttpError(404, "HTTPS settings have a dedicated endpoint.");
   if (category === "medgemma") throw new HttpError(404, "MedGemma settings have a dedicated endpoint.");
   if (category === 'gamma_knife') throw new HttpError(404, 'Gamma Knife settings have a dedicated endpoint.');
   if (!Array.isArray(entries) || entries.length === 0) {

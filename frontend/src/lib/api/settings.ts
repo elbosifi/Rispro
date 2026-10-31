@@ -12,6 +12,33 @@ import type {
 
 type RawRecord = Record<string, unknown>;
 
+export interface AutomaticHttpsSettings {
+  enabled: boolean;
+  redirectHttpToHttps: boolean;
+  httpRedirectActive: boolean;
+  hostname: string;
+  serverUrl: string;
+  subdomain: string;
+  fullDomain: string;
+  credentialsConfigured: boolean;
+  encryptionReady: boolean;
+  provisioned: boolean;
+  managementTransportReady: boolean;
+  cname: { type: "CNAME"; name: string; target: string } | null;
+  status: "Active" | "Pending" | "Error";
+  activeHostname: string | null;
+  issuer: string | null;
+  expiresAt: string | null;
+  renewal: string;
+  lastError: string | null;
+  activationPending: boolean;
+}
+export type AutomaticHttpsInput = Pick<AutomaticHttpsSettings, "enabled" | "redirectHttpToHttps" | "hostname" | "serverUrl" | "subdomain" | "fullDomain"> & { username: string; password: string };
+export function fetchAutomaticHttpsSettings() { return api<AutomaticHttpsSettings>("/settings/https/status"); }
+export function saveAutomaticHttpsSettings(input: AutomaticHttpsInput) { return api<AutomaticHttpsSettings>("/settings/https", { method: "PUT", body: JSON.stringify(input) }); }
+export function checkAutomaticHttpsDns() { return api<{ valid: boolean }>("/settings/https/check-dns", { method: "POST" }); }
+export function activateAutomaticHttps() { return api<{ accepted: boolean }>("/settings/https/activate", { method: "POST" }); }
+
 export interface DeploymentIdentitySettings {
   publicAppBaseUrl: string;
   updatedAt: string;

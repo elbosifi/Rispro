@@ -73,7 +73,7 @@ assert_web_running() {
 reset_fixture
 build_and_restart > "$test_root/output"
 assert_web_running
-grep -qx 'build app' "$calls"
+grep -qx 'build app caddy' "$calls"
 ! grep -q 'build orthanc\|force-recreate orthanc' "$calls" || fail 'Unchanged Orthanc rebuilt/recreated'
 report_internal_orthanc_worklists >> "$test_root/output"
 [[ "$ORTHANC_MWL_DEPLOYMENT_STATUS" == pending/* ]] || fail 'Slow MWL reported ready'
@@ -144,8 +144,8 @@ for mode in embedded orthanc_external; do
   reset_fixture
   RISPRO_DICOM_MODE="$mode" RISPRO_MPPS_MODE=internal_bridge OHIF_COMPOSE_PROFILES=ohif
   build_and_restart > "$test_root/output"
-  grep -qx 'build app ohif mpps-bridge' "$calls"
-  grep -qx 'up -d --no-build app request-scan-worker gateway ohif mpps-bridge' "$calls"
+  grep -qx 'build app caddy ohif mpps-bridge' "$calls"
+  grep -qx 'up -d --no-build app request-scan-worker gateway caddy ohif mpps-bridge' "$calls"
   ! grep -q orthanc "$calls" || fail 'Embedded/external mode touched Orthanc'
 done
 pass 'Required OHIF/MPPS builds remain targeted; external Orthanc is never touched'

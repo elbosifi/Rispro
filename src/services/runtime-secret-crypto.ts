@@ -1,9 +1,10 @@
 import crypto from "crypto";
+import { readFileSync } from "node:fs";
 
 export type RuntimeSecretBundle = { v: 1; alg: "aes-256-gcm"; iv: string; tag: string; ciphertext: string };
 
 function key(): Buffer {
-  const raw = String(process.env.RISPRO_SECRET_ENCRYPTION_KEY || "").trim();
+  const raw = String(process.env.RISPRO_SECRET_ENCRYPTION_KEY || (process.env.RISPRO_SECRET_ENCRYPTION_KEY_FILE ? readFileSync(process.env.RISPRO_SECRET_ENCRYPTION_KEY_FILE, "utf8") : "")).trim();
   if (!raw) throw new Error("RISPRO_SECRET_ENCRYPTION_KEY is not configured.");
   const decoded = Buffer.from(raw, "base64");
   if (decoded.length !== 32 || decoded.toString("base64").replace(/=+$/, "") !== raw.replace(/=+$/, "")) throw new Error("RISPRO_SECRET_ENCRYPTION_KEY must be base64 encoded 32 random bytes.");

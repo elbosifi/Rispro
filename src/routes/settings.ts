@@ -97,6 +97,8 @@ import { readRequestScanSettingsForDisplay, saveRequestScanSettings, resolveRequ
 import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
 import { MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY } from "../services/mwl-eligibility-service.js";
 import { normalizePublicAppBaseUrl, PUBLIC_APP_URL_CATEGORY, PUBLIC_APP_URL_KEY } from "../config/public-app-url.js";
+import { activateHttps, checkHttpsDns, getHttpsSettings, getHttpsStatus, saveHttpsSettings } from "../modules/automatic-https/https-service.js";
+import { httpsManagementTransportReady, requireHttpsManagementTransport } from "../modules/automatic-https/https-transport.js";
 
 function settingScalar(value: unknown): string {
   if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
@@ -316,6 +318,15 @@ settingsRouter.get(
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.use("/https", requireAnyRole(["super_admin"]), (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store"); next();
+});
+settingsRouter.get("/https", asyncRoute(async (req, res) => { res.json({ ...await getHttpsSettings(), managementTransportReady: httpsManagementTransportReady(req) }); }));
+settingsRouter.put("/https", requireHttpsManagementTransport, asyncRoute(async (req, res) => { res.json({ ...await saveHttpsSettings(req.body, (req as AuthRequest).user!.sub as UserId), managementTransportReady: true }); }));
+settingsRouter.post("/https/check-dns", requireHttpsManagementTransport, asyncRoute(async (_req, res) => { res.json(await checkHttpsDns()); }));
+settingsRouter.post("/https/activate", requireHttpsManagementTransport, asyncRoute(async (req, res) => { res.status(202).json(await activateHttps((req as AuthRequest).user!.sub as UserId)); }));
+settingsRouter.get("/https/status", asyncRoute(async (req, res) => { res.json({ ...await getHttpsStatus(), managementTransportReady: httpsManagementTransportReady(req) }); }));
 
 settingsRouter.get(
   "/deployment-identity",

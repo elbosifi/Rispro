@@ -53,6 +53,9 @@ import { incidentsRouter } from "./routes/incidents.js";
 import { sopsRouter } from "./modules/sops/routes.js";
 import { gammaKnifeRouter, gammaKnifePublicRouter } from './modules/gamma-knife/gamma-knife-routes.js';
 import { mobileWidgetRouter, mobileWidgetAdminRouter } from "./modules/mobile-widget/mobile-widget-routes.js";
+import { enforceAutomaticHttps, httpsTransportPolicy } from "./modules/automatic-https/https-transport.js";
+import { recoverHttpsConfiguration, relayAcmeDnsUpdate } from "./modules/automatic-https/https-service.js";
+import { asyncRoute } from "./utils/async-route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,8 +87,14 @@ export function createApp(): Application {
   app.disable("x-powered-by");
   app.set("trust proxy", env.trustProxy);
 
+  void recoverHttpsConfiguration().catch(() => console.error("Automatic HTTPS recovery is pending; check the private Caddy service before activating HTTPS."));
+
   app.use(securityHeaders);
   app.use(requestIdMiddleware);
+
+  app.get("/api/internal/automatic-https/transport-policy", httpsTransportPolicy);
+  app.use(enforceAutomaticHttps);
+  app.post("/api/internal/automatic-https/acmedns/:id/update", express.json({ limit: "2kb" }), asyncRoute(relayAcmeDnsUpdate));
 
   // ---- Conditional JSON parser ------------------------------------------
   // Some upload endpoints accept base64-encoded files that can exceed the

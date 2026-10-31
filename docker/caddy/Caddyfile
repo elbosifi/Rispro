@@ -1,0 +1,6 @@
+# Bootstrap only. RISpro applies its validated template through the private socket.
+# The committed runtime JSON is used on subsequent starts.
+{
+    admin unix//run/rispro-https/admin.sock|0600
+    auto_https off
+}
