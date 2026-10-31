@@ -27,6 +27,108 @@ test('progressive QIDO priority preserves sidebar input, explicit series, count 
   assert.equal(prioritizeSeries(studies, diagnosticSeriesRules, '?initialSeriesInstanceUID=2.1', p => p.metadata)[0], studies[1]);
 });
 
+test('series-level QIDO ranking needs no SOP class, ImageType or NumberOfFrames', () => {
+  const series = [
+    { SeriesInstanceUID: '1', Modality: 'MR', SeriesNumber: 1, SeriesDescription: 'Scout', NumberOfSeriesRelatedInstances: 2 },
+    { SeriesInstanceUID: '2', Modality: 'MR', SeriesNumber: 2, NumberOfSeriesRelatedInstances: 2 },
+    { SeriesInstanceUID: '3', Modality: 'MR', SeriesNumber: 3, NumberOfSeriesRelatedInstances: 32 },
+    { SeriesInstanceUID: '4', Modality: 'MR', SeriesNumber: 4, NumberOfSeriesRelatedInstances: 32 },
+    { SeriesInstanceUID: '5', Modality: 'SR', SeriesNumber: 5 },
+  ];
+  assert.deepEqual(prioritizeSeries(series, diagnosticSeriesRules).map(s => s.SeriesInstanceUID), ['3', '4', '2', '1', '5']);
+  assert.equal(prioritizeSeries(series, diagnosticSeriesRules, '?initialSeriesInstanceUID=1')[0], series[0]);
+  const withoutCounts = series.map(({ NumberOfSeriesRelatedInstances, ...metadata }) => metadata);
+  assert.deepEqual(prioritizeSeries(withoutCounts, diagnosticSeriesRules).map(s => s.SeriesInstanceUID), ['2', '3', '4', '1', '5']);
+  const optionalClasses = [series[2], { ...series[3], SOPClassesInSeries: '1.2.840.10008.5.1.4.1.1.4' }];
+  assert.equal(prioritizeSeries(optionalClasses, diagnosticSeriesRules)[0], optionalClasses[0]);
+});
+
+function diagnosticGateFixture() {
+  const target = new EventTarget(), eventTarget = new EventTarget();
+  const core = { eventTarget, Enums: {
+    Events: { IMAGE_RENDERED: 'render', IMAGE_LOAD_ERROR: 'error', IMAGE_LOAD_FAILED: 'failed' },
+    ViewportType: { STACK: 'stack' }, RequestType: { Thumbnail: 'thumbnail', Prefetch: 'prefetch' },
+  } };
+  const viewport = { type: 'stack', imageId: '/series/1/frames/1', rendered: false,
+    getImageIds: () => ['/series/1/frames/1', '/series/1/frames/2', '/series/2/frames/1'],
+    getCurrentImageId() { return this.imageId; } };
+  return { target, core, viewport, wait: timeout => waitForDiagnosticImage(() => viewport, '1', core, v => v.rendered, target, timeout) };
+}
+
+test('neighbor, thumbnail, prefetch and unrelated-series failures leave the selected diagnostic frame pending', async () => {
+  const f = diagnosticGateFixture(), waiting = f.wait();
+  let outcome;
+  waiting.promise.then(value => { outcome = value; });
+  for (const detail of [
+    { imageId: '/series/1/frames/2' }, { imageId: '/series/2/frames/1' },
+    { imageId: f.viewport.imageId, requestType: 'thumbnail' },
+    { imageId: f.viewport.imageId, requestType: 'prefetch' },
+  ]) f.core.eventTarget.dispatchEvent(new CustomEvent('failed', { detail }));
+  await Promise.resolve(); assert.equal(outcome, undefined);
+  // A viewport transitioning to another series must not fail this series' wait.
+  f.viewport.imageId = '/series/2/frames/1';
+  f.target.dispatchEvent(new CustomEvent('error', { detail: { imageId: f.viewport.imageId } }));
+  await Promise.resolve(); assert.equal(outcome, undefined);
+  f.viewport.imageId = '/series/1/frames/1'; f.viewport.rendered = true;
+  f.target.dispatchEvent(new Event('render'));
+  assert.equal(await waiting.promise, true);
+});
+
+test('actual selected diagnostic frame failure triggers fallback once and removes every listener', async () => {
+  const f = diagnosticGateFixture(), removals = [];
+  for (const target of [f.target, f.core.eventTarget]) {
+    const remove = target.removeEventListener.bind(target);
+    target.removeEventListener = (...args) => { removals.push(args[0]); return remove(...args); };
+  }
+  const waiting = f.wait(); let resolutions = 0;
+  waiting.promise.then(() => resolutions++);
+  f.core.eventTarget.dispatchEvent(new CustomEvent('failed', { detail: { imageId: f.viewport.imageId } }));
+  assert.equal(await waiting.promise, false);
+  f.viewport.rendered = true; f.target.dispatchEvent(new Event('render')); waiting.cancel();
+  await Promise.resolve(); assert.equal(resolutions, 1);
+  assert.deepEqual(removals.sort(), ['error', 'failed', 'render']);
+});
+
+test('selected-frame failure cannot undo diagnostic pixels that have already rendered', async () => {
+  const f = diagnosticGateFixture(), waiting = f.wait();
+  await Promise.resolve();
+  f.viewport.rendered = true;
+  // Even if the render event was missed, check the actual pixels before failing.
+  f.core.eventTarget.dispatchEvent(new CustomEvent('failed', { detail: { imageId: f.viewport.imageId } }));
+  assert.equal(await waiting.promise, true);
+});
+
+test('the bounded watchdog accepts diagnostic rendering after the old 30-second limit', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = diagnosticGateFixture(), waiting = f.wait(); let outcome;
+  waiting.promise.then(value => { outcome = value; });
+  await Promise.resolve(); t.mock.timers.tick(45000);
+  await Promise.resolve(); assert.equal(outcome, undefined);
+  f.viewport.rendered = true; f.target.dispatchEvent(new Event('render'));
+  assert.equal(await waiting.promise, true);
+  t.mock.timers.tick(120000); waiting.cancel();
+});
+
+test('a stalled render times out at 120 seconds and tests may inject a shorter bound', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = diagnosticGateFixture(), waiting = f.wait(); let outcome;
+  waiting.promise.then(value => { outcome = value; });
+  await Promise.resolve(); t.mock.timers.tick(119999);
+  await Promise.resolve(); assert.equal(outcome, undefined);
+  t.mock.timers.tick(1); assert.equal(await waiting.promise, false);
+  const short = f.wait(25);
+  await Promise.resolve(); t.mock.timers.tick(25);
+  assert.equal(await short.promise, false);
+});
+
+test('watchdog performs a final diagnostic-pixel check before timing out', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = diagnosticGateFixture(), waiting = f.wait(25);
+  await Promise.resolve(); f.viewport.rendered = true;
+  t.mock.timers.tick(25);
+  assert.equal(await waiting.promise, true);
+});
+
 test('progressive metadata waits for real pixels, falls back from failed/unsupported series and is serial after render', async () => {
   const trace = [], sets = [], releases = [];
   let resolveRender;
@@ -341,9 +443,85 @@ test('first-image readiness accepts any current acquisition and never a genuine 
       useImageViewer:()=>({StudyInstanceUIDs:['1.2.1','1.2.2']}),useState:()=>['loading',s=>states.push(s)],useLayoutEffect:effect=>effect(),
       isDiagnosticReady,Enums:{ViewportStatus:{RENDERED:'rendered'},Events:{},ViewportType:{STACK:'stack'}},
       document:new EventTarget(),eventTarget:new EventTarget(),cache:{getImageLoadObject:()=>null},
+      window:{config:{}},
     });
     hook(servicesManager,true);
     assert.equal(states.includes('ready'),expected);
+  }
+});
+
+function firstImageHookFixture(progressive) {
+  const target = new EventTarget(), eventTarget = new EventTarget(), states = [];
+  const Enums = { ViewportStatus: { RENDERED: 'rendered' }, ViewportType: { STACK: 'stack' },
+    Events: { IMAGE_RENDERED: 'render', IMAGE_LOAD_ERROR: 'error', IMAGE_LOAD_FAILED: 'failed' } };
+  let rejectImage, cleanup;
+  const imagePromise = new Promise((resolve, reject) => { rejectImage = reject; });
+  const viewport = { type: 'stack', viewportStatus: 'loading', imageId: '/series/1/frames/1',
+    getCurrentImageId() { return this.imageId; }, getImageIds() { return [this.imageId]; },
+    getCornerstoneImage() { return { imageId: this.imageId, getPixelData: () => new Uint16Array([1]) }; } };
+  const services = {
+    cornerstoneViewportService: { getCornerstoneViewport: () => viewport,
+      EVENTS: { VIEWPORT_DATA_CHANGED: 'changed' }, subscribe: () => ({ unsubscribe() {} }) },
+    viewportGridService: { getActiveViewportId: () => 'active' },
+    displaySetService: { getDisplaySetByUID: () => ({ StudyInstanceUID: 'study', Modality: 'MR' }),
+      getActiveDisplaySets: () => ['1', '2'].map(SeriesInstanceUID => ({ SeriesInstanceUID, Modality: 'MR', numImageFrames: 10 })) },
+    uiNotificationService: { show() {} },
+  };
+  const source = loadingSource.slice(loadingSource.indexOf('export function useFirstDiagnosticImage'), loadingSource.indexOf('export function InitialImageLoading')).replace('export function', 'function');
+  const hook = vm.runInNewContext(source + ';useFirstDiagnosticImage', {
+    useViewportGrid: () => [{ activeViewportId: 'active', viewports: new Map([['active', { displaySetInstanceUIDs: ['set'] }]]) }],
+    useImageViewer: () => ({ StudyInstanceUIDs: ['study'] }), useState: () => ['loading', state => states.push(state)],
+    useLayoutEffect: effect => { cleanup = effect(); }, isDiagnosticReady, Enums,
+    window: { config: { risproProgressiveLoading: progressive } }, document: target, eventTarget,
+    cache: { getImageLoadObject: () => ({ promise: imagePromise }) },
+  });
+  assert.equal(hook({ services }, true), 'loading');
+  return { target, viewport, states, services, rejectImage, cleanup,
+    core: { Enums, eventTarget }, state: () => states.at(-1) || 'loading' };
+}
+
+test('progressive overlay stays loading through a failed candidate and errors only on exhaustion', async () => {
+  const previousDocument = global.document;
+  try {
+    for (const recover of [true, false]) {
+      const f = firstImageHookFixture(true), applied = [];
+      global.document = f.target;
+      let exhausted = 0;
+      f.target.addEventListener('rispro-initial-image-failed', () => exhausted++);
+      const promises = ['1', '2'].map(SeriesInstanceUID => ({ metadata: { SeriesInstanceUID },
+        start() { return this.internalPromise ||= Promise.resolve(); } }));
+      const stop = await loadProgressively({ promises, services: f.services,
+        apply: uid => { if (uid) { applied.push(uid); f.viewport.imageId = '/series/' + uid + '/frames/1'; } },
+        waitForImage: (getViewport, uid) => waitForDiagnosticImage(getViewport, uid, f.core, v => isDiagnosticReady(v, 'rendered'), f.target),
+        isReady: v => isDiagnosticReady(v, 'rendered') });
+      try {
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(applied, ['1']);
+        f.rejectImage(Error('selected frame failed'));
+        f.core.eventTarget.dispatchEvent(new CustomEvent('failed', { detail: { imageId: f.viewport.imageId } }));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(applied, ['1', '2']);
+        assert.equal(f.state(), 'loading'); assert.equal(exhausted, 0);
+        if (recover) {
+          f.viewport.viewportStatus = 'rendered'; f.target.dispatchEvent(new Event('render'));
+        } else f.target.dispatchEvent(new CustomEvent('error', { detail: { imageId: f.viewport.imageId } }));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(f.state(), recover ? 'ready' : 'error');
+        assert.equal(exhausted, recover ? 0 : 1);
+      } finally { stop(); f.cleanup(); }
+    }
+  } finally { global.document = previousDocument; }
+});
+
+test('non-progressive overlay retains individual frame-event and cached-promise errors', async () => {
+  for (const failure of ['event', 'promise']) {
+    const f = firstImageHookFixture(false);
+    try {
+      if (failure === 'event') f.target.dispatchEvent(new CustomEvent('error', { detail: { imageId: f.viewport.imageId } }));
+      else f.rejectImage(Error('selected baseline frame failed'));
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(f.state(), 'error');
+    } finally { f.cleanup(); }
   }
 });
 

@@ -38,6 +38,7 @@ const viewerImage=process.env.OHIF_TEST_IMAGE||'rispro-ohif:native-v1';
 const nativeDelivery=env.ohifNativeDeliveryEnabled;
 const nativeBenchmark=process.env.OHIF_NATIVE_BENCHMARK==='1';
 const progressive=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='progressive';
+const dynamicMri=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='dynamic-mri';
 const transportCounts={proxyFrames:0,authorizations:0};
 let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
@@ -186,7 +187,11 @@ try{
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(progressive){
+  if(dynamicMri){
+    const {runDynamicMriAcceptance}=await import('./ohif-dynamic-mri-browser.mjs');
+    await runDynamicMriAcceptance({context,cases,origin,temp,archiveRequest,
+      launch:async c=>{const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});
+  }else if(progressive){
     const {runProgressiveBenchmark}=await import('./ohif-progressive-benchmark.mjs');
     await runProgressiveBenchmark({browser,cases,origin,uncompressedOrigin,backendOrigin:'http://127.0.0.1:'+appPort,archiveRequest,pool,env,temp,login,userId,
       launch:async(c,ctx)=>{const response=await ctx.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});

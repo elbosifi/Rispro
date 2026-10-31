@@ -1,8 +1,8 @@
 # Progressive Native OHIF loading
 
-Implemented locally on 2026-10-30 for pinned OHIF v3.12.6, commit `2851f4349d586f475c279e34d2fdb1d0b56e2fc7`, with Cornerstone 4.15.29. Changes are uncommitted and undeployed. Production Orthanc and hospital data were not accessed.
+Implemented locally on 2026-10-30 for pinned OHIF v3.12.6, commit `2851f4349d586f475c279e34d2fdb1d0b56e2fc7`, with Cornerstone 4.15.29. The original implementation is committed on `main` as `fab7576d3db4c292b0f8e0bea90aa24fea6d3dd4`. The targeted corrective patch dated 2026-10-31 remains local, uncommitted and undeployed. Validation uses synthetic local data and does not verify hospital deployment or real clinical testing.
 
-The administrator setting **Settings > OHIF Viewer > Progressive OHIF Loading** defaults to OFF. It uses the existing authenticated, supervisor/admin-only, recently reauthenticated settings endpoint and audit log. Migration `240_ohif_progressive_loading.sql` adds one default-false column to the existing singleton settings table. There are no new tables or runtime environment variables. Saving ON adds `risproLoadingProfile=progressive` to newly generated native launch URLs. Saving OFF removes that automatic selection. Open tabs keep their URL, configuration and authorized session. The local browser checks exercise persistence, both switch states, administrator restrictions and an already-open tab across changes.
+The administrator setting **Settings > OHIF Viewer > Progressive OHIF Loading** defaults to OFF. It uses the existing authenticated, supervisor/admin-only, recently reauthenticated settings endpoint and audit log. Migration `240_ohif_progressive_loading.sql` adds one default-false column to the existing singleton settings table. There are no new tables or runtime environment variables. Saving ON adds `risproLoadingProfile=progressive` to newly generated native launch URLs. Saving OFF disables that automatic selection for new launches; authorized per-tab URL overrides remain available for testing. Open tabs keep their URL, configuration and authorized session. The local browser checks exercise persistence, both switch states, administrator restrictions and an already-open tab across changes.
 
 Loading profiles remain independently selectable per tab:
 
@@ -17,11 +17,13 @@ Loading profiles remain independently selectable per tab:
 
 The progressive-only image background limits were reduced after the synthetic 2 Mbps run showed a 2.05-second wheel step with 25 prefetch requests. With one prefetch and one thumbnail request, the corresponding measured wheel step was 0.48 seconds. Cornerstone still owns its image loading, cache and request pools. OFF does not change the deployed limits.
 
-Initial retrieval priority is computed from the existing lightweight series QIDO response. Explicit `initialSeriesInstanceUID` selection wins, including a series in another current acquisition. Otherwise the heuristic reuses RISpro's weighted CT/MR, image-count and supported SOP-class preferences. ImageType and description clues lower localizer, scout, survey, pilot, topogram and clearly non-diagnostic series. Non-image modalities are lower priority. Available instance/frame counts provide a small bounded preference for a substantial stack even without helpful descriptions. Stable ties retain OHIF's existing sorting. No instance metadata is downloaded to classify a series, no candidates are discarded, and the original series summary and sidebar sort are retained.
+Initial retrieval priority is computed from the existing lightweight series QIDO response: Modality, Series Description, the existing Series Number order and Number of Series Related Instances when available. Explicit `initialSeriesInstanceUID` selection wins, including a series in another current acquisition. The heuristic reuses applicable RISpro diagnostic preferences and lowers localizer, scout, survey, pilot, topogram and clearly non-diagnostic descriptions. Non-image modalities are lower priority; counts provide a small bounded stack preference. Optional ImageType, SOPClassUID and NumberOfFrames values may contribute only if actually returned; their absence is supported. The series query does not request instance attributes `(0008,0008)` or `(0028,0008)`, or study-level SOP Classes in Study `(0008,0062)`, and the heuristic does not assume `SOPClassesInSeries`. Stable ties retain OHIF's existing sorting. No extra requests classify a series, no candidates are discarded, and the original series summary and sidebar sort are retained.
 
 Only the default/basic hanging protocol receives `hpInitiationCriteria: { minSeriesLoaded: 1 }` in progressive mode. The source patch leaves the global HangingProtocolService method and other protocols unchanged. For explicit series plus SOP selections, the selected series is retrieved first and OHIF still locates the requested SOP. A SOP-only URL retains upstream all-series matching: series-level QIDO cannot identify its containing series reliably.
 
-The route consumes OHIF's existing DeferredPromises. It retrieves one candidate, creates its normal display set, applies the default protocol and waits for Cornerstone's image-render event plus RISpro's existing decoded-pixel readiness check. Remaining metadata starts only after actual diagnostic rendering, with at most one background series request in flight. Before starting the next background series, a newly selected active viewport must finish rendering. The active frame uses Cornerstone's interaction pool. An existing in-flight metadata response is allowed to finish. Failed or unsupported initial candidates advance to the next candidate. A 30-second image-render watchdog is a failure escape, not the normal scheduling trigger. Exhausted candidates show an explicit error, and route cleanup removes listeners and prevents subsequent queued starts. Existing server metadata timeouts remain unchanged.
+The route consumes OHIF's existing DeferredPromises. It retrieves one candidate, creates its normal display set, applies the default protocol and waits for Cornerstone's image-render event plus RISpro's existing decoded-pixel readiness check. Remaining metadata starts only after actual diagnostic rendering, with at most one background series request in flight. Before starting the next background series, a newly selected active viewport must finish rendering. The active frame uses Cornerstone's interaction pool. An existing in-flight metadata response is allowed to finish. Failed or unsupported initial candidates advance to the next candidate. Metadata scheduling and request concurrency are unchanged by this correction.
+
+For a stack, a load failure triggers fallback only for its selected, not-yet-rendered image in the series being initialized. Neighboring frames, thumbnails, prefetch failures and unrelated series do not fail that wait. The bounded image-render watchdog is 120 seconds and performs one final diagnostic-pixel readiness check before failing; unit tests can inject a shorter bound. It is a failure escape, not the normal scheduling trigger. The wait settles once and removes all listeners. In progressive mode the overlay stays loading through recoverable candidate failures, becomes ready when diagnostic pixels render, and displays a terminal error only after `rispro-initial-image-failed` signals exhaustion. Non-progressive individual-error handling is preserved. Existing server metadata timeouts remain unchanged.
 
 Native metadata compression is a separate Nginx change. `native-location.conf` enables level-1 gzip for `application/dicom+json` and `application/json`, with a 1,024-byte minimum and `Vary: Accept-Encoding`. The upstream is requested without Accept-Encoding; Nginx performs the negotiated browser encoding. Binary and multipart frame MIME types are excluded. Native Orthanc streaming, `proxy_buffering off`, authentication, timeout, privacy and no-cache directives remain intact. The original route is preserved in `native-location.uncompressed.conf` and compared with the pre-change version. The UI switch does not disable gzip.
 
@@ -78,7 +80,7 @@ Compression is 22.67:1, a 95.59% response-body reduction. Metadata SHA-256 after
 
 Decoded metadata and extracted diagnostic pixel payloads are byte-identical across the original and compressed routes. Multipart framing remains parseable; part headers and transfer syntax match. Native frames have no Content-Encoding and traverse Nginx directly to Orthanc; the native-only test phase records zero Express frame requests. A signed CT sentinel and its rescale are verified in Cornerstone, and all three CT MPR viewports contain rendered pixels. Enhanced MR multiframe rendering also passes.
 
-Local validation completed:
+The following validation and measurements describe the original 2026-10-30 implementation. Corrective-patch validation is recorded separately below:
 
 - OHIF production build and compiled browser compatibility verification: PASS. The normal Dockerfile built the first candidate. Docker Hub timed out resolving the base image during the final rebuild; the final source was built using the cached pinned builder, restoring tracked upstream source and verifying the unchanged Cornerstone compatibility patch before applying the current RISpro source patches. No dependencies or versions were changed.
 - Full configuration `nginx -t` on both isolated native gateways, compression negotiation, decoded metadata equality, frame equality and original-route rollback comparison: PASS.
@@ -90,19 +92,19 @@ Local validation completed:
 - Backend typecheck, final frontend typecheck and final frontend production build: PASS.
 - Existing authenticated native browser acceptance: PASS, including authorization failures, credential isolation, original pixel-byte equality, range behavior, CT/MR rendering, scrolling, mobile widths, independent sessions and proxy rollback.
 - Existing multi-study reporting browser acceptance with progressive enabled: PASS for CT/MR, explicit selection in the second current study, current/prior authorization, one shared report, annotated key-image capture/provenance and mobile rendering.
-- Agent contract and repository harness: PASS. Comprehensive CI, self-hosted CI and deployment are UNRUN; no commit or push was requested.
+- Agent contract and repository harness: PASS. This original local validation record did not include comprehensive CI, self-hosted CI or deployment evidence.
 
 Sandbox `spawn EPERM` failures were rerun outside the sandbox. The synthetic harness startup window was bounded more generously for cold imports, and its administrator fixture cleanup was corrected during development. These were not recorded as product test passes before rerunning them. Build/network and intermediate experiment logs are retained with the local artifacts.
 
 To reproduce locally, start with `npm run agent:preflight`, `npm run db:test:up`, `npm run db:test:check`, and `npm run test:db:one -- src/modules/ohif-viewer/ohif-schema.integration.test.ts`. Build the viewer with `docker build -f docker/ohif/Dockerfile -t rispro-ohif:progressive-local .`. Use the existing synthetic harness with the disposable test DB environment, `OHIF_TEST_IMAGE=rispro-ohif:progressive-local`, the existing native-delivery test gates, and `OHIF_LOADING_PROFILE_BENCHMARK=progressive`, then run `node --import tsx scripts/ohif-native-reporting-browser.mjs`. These are test harness selectors; switching the product setting requires no environment change or rebuild. Screenshots, JSON measurements and build/test logs are retained locally under `test-results/ohif-progressive/`.
 
-After review and a separately authorized deployment of this implementation, enable the setting, save it, and open a new authorized Native OHIF tab. Confirm the generated URL includes both `risproDelivery=native` and `risproLoadingProfile=progressive`. For per-tab testing, edit the loading selector in an already-authorized launch URL. Remove it to restore the deployed 100/4/25 sequence, or select `current` for 4/4/1. Set the administrator switch OFF to restore the original sequence for new tabs. Existing tabs can be reloaded with their selector removed when the reader chooses.
+For an installation containing this implementation, enable the setting, save it, and open a new authorized Native OHIF tab. Confirm the generated URL includes both `risproDelivery=native` and `risproLoadingProfile=progressive`. For per-tab testing, edit the loading selector in an already-authorized launch URL. Remove it to restore the original 100/4/25 sequence, or select `current` for 4/4/1. Administrator OFF restores automatic baseline selection for new tabs, while an explicitly authorized `risproLoadingProfile=progressive` URL remains selectable. Existing tabs can be reloaded with their selector removed when the reader chooses.
 
 To roll back compression independently, restore the native gateway template from `docker/ohif/native-location.uncompressed.conf`, validate the complete rendered Nginx configuration with `nginx -t`, and reload/recreate only the relevant Nginx gateway through the existing deployment procedure. The local acceptance test runs the original and compressed routes as separate isolated gateways. No production rollback or deployment was performed.
 
 Remaining acceptance outside this task is hospital network routing/throughput, physical iPad/Safari behavior, and representative vendor studies, including large enhanced/dynamic acquisitions. No hospital access is needed to reproduce the local evidence. The heuristic remains advisory when QIDO lacks useful classification/count fields, and SOP-only selection deliberately retains the upstream initialization barrier.
 
-Exact changed files and purpose:
+Original implementation files and purpose (committed in `fab7576d`):
 
 | File | Purpose |
 | --- | --- |
@@ -128,28 +130,13 @@ Exact changed files and purpose:
 | `scripts/ohif-multi-study-browser.mjs` | Explicit progressive selection in the second current study |
 | `docs/ohif-progressive-loading.md` | Local evidence, limitations, activation and independent rollback instructions |
 
-Final branch is `main`, with unchanged HEAD `a22bd3c96530d6a8bef6cbf76f86f75514ee3a7f`. Exact final `git status --short`:
+The 2026-10-31 corrective patch modifies only `prioritizeSeries()`, `waitForDiagnosticImage()` and the QIDO source patch in `configureProgressive()`, plus generated `useFirstDiagnosticImage()`, focused tests and this document. It adds no settings, dependencies, database/API changes or scheduling changes. Validation passed: 28 focused unit tests, the pinned production OHIF build, frontend typecheck/build, and the existing progressive synthetic browser acceptance with all eight timing runs and fourteen checks, including real frame-failure fallback, MPR and multiframe rendering. Artifacts are retained in `test-results/ohif-progressive-corrections/`. No directly related failure remains unresolved; hospital/clinical/deployment acceptance is not claimed.
+
+At completion of the corrective patch, the branch was `main`, with unchanged HEAD `fab7576d3db4c292b0f8e0bea90aa24fea6d3dd4`. Its status snapshot before subsequent work was:
 
 ```text
- M docker/ohif/Dockerfile
- M docker/ohif/app-config.js
+ M docker/ohif/configure-progressive.cjs
  M docker/ohif/configure-viewer.cjs
  M docker/ohif/configure-viewer.test.cjs
- M docker/ohif/native-location.conf
- M frontend/src/pages/settings/ohif-viewer-section.test.tsx
- M frontend/src/pages/settings/ohif-viewer-section.tsx
- M scripts/ohif-multi-study-browser.mjs
- M scripts/ohif-native-benchmark-server.mjs
- M scripts/ohif-native-benchmark.mjs
- M scripts/ohif-native-reporting-browser.mjs
- M src/modules/ohif-viewer/ohif-runtime-config.test.ts
- M src/modules/ohif-viewer/ohif-schema.integration.test.ts
- M src/modules/ohif-viewer/repository.ts
- M src/modules/ohif-viewer/service.ts
- M src/modules/ohif-viewer/types.ts
-?? docker/ohif/configure-progressive.cjs
-?? docker/ohif/native-location.uncompressed.conf
-?? docs/ohif-progressive-loading.md
-?? scripts/ohif-progressive-benchmark.mjs
-?? src/db/migrations/240_ohif_progressive_loading.sql
+ M docs/ohif-progressive-loading.md
 ```

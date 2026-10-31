@@ -82,7 +82,16 @@ function isDiagnosticReady(viewport, renderedStatus) {
   }
   // Volume viewports (MPR/MIP) have no stack image. Require actual voxel data
   // in addition to a completed render, never a hanging-protocol event.
-  return !!viewport.getImageData?.()?.scalarData?.length;
+  const data = viewport.getImageData?.();
+  // Cornerstone 4D voxel managers expose groups rather than getScalarData().
+  // Read a real voxel at the rendered anatomical plane without allocating a
+  // complete phase or treating unloaded voxels (null) as diagnostic pixels.
+  if (data?.voxelManager?.getCurrentDimensionGroupNumber) {
+    const ijk = data.imageData.worldToIndex(viewport.getCamera().focalPoint).map(Math.round);
+    return ijk.every((value, i) => value >= 0 && value < data.dimensions[i]) &&
+      Number.isFinite(data.voxelManager.getAtIJKPoint(ijk));
+  }
+  return !!data?.scalarData?.length;
 }
 
 const loadingSource = `import React, { useEffect, useLayoutEffect, useState } from 'react';
@@ -99,6 +108,7 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
   const { cornerstoneViewportService, displaySetService } = servicesManager.services;
   useLayoutEffect(() => {
     if (!enabled || state === 'ready' || !cornerstoneViewportService) return;
+    const progressive = window.config?.risproProgressiveLoading === true;
     let alive = true;
     const pending = new Set();
     const selected = () => {
@@ -122,10 +132,11 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
       const promise = imageId && cache.getImageLoadObject(imageId)?.promise;
       if (promise && !pending.has(promise)) {
         pending.add(promise);
-        promise.catch(() => { if (alive && selected()?.getCurrentImageId?.() === imageId) setState('error'); });
+        promise.catch(() => { if (!progressive && alive && selected()?.getCurrentImageId?.() === imageId) setState('error'); });
       }
     };
     const failure = event => {
+      if (progressive) return;
       const viewport = selected();
       const id = event.detail.imageId;
       if (id && (viewport?.getCurrentImageId?.() === id ||
@@ -370,6 +381,7 @@ function configureUsability(root) {
 }
 
 function configureViewer(root) {
+  require('./configure-dynamic-mri.cjs').configureDynamicMri(root);
   configureProgressive(root, diagnosticSeriesRules, isDiagnosticReady);
   configureUsability(root);
   configureLoading(root);

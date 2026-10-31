@@ -12,13 +12,12 @@ function prioritizeSeries(series, rules, search = '', metadataOf = value => valu
     const description = String(metadata.SeriesDescription || '');
     if (/LOCALIZER|SCOUT|SURVEY|PILOT|TOPOGRAM|NON.?DIAGNOSTIC/i.test(imageType + ' ' + description)) return -100;
     if (['SR', 'SEG', 'PR', 'KO', 'RTSTRUCT', 'RTPLAN', 'RTDOSE', 'DOC', 'PMAP'].includes(metadata.Modality)) return -200;
-    // Reuse the viewer's weighted diagnostic rules. QIDO count is a proxy for
-    // numImageFrames; enhanced single-instance series may also expose frames.
+    // Series QIDO supplies instance counts. Optional instance attributes are
+    // useful only when actually returned; classification must not require them.
     const counts = Math.max(Number(metadata.NumberOfSeriesRelatedInstances) || 0,
       Number(metadata.NumberOfFrames) || 0);
     return rules.reduce((score, rule) => {
-      const value = rule.attribute === 'numImageFrames' ? counts
-        : rule.attribute === 'SOPClassUID' ? metadata.SOPClassUID || metadata.SOPClassesInSeries : metadata[rule.attribute];
+      const value = rule.attribute === 'numImageFrames' ? counts : metadata[rule.attribute];
       const equals = rule.constraint.equals;
       const matches = equals ? [].concat(value || []).includes(equals.value)
         : Number(value) > rule.constraint.greaterThan.value;
@@ -87,19 +86,38 @@ async function loadProgressively({ promises, services, apply, waitForImage, isRe
   return () => { stopped = true; cancelWait(); };
 }
 
-function waitForDiagnosticImage(getViewport, seriesUID, core, ready, target = document) {
+function waitForDiagnosticImage(getViewport, seriesUID, core, ready, target = document, timeoutMs = 120000) {
   let finish;
+  let settled = false;
   const promise = new Promise(resolve => { finish = resolve; });
   const events = core.Enums.Events;
   const matches = v => !seriesUID || v?.getImageIds?.().some(id => id.includes('/series/' + seriesUID + '/'));
-  const complete = value => { cleanup(); finish(value); };
-  const check = () => { const v = getViewport(); if (matches(v) && ready(v)) complete(true); };
+  const complete = value => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    finish(value);
+  };
+  const check = () => {
+    if (settled) return false;
+    const v = getViewport(), rendered = matches(v) && ready(v);
+    if (rendered) complete(true);
+    return rendered;
+  };
   const failure = event => {
     const v = getViewport(), id = event.detail?.imageId;
-    if (matches(v) && id && (id === v?.getCurrentImageId?.() || v?.getImageIds?.().includes(id))) complete(false);
+    if (settled || !matches(v) || !id) return;
+    if (v?.type === core.Enums.ViewportType?.STACK) {
+      const selected = v.getCurrentImageId?.();
+      const requestType = event.detail?.requestType;
+      if (id !== selected || (seriesUID && !selected.includes('/series/' + seriesUID + '/')) ||
+          (requestType && [core.Enums.RequestType?.Thumbnail, core.Enums.RequestType?.Prefetch].includes(requestType))) return;
+      if (ready(v)) { complete(true); return; }
+    } else if (!v?.getImageIds?.().includes(id)) return;
+    complete(false);
   };
   // Safety watchdog only, never the normal background scheduling trigger.
-  const timer = setTimeout(() => complete(false), 30000);
+  const timer = setTimeout(() => { if (!check()) complete(false); }, timeoutMs);
   function cleanup() {
     clearTimeout(timer);
     target.removeEventListener(events.IMAGE_RENDERED, check, true);
@@ -131,7 +149,7 @@ function configureProgressive(root, diagnosticRules, ready) {
       this.thenFunction = undefined;
     }`);
   replace(loader, "const includeField = ['00080021', '00080031', '0008103E', '00200011'].join(',');",
-    "const includeField = ['00080021', '00080031', '0008103E', '00200011', ...(window.config?.risproProgressiveLoading ? ['00080008', '00080060', '00080062', '00201209', '00280008'] : [])].join(',');");
+    "const includeField = ['00080021', '00080031', '0008103E', '00200011', ...(window.config?.risproProgressiveLoading ? ['00080060', '00201209'] : [])].join(',');");
   replace(loader, 'const seriesInstanceUIDs = preLoadData.map(seriesMetadata => {',
     'const retrievalOrder = window.config?.risproProgressiveLoading\n      ? prioritizeSeries(preLoadData, risproDiagnosticRules, window.location.search) : preLoadData;\n    const seriesInstanceUIDs = retrievalOrder.map(seriesMetadata => {');
   const route = 'platform/app/src/routes/Mode/defaultRouteInit.ts';
