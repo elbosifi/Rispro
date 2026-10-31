@@ -22,6 +22,7 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
   const [isDrawing, setIsDrawing] = useState(false);
   const chosen = useRef(null), generation = useRef(0), previousTool = useRef(null);
   const owned = useRef(new Set<string>()), drawing = useRef(null);
+  const deletePress = useRef(null);
   const seriesKey = displaySets.map(ds => `${ds.StudyInstanceUID}/${ds.SeriesInstanceUID}/${ds.displaySetInstanceUID}`).join('|');
   const group = () => toolGroupService.getToolGroupForViewport(viewportId);
   const selected = () => owned.current.has(chosen.current) && annotations.state.getAnnotation(chosen.current);
@@ -134,6 +135,7 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
           }
           const previous = chosen.current;
           chosen.current = annotation.annotationUID;
+          annotation.invalidated = true;
           drawing.current = null; setIsDrawing(false);
           if (!previous) setBaseline('none');
           if (previous && previous !== chosen.current) removeOwned(previous);
@@ -153,7 +155,14 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
       if (!open || !session || session.uid || viewportGridService.getActiveViewportId() !== viewportId ||
           group()?.getActivePrimaryMouseButtonTool() !== 'EllipticalROI' || annotation?.metadata?.toolName !== 'EllipticalROI' ||
           (event.detail.viewportId ? event.detail.viewportId !== viewportId : annotation.metadata.FrameOfReferenceUID !== context.frameOfReferenceUID)) return;
-      session.uid = annotation.annotationUID; owned.current.add(session.uid);
+      // addAnnotation fires before EllipticalROI sets editData. Claim only a
+      // newly drawn tool gesture, never an imported/rehydrated measurement.
+      queueMicrotask(() => {
+        const edit = group()?.getToolInstance('EllipticalROI')?.editData;
+        if (drawing.current === session && !session.uid && edit?.newAnnotation && edit.annotation === annotation) {
+          session.uid = annotation.annotationUID; owned.current.add(session.uid);
+        }
+      });
     };
     const completed = event => {
       const annotation = event.detail.annotation, session = drawing.current;
@@ -169,7 +178,10 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
       if (!owned.current.has(annotation?.annotationUID)) return;
       redraw();
       if (event.detail.changeType === ToolEnums.ChangeTypes.StatsUpdated || !open) return;
-      if (annotation.annotationUID === chosen.current) calculate(annotation);
+      if (annotation.annotationUID === chosen.current) {
+        if (drawing.current?.completed) cancelDrawing(false);
+        calculate(annotation);
+      }
       else if (drawing.current?.completed && drawing.current.uid === annotation.annotationUID) calculate(annotation, drawing.current);
     };
     const removed = event => {
@@ -226,14 +238,23 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
   const y = value => 116 - 90 * (value - lower) / range;
   const current = results.find(result => result.phase === phase), base = results.find(result => result.phase === Number(baseline));
   const format = value => Number.isFinite(value) ? Number(value.toFixed(2)).toString() : 'Unavailable';
-  return <div className="rispro-dynamic-mri" style={{ top: isCineEnabled ? '7.5rem' : undefined }} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+  return <div className="rispro-dynamic-mri" style={{ top: isCineEnabled ? '7.5rem' : undefined }} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation(); }} onKeyUp={event => event.stopPropagation()}>
     {!open ? <Button size="sm" variant="secondary" onClick={start}>Enhancement Curve</Button> :
       <section aria-label="MRI enhancement curve" data-roi-uid={chosen.current || undefined} className="bg-background text-foreground border-input rounded border p-2 shadow-lg">
         <div className="flex items-center justify-between gap-2"><strong>Enhancement Curve</strong><Button className="rispro-roi-action" size="sm" variant="ghost" aria-label="Close enhancement curve" onClick={() => { cancelDrawing(false); setOpen(false); restore(); }}>×</Button></div>
         <div className="rispro-roi-actions">
           {isDrawing ? <Button className="rispro-roi-action" size="sm" variant="secondary" onClick={() => { cancelDrawing(); setStatus(selected() ? 'Drawing cancelled. Original ROI retained.' : 'Draw an Elliptical ROI on an acquisition plane.'); }}>Cancel drawing</Button> :
             <Button className="rispro-roi-action" size="sm" variant="secondary" onClick={beginDrawing}>{selected() ? 'Replace ROI' : 'Draw ROI'}</Button>}
-          <Button className="rispro-roi-action" size="sm" variant="secondary" disabled={!selected() || isDrawing} onClick={deleteRoi}>Delete ROI</Button>
+          <Button className="rispro-roi-action" size="sm" variant="secondary" disabled={!selected() || isDrawing} onClick={deleteRoi}
+            onPointerDown={event => { if (event.pointerType === 'touch') deletePress.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; }}
+            onPointerCancel={() => { deletePress.current = null; }}
+            onPointerUp={event => {
+              const press = deletePress.current; deletePress.current = null;
+              if (event.pointerType !== 'touch' || press?.id !== event.pointerId || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) return;
+              const rect = event.currentTarget.getBoundingClientRect();
+              if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return;
+              event.preventDefault(); deleteRoi();
+            }}>Delete ROI</Button>
         </div>
         <div className="flex gap-2">
           <Select value={mode} onValueChange={setMode}><SelectTrigger className="text-xs" aria-label="Curve measurement"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="signal">Mean SI (a.u.)</SelectItem><SelectItem value="enhancement">Enhancement (%)</SelectItem></SelectContent></Select>

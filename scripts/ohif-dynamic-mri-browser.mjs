@@ -48,7 +48,10 @@ async function dynamicFixture(c, archiveRequest) {
   await upload(enhanced);
 }
 
-export async function runDynamicMriAcceptance({ context, cases, origin, temp, archiveRequest, launch }) {
+export async function runDynamicMriAcceptance({ context: parentContext, cases, origin, temp, archiveRequest, launch }) {
+  // Exercise mouse and native touch input in the same touch-capable browser.
+  const context = await parentContext.browser().newContext({ viewport: { width: 1600, height: 1000 }, hasTouch: true });
+  await context.addCookies(await parentContext.cookies());
   const checks = [], c = cases.find(item => item.modality === 'MR');
   await dynamicFixture(c, archiveRequest);
   await context.addInitScript(installProbe);
@@ -261,9 +264,17 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     const ordinaryPoints = (await roiState(ordinaryUID)).points;
     await tool('StackScroll'); checks.push('normal toolbar ROI remains independent of curve selection and tool restoration');
     await page.getByRole('button', { name: 'Replace ROI', exact: true }).click();
+    await page.evaluate(uid => {
+      const s = window.services, core = window.cornerstone, tools = window.cornerstoneTools;
+      core.utilities.triggerEvent(core.eventTarget, tools.Enums.Events.ANNOTATION_ADDED, { annotation: tools.annotation.state.getAnnotation(uid), viewportId: s.viewportGridService.getActiveViewportId() });
+    }, ordinaryUID);
+    await page.getByRole('button', { name: 'Cancel drawing', exact: true }).click();
+    assert.deepEqual((await roiState(ordinaryUID)).points, ordinaryPoints); assert.equal(await roiUID(), originalUID);
+    checks.push('external annotation-added events during replacement cannot transfer ownership or delete ordinary measurements');
+    await page.getByRole('button', { name: 'Replace ROI', exact: true }).click();
     assert.ok((await roiState(originalUID)).points); await drawMouse([60, 60], [65, 65]);
     await page.waitForFunction(previous => { const uid = document.querySelector('[aria-label="MRI enhancement curve"]')?.getAttribute('data-roi-uid'); return uid && uid !== previous; }, originalUID);
-    const replacementUID = await roiUID(); assert.equal(await primary(), 'StackScroll');
+    let replacementUID = await roiUID(); assert.equal(await primary(), 'StackScroll');
     const replaced = await roiState(replacementUID);
     assert.deepEqual(replaced.uids.sort(), [replacementUID, ordinaryUID].sort());
     assert.notEqual(await page.getByTestId('roi-summary').innerText(), oldCount);
@@ -289,12 +300,19 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await chart.waitFor(); assert.equal(await roiUID(), replacementUID);
     assert.deepEqual((await roiState(replacementUID)).uids.sort(), [replacementUID, ordinaryUID].sort());
     checks.push('close and reopen reuse the same curve ROI without duplication');
+    await page.getByRole('button', { name: 'Delete ROI', exact: true }).click();
+    assert.equal(await roiUID(), null); assert.equal(await chart.count(), 0); assert.deepEqual((await roiState(ordinaryUID)).uids, [ordinaryUID]);
+    await page.getByRole('button', { name: 'Draw ROI', exact: true }).click(); await drawMouse([60, 60], [65, 65]);
+    await chart.waitFor(); replacementUID = await roiUID(); assert.ok(replacementUID); assert.equal(await primary(), 'StackScroll');
+    checks.push('mouse Delete removes only the selected ROI and Draw ROI starts a fresh single-ROI analysis');
+    await page.setViewportSize({ width: 1024, height: 768 });
     const touch = await context.newCDPSession(page);
     await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     await page.evaluate(() => {
       window.__curveTouchEvents = [];
       document.addEventListener('touchmove', event => window.__curveTouchEvents.push({ trusted: event.isTrusted, fingers: event.touches.length, target: event.target.className }), true);
       document.addEventListener('CORNERSTONE_TOOLS_TOUCH_DRAG', event => window.__curveTouchEvents.push({ canvas: event.detail.currentPoints.canvas, start: event.detail.startPoints.canvas, fingers: event.detail.event.touches.length, interacting: window.cornerstoneTools.state.isInteractingWithTool }), true);
+      for (const name of ['touchstart', 'touchend', 'click']) document.addEventListener(name, event => { if (event.target.closest?.('.rispro-dynamic-mri')) window.__curveTouchEvents.push({ type: name, text: event.target.textContent, trusted: event.isTrusted }); }, true);
     });
     const swipe = async (x, y, dx, dy, fingers = 1) => {
       const points = (deltaX, deltaY) => Array.from({ length: fingers }, (_, i) => ({ x: x + deltaX + i * 40, y: y + deltaY, id: i + 1, radiusX: 1, radiusY: 1, force: 1 }));
@@ -304,6 +322,9 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     };
     const navigationRect = await element.boundingBox(), navX = navigationRect.x + navigationRect.width * .12, navY = navigationRect.y + navigationRect.height * .75;
     await firstPhase();
+    // Pinned preventGhostClick.js deliberately suppresses the other input type
+    // for 2000ms. Respect that guard when switching from mouse to touch tests.
+    await page.waitForTimeout(2100);
     const touchCamera = (await state()).camera, touchPoints = (await roiState(replacementUID)).points;
     for (const phase of [2, 3]) { await swipe(navX, navY, 27, 0); assert.equal((await state()).phase, phase); await visibleRoi(replacementUID); }
     assert.deepEqual((await roiState(replacementUID)).points, touchPoints); assert.deepEqual((await state()).camera, touchCamera);
@@ -314,7 +335,7 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await visibleRoi(replacementUID);
     const pinchBefore = (await state()).camera;
     await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: navX, y: navY, id: 1 }, { x: navX + 80, y: navY, id: 2 }] });
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: navX - 20, y: navY, id: 1 }, { x: navX + 100, y: navY, id: 2 }] });
+    for (let i = 1; i <= 8; i++) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: navX - 2.5 * i, y: navY, id: 1 }, { x: navX + 80 + 2.5 * i, y: navY, id: 2 }] });
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     assert.equal((await state()).phase, 3); assert.notEqual((await state()).camera.parallelScale, pinchBefore.parallelScale);
     await visibleRoi(replacementUID); assert.deepEqual((await roiState(replacementUID)).points, touchPoints);
@@ -326,16 +347,32 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await page.getByRole('button', { name: 'Draw ROI', exact: true }).waitFor();
     checks.push('keyboard/desktop deletion clears owned ROI, measurements and baseline while preserving ordinary annotations');
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.getByRole('button', { name: 'Draw ROI', exact: true }).click();
+    const drawButton = await page.getByRole('button', { name: 'Draw ROI', exact: true }).boundingBox();
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: drawButton.x + drawButton.width / 2, y: drawButton.y + drawButton.height / 2, id: 1 }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     const touchDrawRect = await element.boundingBox();
     const touchDrawPoints = await page.evaluate(() => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), z = v.getCamera().focalPoint[2]; return [[30, 50, z], [35, 55, z]].map(p => v.worldToCanvas(p)); });
     await swipe(touchDrawRect.x + touchDrawPoints[0][0], touchDrawRect.y + touchDrawPoints[0][1], touchDrawPoints[1][0] - touchDrawPoints[0][0], touchDrawPoints[1][1] - touchDrawPoints[0][1]);
     await chart.waitFor(); assert.equal(await primary(), 'StackScroll');
     const mobileUID = await roiUID(); assert.ok(mobileUID); await visibleRoi(mobileUID);
+    const beforeTouchEdit = await roiState(mobileUID), editPhase = (await state()).phase;
+    const editPoint = await page.evaluate(({ uid, rect }) => {
+      const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), p = window.cornerstoneTools.annotation.state.getAnnotation(uid).data.handles.points;
+      // A horizontal handle changes width under horizontal input; a top/bottom
+      // handle intentionally ignores that direction. Avoid the floating panel.
+      return [p[2], p[3]].map(point => v.worldToCanvas(point)).find(point => document.elementFromPoint(rect.x + point[0], rect.y + point[1])?.classList.contains('cornerstone-canvas'));
+    }, { uid: mobileUID, rect: touchDrawRect });
+    assert.ok(editPoint, 'A native ROI width handle is reachable outside the panel');
+    await swipe(touchDrawRect.x + editPoint[0], touchDrawRect.y + editPoint[1], -30, 0);
+    assert.equal((await state()).phase, editPhase); assert.notDeepEqual((await roiState(mobileUID)).points, beforeTouchEdit.points);
+    await visibleRoi(mobileUID); assert.deepEqual((await roiState(mobileUID)).uids.sort(), [mobileUID, ordinaryUID].sort());
+    checks.push('single-finger ROI editing retains priority over phase navigation');
     const deleteButton = await page.getByRole('button', { name: 'Delete ROI', exact: true }).boundingBox();
     assert.ok(deleteButton.width >= 44 && deleteButton.height >= 44);
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: deleteButton.x + deleteButton.width / 2, y: deleteButton.y + deleteButton.height / 2, id: 1 }] });
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await swipe(deleteButton.x + deleteButton.width / 2, deleteButton.y + deleteButton.height / 2, deleteButton.width + 20, 0);
+    assert.equal(await roiUID(), mobileUID);
+    checks.push('dragging away from Delete does not delete the ROI');
+    await page.getByRole('button', { name: 'Delete ROI', exact: true }).tap();
     await page.waitForFunction(() => !document.querySelector('[aria-label="MRI enhancement curve"]')?.getAttribute('data-roi-uid'));
     assert.equal(await chart.count(), 0); assert.deepEqual((await roiState(ordinaryUID)).uids, [ordinaryUID]);
     assert.deepEqual((await roiState(ordinaryUID)).points, ordinaryPoints);
@@ -384,5 +421,5 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await page.screenshot({ path: join(temp, 'dynamic-mri-failure.png') }).catch(() => {});
     writeFileSync(join(temp, 'dynamic-mri-failure.txt'), await page.locator('body').innerText().catch(() => ''));
     throw error;
-  } finally { await page.close(); }
+  } finally { await context.close(); }
 }
