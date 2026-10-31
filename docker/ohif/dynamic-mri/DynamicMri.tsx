@@ -3,7 +3,7 @@ import { cache, metaData, eventTarget, Enums, utilities, imageLoader, imageLoadP
 import { Enums as ToolEnums, state as toolState } from '@cornerstonejs/tools';
 import { useSystem } from '@ohif/core';
 import { Button, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, useCine } from '@ohif/ui-next';
-import { temporalContext, sampleCurve, curveValues, timeAxis } from './analysis.mjs';
+import { temporalContext, sampleCurve, curveStatus, curveValues, timeAxis } from './analysis.mjs';
 import { installPhaseNavigation } from './navigation.mjs';
 import './dynamic-mri.css';
 
@@ -88,7 +88,7 @@ export default function DynamicMri({ enabledVPElement: element, viewportId, serv
         });
         if (version !== generation.current || !sampled) return;
         setResults(sampled);
-        setStatus(sampled.some(result => result.error) ? 'Incomplete curve: ' + sampled.filter(result => result.error).map(result => `Phase ${result.phase}: ${result.error}`).join(' ') : '');
+        setStatus(curveStatus(sampled));
       } catch (error) {
         if (version === generation.current) setStatus('Measurement unavailable: ' + error.message);
       }

@@ -98,9 +98,18 @@ export function roiPlane(context, annotation) {
 
 export function meanSignal(frame, ellipse, image, worldToIndex) {
   const g = frame.geometry, instance = frame.instance;
-  if (!image || image.color || image.numberOfComponents > 1 || instance.SamplesPerPixel > 1 ||
-      (instance.PhotometricInterpretation && !/^MONOCHROME[12]$/.test(instance.PhotometricInterpretation)) || image.rows !== g.rows || image.columns !== g.columns ||
-      instance.ModalityLUTSequence || instance.RealWorldValueMappingSequence) throw Error('Comparable scalar MRI pixels unavailable.');
+  if (!image) throw Error('Decoded phase image unavailable.');
+  if (image.color || image.numberOfComponents > 1 || instance.SamplesPerPixel > 1 ||
+      (instance.PhotometricInterpretation && !/^MONOCHROME[12]$/.test(instance.PhotometricInterpretation))) throw Error('Color or multi-component MRI pixels are unsupported.');
+  if (image.rows !== g.rows || image.columns !== g.columns) throw Error('Decoded image dimensions do not match source geometry.');
+  const modalityLut = instance.ModalityLUTSequence;
+  if (modalityLut != null && (!Array.isArray(modalityLut) || modalityLut.length)) throw Error('Nonlinear modality LUT is unsupported.');
+  const realWorld = instance.RealWorldValueMappingSequence;
+  if (realWorld != null && (!Array.isArray(realWorld) || realWorld.some(item => !item ||
+      item.RealWorldValueLUTData != null || !Number.isFinite(scalar(item.RealWorldValueSlope)) ||
+      !Number.isFinite(scalar(item.RealWorldValueIntercept))))) throw Error('Nonlinear or incomplete real-world value mapping is unsupported.');
+  // SI uses Cornerstone's modality signal, as the existing ROI tool does.
+  // Real-world mapping is a separate DICOM transform, never another rescale.
   const pixels = image.getPixelData?.();
   if (!pixels || pixels.length !== g.rows * g.columns) throw Error('Decoded phase pixels unavailable.');
   const toPixel = point => {
@@ -161,6 +170,23 @@ export async function sampleCurve(context, annotation, { loadImage, worldToIndex
     onPhase([...results]);
   }
   return results;
+}
+
+export function curveStatus(results) {
+  const failures = results.filter(result => result.error);
+  if (!failures.length) return '';
+  const reasons = new Map();
+  for (const result of failures) {
+    if (!reasons.has(result.error)) reasons.set(result.error, []);
+    reasons.get(result.error).push(result.phase);
+  }
+  const details = [...reasons].map(([reason, phases]) => {
+    const consecutive = phases.every((phase, i) => !i || phase === phases[i - 1] + 1);
+    const label = phases.length === 1 ? `Phase ${phases[0]}` :
+      `Phases ${consecutive ? `${phases[0]}–${phases.at(-1)}` : phases.join(', ')}`;
+    return `${label}: ${reason}`;
+  });
+  return `Incomplete curve: ${failures.length}/${results.length} phases unavailable. ${details.join(' ')}`;
 }
 
 export function curveValues(results, mode, baselinePhase) {

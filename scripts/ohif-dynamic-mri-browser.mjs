@@ -27,6 +27,11 @@ async function dynamicFixture(c, archiveRequest) {
       Rows: size, Columns: size, SamplesPerPixel: 1, PhotometricInterpretation: 'MONOCHROME2', BitsAllocated: 16, BitsStored: 16, HighBit: 15, PixelRepresentation: 0,
       ImageOrientationPatient: [1, 0, 0, 0, 1, 0], ImagePositionPatient: [0, 0, slice * 2], PixelSpacing: [1, 1], SliceThickness: 2, SpacingBetweenSlices: 2,
       WindowCenter: 125, WindowWidth: 250, RescaleIntercept: 0, RescaleSlope: 1, PixelData: pixels.buffer };
+    // Valid optional linear mapping used by real MR objects. SI stays on the
+    // existing modality-rescale path, not this independent real-world mapping.
+    ds.RealWorldValueMappingSequence = [{ RealWorldValueSlope: 0.5, RealWorldValueIntercept: 7,
+      RealWorldValueFirstValueMapped: 0, RealWorldValueLastValueMapped: 65535, LUTLabel: 'SYNTHETIC',
+      MeasurementUnitsCodeSequence: [{ CodeValue: '1', CodingSchemeDesignator: 'UCUM', CodeMeaning: 'no units' }] }];
     instances.push(ds); await upload(ds);
   }
   // Exercise the pinned loader's supported multiframe TimeSlotVector path.
@@ -104,6 +109,11 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     const chart = page.locator('.rispro-dynamic-mri svg[data-values]');
     await chart.waitFor({ timeout: 30000 });
     assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [100, 150, 125]);
+    assert.equal(await page.evaluate(() => {
+      const core = window.cornerstone, ds = window.services.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);
+      return ds.dynamicVolumeInfo.timePoints.flat().every(id => core.metaData.get('instance', id).RealWorldValueMappingSequence?.[0]?.RealWorldValueSlope === 0.5);
+    }), true);
+    checks.push('linear real-world mapping survives DICOM delivery without rejecting or changing modality SI');
     assert.equal((await state()).phase, 3); checks.push('real Elliptical ROI drawing produces 100/150/125 without changing phase');
     await page.getByRole('combobox', { name: 'Baseline phase' }).click(); await page.getByRole('option', { name: 'Baseline: phase 1', exact: true }).click();
     assert.match(await page.getByRole('combobox', { name: 'Baseline phase' }).innerText(), /Baseline: phase 1/);
@@ -148,6 +158,33 @@ export async function runDynamicMriAcceptance({ context, cases, origin, temp, ar
     await modify(false);
     await chart.waitFor(); assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [0, 50, 25]);
     checks.push('invalid ROI plane gives an explicit unavailable state and recovers after correction');
+    const nonlinear = async enabled => page.evaluate(enabled => {
+      const s = window.services, core = window.cornerstone, tools = window.cornerstoneTools;
+      const v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+      const ds = s.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);
+      for (const id of ds.dynamicVolumeInfo.timePoints.flat()) {
+        const instance = core.metaData.get('instance', id);
+        if (enabled) instance.ModalityLUTSequence = [{ LUTDescriptor: [3, 0, 16], LUTData: [0, 1, 4] }];
+        else delete instance.ModalityLUTSequence;
+      }
+      const annotation = tools.annotation.state.getAnnotations('EllipticalROI', v.element)[0];
+      core.utilities.triggerEvent(core.eventTarget, tools.Enums.Events.ANNOTATION_MODIFIED, { annotation, viewportId: v.id, changeType: tools.Enums.ChangeTypes.HandlesUpdated });
+    }, enabled);
+    await nonlinear(true);
+    const groupedError = page.getByRole('status').filter({ hasText: '3/3 phases unavailable' });
+    await groupedError.waitFor();
+    assert.equal((await groupedError.innerText()).split('Nonlinear modality LUT').length - 1, 1);
+    assert.equal(await chart.count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobilePanel = await page.getByRole('region', { name: 'MRI enhancement curve' }).boundingBox();
+    assert.ok(mobilePanel.x >= 0 && mobilePanel.x + mobilePanel.width <= 390 && mobilePanel.y + mobilePanel.height <= 844);
+    assert.ok((await groupedError.boundingBox()).height < 100, 'Repeated phase failures must remain compact on a narrow viewport');
+    await page.screenshot({ path: join(temp, 'dynamic-mri-compact-errors-mobile.png') });
+    checks.push('compact shared failure stays within a 390px portrait viewport');
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await nonlinear(false); await chart.waitFor();
+    assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [0, 50, 25]);
+    checks.push('unsupported mapping stays rejected with one compact shared reason, then recovers');
     const missingId = await page.evaluate(() => {
       const core = window.cornerstone, s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
       const ds = s.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);

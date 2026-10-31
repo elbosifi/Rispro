@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { temporalContext, roiPlane, meanSignal, sampleCurve, curveValues, timeAxis } from './dynamic-mri/analysis.mjs';
+import { temporalContext, roiPlane, meanSignal, sampleCurve, curveStatus, curveValues, timeAxis } from './dynamic-mri/analysis.mjs';
 import { installPhaseNavigation } from './dynamic-mri/navigation.mjs';
 const require = createRequire(import.meta.url);
 
@@ -84,6 +84,52 @@ test('patient-space ellipse maps anisotropic/rotated pixels, excludes padding an
   f.annotation.data.handles.points = f.annotation.data.handles.points.map(rotate);
   const rotated = roiPlane(f.context(), f.annotation);
   assert.equal(meanSignal(rotated.frames[0], rotated, f.image(125)).mean, 240);
+});
+
+test('empty optional LUT sequences do not reject decoded scalar MR pixels', () => {
+  const f = fixture(), ellipse = roiPlane(f.context(), f.annotation), frame = ellipse.frames[0];
+  Object.assign(frame.instance, { ModalityLUTSequence: [], RealWorldValueMappingSequence: [] });
+  assert.equal(meanSignal(frame, ellipse, f.image(100)).mean, 100);
+});
+
+test('linear real-world mapping does not reject or double-scale the modality signal', () => {
+  const f = fixture(), ellipse = roiPlane(f.context(), f.annotation), frame = ellipse.frames[0];
+  Object.assign(frame.instance, { RescaleSlope: 2, RescaleIntercept: -10,
+    RealWorldValueMappingSequence: [{ RealWorldValueSlope: 0.5, RealWorldValueIntercept: 7,
+      RealWorldValueFirstValueMapped: 0, RealWorldValueLastValueMapped: 4095 }] });
+  const raw = f.image(100);
+  assert.equal(meanSignal(frame, ellipse, raw).mean, 190);
+  const scaled = f.image(190, { preScale: { scaled: true, scalingParameters: { rescaleSlope: 2, rescaleIntercept: -10 } } });
+  assert.equal(meanSignal(frame, ellipse, scaled).mean, 190);
+  assert.equal(raw.getPixelData()[0], 100);
+});
+
+test('unsupported pixel layouts and nonlinear mappings retain specific rejection reasons', () => {
+  const f = fixture(), ellipse = roiPlane(f.context(), f.annotation), frame = ellipse.frames[0];
+  for (const sequence of [[{ RealWorldValueLUTData: [0, 1, 4] }], [{}], [{ RealWorldValueSlope: NaN, RealWorldValueIntercept: 0 }], {}]) {
+    frame.instance.RealWorldValueMappingSequence = sequence;
+    assert.throws(() => meanSignal(frame, ellipse, f.image(100)), /real-world value mapping/);
+  }
+  delete frame.instance.RealWorldValueMappingSequence;
+  frame.instance.ModalityLUTSequence = [{ LUTDescriptor: [3, 0, 16], LUTData: [0, 1, 4] }];
+  assert.throws(() => meanSignal(frame, ellipse, f.image(100)), /Nonlinear modality LUT/);
+  delete frame.instance.ModalityLUTSequence;
+  assert.throws(() => meanSignal(frame, ellipse, f.image(100, { color: true })), /Color or multi-component/);
+  assert.throws(() => meanSignal(frame, ellipse, f.image(100, { rows: 6 })), /dimensions/);
+});
+
+test('twenty identical phase failures produce one compact reason and no fabricated measurements', () => {
+  const reason = 'Nonlinear modality LUT is unsupported.';
+  const results = Array.from({ length: 20 }, (_, i) => ({ phase: i + 1, mean: null, error: reason }));
+  const status = curveStatus(results);
+  assert.match(status, /20\/20 phases unavailable/);
+  assert.match(status, /Phases 1–20/);
+  assert.equal(status.split(reason).length - 1, 1);
+  assert.ok(status.length < 140);
+  assert.deepEqual(curveValues(results, 'signal'), new Array(20).fill(null));
+  assert.equal(curveStatus([]), '');
+  assert.equal(curveStatus([{ phase: 1, mean: 100 }]), '');
+  assert.match(curveStatus([{ phase: 1, mean: 100 }, { phase: 2, error: reason }, { phase: 3, error: reason }]), /Phases 2–3/);
 });
 
 test('incompatible, oblique, missing and unavailable data never become zero measurements', async () => {

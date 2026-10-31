@@ -44,6 +44,8 @@ The fixture has three phases (100/150/125 a.u.), eight anatomical planes, and a 
 
 Measured browser results (SVG values after real ROI drawing):
 
+The following table and benchmark results describe the original implementation's validation. Validation of the scalar-metadata follow-up is recorded in its section below.
+
 | Phase | Mean SI (a.u.) | Enhancement with explicit baseline 1 |
 | --- | ---: | ---: |
 | 1 | 100 | 0% |
@@ -80,7 +82,19 @@ Final JSON evidence is in `test-results/ohif-dynamic-mri/dynamic-mri-results.jso
 
 Feature changes are isolated to `docker/ohif/configure-dynamic-mri.cjs`, `docker/ohif/dynamic-mri/{DynamicMri.tsx,analysis.mjs,navigation.mjs,dynamic-mri.css}`, registration and the dynamic-readiness branch in `docker/ohif/configure-viewer.cjs`, two Dockerfile COPY entries, `docker/ohif/configure-dynamic-mri.test.mjs`, the test-only dispatch in `scripts/ohif-native-reporting-browser.mjs`, `scripts/ohif-dynamic-mri-browser.mjs`, and this document. Existing progressive corrective changes in the working tree remain preserved.
 
-Features are enabled without an administrator action for eligible series. To troubleshoot, append `&risproDynamicMri=off` to the already-authorized OHIF viewer tab URL and reload; remove it and reload to restore the controls. The ordinary Cine/StackScroll tools remain available with the override. Build-time rollback removes the configurator registration/COPY entries and its narrow source/readiness additions, while preserving the separate progressive corrective patch. No version/dependency, settings, delivery, cache-concurrency, authentication, reporting, Nginx or Orthanc configuration changes are part of this feature. Changes remain local, uncommitted and undeployed.
+Features are enabled without an administrator action for eligible series. To troubleshoot, append `&risproDynamicMri=off` to the already-authorized OHIF viewer tab URL and reload; remove it and reload to restore the controls. The ordinary Cine/StackScroll tools remain available with the override. Build-time rollback removes the configurator registration/COPY entries and its narrow source/readiness additions, while preserving the separate progressive corrective patch. No version/dependency, settings, delivery, cache-concurrency, authentication, reporting, Nginx or Orthanc configuration changes are part of this feature. The original dynamic MRI implementation is committed on `main` as `54250f1a`; the scalar-metadata correction below remains local, uncommitted and undeployed.
+
+## Scalar metadata correction, 2026-10-31
+
+A reported screenshot showed every phase rejected with the generic message `Comparable scalar MRI pixels unavailable.` It identifies the failed guard, but does not establish which of its conditions applied to that examination. Two compatibility defects were independently reproduced with synthetic scalar MR data: an empty optional LUT sequence and a valid linear Real World Value Mapping Sequence both triggered that message.
+
+`meanSignal()` now accepts empty optional sequences and validates linear real-world mappings rather than rejecting every sequence. Signal intensity continues to use Cornerstone's modality-rescaled decoded pixels, matching the existing ROI signal path. Real-world slope/intercept are not applied on top of modality rescale and no physical-unit/concentration conversion is introduced. The [DICOM Real World Value Mapping specification](https://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.6.16.2.html#sect_C.7.6.16.2.11.1.1) defines that mapping independently of the modality transform.
+
+Nonlinear modality LUTs, nonlinear/incomplete real-world mappings, color/multi-component images, incompatible decoded dimensions and missing pixels remain unavailable. Each now has a distinct failure reason. `curveStatus()` groups identical errors across phases: twenty matching failures produce one reason with the affected phase range and count, instead of twenty repeated paragraphs. Failed phases retain null measurements.
+
+The synthetic browser fixture now includes a non-identity linear real-world mapping. It must still produce SI 100/150/125 and enhancement 0/50/25%, preserving every source pixel. Browser checks also inject an unsupported modality LUT, verify one grouped reason and no chart, then verify recovery after restoring the fixture metadata. The original clinical examination has not been accessed or retested; its exact failing attribute remains unconfirmed from the screenshot alone.
+
+Follow-up validation: PASS 53/53 focused/existing viewer unit tests; PASS 20 synthetic dynamic MRI browser checks, including ordinary/enhanced frames, unchanged decoded pixels, mapping rejection/recovery and a compact error panel at 390×844 portrait size; PASS production OHIF build/browser-build verification; PASS final frontend typecheck/build; PASS agent contract and documentation checks. Test logs, JSON evidence and the portrait screenshot are under `test-results/ohif-dynamic-mri-scalar-fix/`. These are local synthetic/browser results, not verification of the clinical study in the screenshot. Changes remain uncommitted and undeployed.
 
 ## Limitations
 
