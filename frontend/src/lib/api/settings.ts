@@ -13,6 +13,8 @@ import type {
 type RawRecord = Record<string, unknown>;
 
 export interface AutomaticHttpsSettings {
+  bootstrapUrl?: string | null;
+  temporaryBootstrap?: boolean;
   provider: "acmedns" | "cloudflare";
   providerConfigurations: { acmedns: { serverUrl: string; subdomain: string; fullDomain: string; credentialsConfigured: boolean } | null; cloudflare: { credentialsConfigured: boolean } | null };
   enabled: boolean;
@@ -45,6 +47,7 @@ export function saveAutomaticHttpsSettings(input: AutomaticHttpsInput) {
   return api<AutomaticHttpsSettings>("/settings/https", { method: "PUT", body: JSON.stringify(payload) });
 }
 export function checkAutomaticHttpsDns() { return api<{ valid: boolean }>("/settings/https/check-dns", { method: "POST" }); }
+export function authorizeAutomaticHttpsBootstrap(code: string) { return api<{ authorized: boolean }>("/settings/https/bootstrap-authorize", { method: "POST", body: JSON.stringify({ code }) }); }
 export function testAutomaticHttpsConnection() { return api<{ valid: boolean }>("/settings/https/test-connection", { method: "POST" }); }
 export function activateAutomaticHttps() { return api<{ accepted: boolean }>("/settings/https/activate", { method: "POST" }); }
 

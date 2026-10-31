@@ -5,11 +5,13 @@ services:
       RISPRO_HTTPS_PROVISIONED: "true"
       RISPRO_HTTPS_RUNTIME_DIR: /run/rispro-https
       RISPRO_SECRET_ENCRYPTION_KEY_FILE: /run/secrets/runtime_secret_encryption_key
+      RISPRO_HTTPS_BOOTSTRAP_IP_FILE: /run/secrets/https_bootstrap_ip
     volumes:
       - rispro-https-runtime:/run/rispro-https
     secrets:
       - https_gateway_identity
       - runtime_secret_encryption_key
+      - https_bootstrap_ip
   gateway:
     ports:
       # Protected local bootstrap, also usable over an SSH local port forward.
@@ -33,6 +35,7 @@ services:
         condition: service_healthy
     ports:
       - "443:443"
+      - "3443:3443"
     volumes:
       - rispro-caddy-data:/data
       - rispro-caddy-config:/config
@@ -50,3 +53,5 @@ secrets:
     file: ./secrets/https/gateway-identity
   runtime_secret_encryption_key:
     file: ./secrets/https/runtime-secret-key
+  https_bootstrap_ip:
+    file: ./secrets/https/bootstrap-ip

@@ -16,6 +16,7 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
   const queryClient = useQueryClient();
   const [draftOverride, setDraftOverride] = useState<string | null>(null);
   const [pendingSaveAfterReAuth, setPendingSaveAfterReAuth] = useState<number | null>(null);
+  const [temporaryBootstrap, setTemporaryBootstrap] = useState(false);
   const currentOrigin = useMemo(() => browserOrigin(), []);
   const query = useQuery({ queryKey: ["deployment-identity"], queryFn: fetchDeploymentIdentitySettings, retry: false });
 
@@ -50,6 +51,7 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
 
   return (
     <div className="max-w-2xl space-y-4">
+      {!temporaryBootstrap ? <>
       <p className="text-sm leading-6 text-muted-foreground">{text.help}</p>
       {query.isLoading ? <p className="text-sm text-muted-foreground">{text.loading}</p> : null}
       {query.error && !(query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403)) ? <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{query.error instanceof Error ? query.error.message : "Could not load the setting."}</p> : null}
@@ -67,7 +69,8 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
       </button>
       {mutation.isSuccess ? <p className="text-sm text-emerald-700">{text.saved}</p> : null}
       {mutation.error && !reauthError ? <p className="text-sm text-rose-700">{mutation.error instanceof Error ? mutation.error.message : "Could not save the setting."}</p> : null}
-      <AutomaticHttpsSection onReAuthRequired={onReAuthRequired} reauthVersion={reauthVersion} />
+      </> : null}
+      <AutomaticHttpsSection onReAuthRequired={onReAuthRequired} reauthVersion={reauthVersion} onTemporaryBootstrap={setTemporaryBootstrap} />
     </div>
   );
 }

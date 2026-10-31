@@ -1221,6 +1221,18 @@ else if (!current) throw new Error('The existing runtime encryption key file is 
 const tokenPath = path.join(directory, 'gateway-identity');
 if (!fs.existsSync(tokenPath)) fs.writeFileSync(tokenPath, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
 if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(tokenPath, 'utf8').trim())) throw new Error('The existing HTTPS gateway identity is invalid; it was not changed.');
+// Only advertise a private IPv4 address on the unique lowest-metric default
+// interface. Ambiguous routing fails closed rather than guessing a LAN address.
+const interfaces = require('node:os').networkInterfaces();
+let routes = [];
+try { routes = fs.readFileSync('/proc/net/route', 'utf8').trim().split('\n').slice(1).map(line => line.trim().split(/\s+/))
+  .filter(parts => parts[1] === '00000000' && (parseInt(parts[3], 16) & 1) && !/^(docker|br-|veth|virbr|tun|tap)/.test(parts[0]))
+  .map(parts => ({ iface: parts[0], metric: Number(parts[6]) })).sort((a, b) => a.metric - b.metric); } catch {}
+const best = routes.filter(route => route.metric === routes[0]?.metric);
+const addresses = best.length === 1 ? (interfaces[best[0].iface] || []).filter(item => !item.internal && item.family === 'IPv4' && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address)).map(item => item.address) : [];
+const bootstrapIp = addresses.length === 1 ? addresses[0] : '';
+fs.writeFileSync(path.join(directory, 'bootstrap-ip'), bootstrapIp, { mode: 0o600 });
+fs.chmodSync(path.join(directory, 'bootstrap-ip'), 0o600);
 fs.chmodSync(keyPath, 0o600);
 fs.chmodSync(tokenPath, 0o600);
 EOF_HTTPS

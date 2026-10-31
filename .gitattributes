@@ -1,2 +1,3 @@
 docker/rispro/entrypoint.sh text eol=lf
 docker/caddy/entrypoint.sh text eol=lf
+scripts/https-bootstrap.sh text eol=lf

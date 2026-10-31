@@ -13,12 +13,18 @@ change the public application URL or external tunnel configuration.
    password, subdomain and full domain from a trusted managed provider. For
    Cloudflare DNS, create a token scoped to the hostname's zone with **Zone →
    Zone → Read** and **Zone → DNS → Edit** permissions.
-2. Open **Settings → Deployment & Application Identity → Automatic HTTPS** as a
-   super administrator and complete password reauthentication. Initial credential
-   entry requires verified HTTPS or the protected local bootstrap at
-   `http://localhost:3001`. Port 3001 binds only to VM loopback. A remote
-   administrator can use `ssh -L 3001:127.0.0.1:3001 <administrator>@<rispro-vm>`.
-   Do not publish this bootstrap port through a public proxy.
+2. On the trusted RISpro server console, from the repository directory, run
+   `bash scripts/https-bootstrap.sh`. It prints the temporary IP HTTPS URL,
+   the served leaf certificate's SHA-256 fingerprint and a single-use code valid
+   for five minutes. Open the printed URL on the LAN. Before accepting the browser's
+   certificate exception, compare its certificate fingerprint with the console.
+   Do not proceed if they differ. No CA certificate needs to be installed.
+   Sign in as a super administrator, reauthenticate, and enter the console code.
+   The existing HTTP settings page also links to the temporary URL, but provider
+   credentials must be entered over HTTPS. The temporary listener permits only
+   authentication, HTTPS settings and the frontend resources those screens need.
+   Allow port 3443 from the administrator's LAN and restrict it at the host or
+   network firewall elsewhere; Docker forwarding can obscure the original source IP.
 3. Select the provider, enter its credentials and your hostname, leave
    **Redirect HTTP to HTTPS** unchecked, and select **Save Configuration**.
    Saved credential fields remain blank. A blank token retains the saved token;
@@ -41,12 +47,20 @@ change the public application URL or external tunnel configuration.
    the external tunnel. A failure restores the previous configuration. Staging
    certificates are never activated as trusted. Saved settings for each provider
    are retained when switching; activation changes the active provider only after
-   gateway verification. If an existing certificate is reused, a successful zone
+   gateway verification. The temporary listener closes automatically after
+   activation; open the displayed publicly trusted hostname. If an existing certificate is reused, a successful zone
    read does not establish that DNS Edit will succeed at the next renewal.
 7. Open the HTTPS settings link and sign in. HTTP sessions retain their existing
    cookie names and attributes. HTTPS session, reauthentication, passkey and
    viewer cookies use separate names with `Secure`, preserving HTTP sessions on
    the same hostname during testing.
+
+The address selection uses the private IPv4 address on the unique lowest-metric
+default interface. If routing or addresses are ambiguous, bootstrap fails closed
+instead of choosing an interface. The address is refreshed by the supported setup
+or update scripts; after an address change, rerun the appropriate script before
+using temporary bootstrap. Loopback port 3001 remains available for recovery, but
+it rejects new provider credentials over plaintext HTTP.
 
 ## Direct LAN acceptance
 

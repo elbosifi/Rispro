@@ -11,9 +11,9 @@ import { logSecurityAuditEntry } from "../../services/audit-service.js";
 import { isRuntimeSecretEncryptionConfigured } from "../../services/runtime-secret-crypto.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { UserId } from "../../types/http.js";
-import { bootstrapCaddyConfiguration, caddyConfiguration, HTTPS_CATEGORY, INITIAL_HOSTNAME, requiredCname, validateHttpsConfiguration, type HttpsConfiguration } from "./https-configuration.js";
+import { bootstrapCaddyConfiguration, caddyConfiguration, temporaryBootstrapConfiguration, HTTPS_CATEGORY, INITIAL_HOSTNAME, requiredCname, validateHttpsConfiguration, type HttpsConfiguration } from "./https-configuration.js";
 import { accountCredentials, checkCname, checkCloudflare, cloudflareToken, updateProvider } from "./https-provider.js";
-import { equalSecret, gatewayIdentity, httpsRuntimeDirectory } from "./https-transport.js";
+import { bootstrapIp, equalSecret, gatewayIdentity, httpsRuntimeDirectory } from "./https-transport.js";
 
 interface CertificateStatus { issuer: string; expiresAt: string }
 interface HttpsState {
@@ -27,6 +27,8 @@ interface HttpsState {
 const emptyState = (): HttpsState => ({ draft: null, active: null, phase: "idle", lastError: null, certificate: null });
 const LOCK = 719821993;
 let activation: Promise<void> | null = null;
+let bootstrapListenerActive = false;
+let bootstrapMonitorStarted = false;
 
 async function readState(db: Pick<PoolClient, "query"> = pool): Promise<HttpsState> {
   const result = await db.query<{ setting_value: HttpsState }>("select setting_value from system_settings where category=$1 and setting_key='configuration'", [HTTPS_CATEGORY]);
@@ -46,6 +48,7 @@ function display(state: HttpsState) {
     encryptionReady: isRuntimeSecretEncryptionConfigured(), provisioned: process.env.RISPRO_HTTPS_PROVISIONED === "true",
     cname: value && provider === "acmedns" ? requiredCname(value) : null, status: state.phase === "error" ? "Error" : state.active && state.phase !== "pending" ? "Active" : "Pending",
     activeHostname: state.active?.hostname || null, activeProvider: state.active ? state.active.provider || "acmedns" : null, issuer: state.certificate?.issuer || null, expiresAt: state.certificate?.expiresAt || null,
+    bootstrapUrl: (!state.active || state.phase === "error") && bootstrapIp() ? `https://${bootstrapIp()}:3443/settings?section=deployment_identity` : null,
     renewal: state.active ? "Managed automatically by Caddy; provider access and DNS delegation must remain valid." : "Pending activation",
     lastError: state.lastError, activationPending: state.phase === "pending" };
 }
@@ -95,19 +98,28 @@ async function applyHttpRedirect(config: HttpsConfiguration | null) {
 
 function staging(): boolean { return process.env.NODE_ENV !== "production"; }
 
-async function runtimeConfiguration(config: HttpsConfiguration | null) {
-  if (!config) return bootstrapCaddyConfiguration();
+async function runtimeConfiguration(config: HttpsConfiguration | null, includeBootstrap = !config) {
+  const ip = process.env.RISPRO_HTTPS_PROVISIONED === "true" && includeBootstrap ? bootstrapIp() : null;
+  const temporary = ip ? temporaryBootstrapConfiguration(ip, gatewayIdentity()) : null;
+  if (!config) return temporary || bootstrapCaddyConfiguration();
+  let publicConfig: ReturnType<typeof caddyConfiguration>;
   if (config.provider === "cloudflare") {
     const filename = `cloudflare-${config.id}.token`;
     await atomicFile(filename, cloudflareToken(config));
-    return caddyConfiguration(config, path.join(httpsRuntimeDirectory(), filename), gatewayIdentity(), staging());
-  }
-  const credentialsPath = path.join(httpsRuntimeDirectory(), `account-${config.id}.json`);
-  await atomicJson(`account-${config.id}.json`, { ...accountCredentials(config), subdomain: config.subdomain,
+    publicConfig = caddyConfiguration(config, path.join(httpsRuntimeDirectory(), filename), gatewayIdentity(), staging());
+  } else {
+    const credentialsPath = path.join(httpsRuntimeDirectory(), `account-${config.id}.json`);
+    await atomicJson(`account-${config.id}.json`, { ...accountCredentials(config), subdomain: config.subdomain,
     // The plugin never contacts administrator-supplied URLs. This limited relay
     // revalidates DNS and pins a public IP for EVERY request, including renewal.
-    server_url: `http://app:3000/api/internal/automatic-https/acmedns/${config.id}` });
-  return caddyConfiguration(config, credentialsPath, gatewayIdentity(), staging());
+      server_url: `http://app:3000/api/internal/automatic-https/acmedns/${config.id}` });
+    publicConfig = caddyConfiguration(config, credentialsPath, gatewayIdentity(), staging());
+  }
+  if (!temporary) return publicConfig;
+  return { ...publicConfig, apps: { ...publicConfig.apps, pki: temporary.apps.pki,
+    tls: { ...publicConfig.apps.tls, certificates: { automate: [...publicConfig.apps.tls.certificates.automate, ip!] },
+      automation: { policies: [...temporary.apps.tls.automation.policies, ...publicConfig.apps.tls.automation.policies] } },
+    http: { servers: { ...publicConfig.apps.http.servers, ...temporary.apps.http.servers } } } };
 }
 
 async function loadCaddy(configuration: unknown): Promise<void> {
@@ -115,7 +127,11 @@ async function loadCaddy(configuration: unknown): Promise<void> {
     const request = http.request({ socketPath: path.join(httpsRuntimeDirectory(), "admin.sock"), path: "/load", method: "POST",
       headers: { "Content-Type": "application/json" } }, (response) => {
       response.resume();
-      if (response.statusCode === 200) resolve();
+      if (response.statusCode === 200) {
+        const value = configuration as { apps?: { http?: { servers?: { bootstrap?: unknown } } } };
+        bootstrapListenerActive = Boolean(value.apps?.http?.servers?.bootstrap);
+        resolve();
+      }
       else reject(new HttpError(503, "Caddy rejected the HTTPS configuration."));
     });
     request.setTimeout(15_000, () => request.destroy());
@@ -174,7 +190,7 @@ export async function saveHttpsSettings(input: unknown, userId: UserId) {
     const next = { ...state, providers, draft, phase: "idle" as const, lastError: null };
     if (!draft.enabled && state.active) {
       const previous = await runtimeConfiguration(state.active);
-      const bootstrap = bootstrapCaddyConfiguration();
+      const bootstrap = await runtimeConfiguration(null);
       try {
         await loadCaddy(bootstrap);
         await applyHttpRedirect(null);
@@ -217,7 +233,7 @@ export async function checkHttpsConnection() {
   return { valid: true };
 }
 
-export async function activateHttps(userId: UserId) {
+export async function activateHttps(userId: UserId, fromBootstrap = false) {
   if (process.env.RISPRO_HTTPS_PROVISIONED !== "true") throw new HttpError(503, "Run the supported Docker setup/update to provision Caddy first.");
   if (activation) throw new HttpError(409, "HTTPS activation is already running.");
   const client = await lock();
@@ -231,11 +247,12 @@ export async function activateHttps(userId: UserId) {
   activation = (async () => {
     let certificate: CertificateStatus | null = null;
     try {
-      const oldRuntime = await runtimeConfiguration(state.active);
+      const retainBootstrap = !state.active || fromBootstrap;
+      const oldRuntime = await runtimeConfiguration(state.active, retainBootstrap);
       await activateWithRollback({
         credentials: () => candidate.provider === "cloudflare" ? checkCloudflare(candidate) : updateProvider(candidate),
         dns: () => candidate.provider === "cloudflare" ? Promise.resolve() : checkCname(candidate),
-        apply: async () => loadCaddy(await runtimeConfiguration(candidate)),
+        apply: async () => loadCaddy(await runtimeConfiguration(candidate, retainBootstrap)),
         verify: async () => {
           if (staging()) throw new HttpError(409, "Staging certificate requested. Public trust activation requires a production deployment; staging is never treated as trusted.");
           const deadline = Date.now() + 180_000;
@@ -250,6 +267,9 @@ export async function activateHttps(userId: UserId) {
           await atomicJson("current.json", await runtimeConfiguration(candidate));
           await applyHttpRedirect(candidate);
           await persist(next, userId, "https_activated");
+          // Give the bootstrap browser one status poll to display the verified
+          // hostname before removing the temporary listener automatically.
+          if (retainBootstrap && bootstrapIp()) { await delay(8000); await loadCaddy(await runtimeConfiguration(candidate)); }
         },
         rollback: async () => {
           await loadCaddy(oldRuntime);
@@ -302,5 +322,33 @@ export async function recoverHttpsConfiguration() {
       try { await loadCaddy(configuration); break; }
       catch (error) { if (attempt === 29) throw error; await delay(2000); }
     }
+    if (state.active && bootstrapIp()) {
+      // An expired or otherwise unverifiable public certificate must not leave
+      // the administrator without a protected recovery path after restart.
+      try { await verifyHttpsGateway(state.active.hostname); }
+      catch { await loadCaddy(await runtimeConfiguration(state.active, true)); }
+    }
   } finally { await unlock(client); }
+}
+
+// Keep recovery available if a previously trusted certificate later becomes
+// unverifiable. The advisory lock prevents a monitor reload during activation.
+export function startHttpsBootstrapMonitor() {
+  if (bootstrapMonitorStarted || process.env.RISPRO_HTTPS_PROVISIONED !== "true") return;
+  bootstrapMonitorStarted = true;
+  setInterval(() => {
+    void (async () => {
+      if (!bootstrapIp()) return;
+      let client: PoolClient;
+      try { client = await lock(); } catch { return; }
+      try {
+        const state = await readState(client);
+        if (!state.active || state.phase === "pending") return;
+        let trusted = false;
+        try { await verifyHttpsGateway(state.active.hostname); trusted = true; } catch { /* recovery remains protected */ }
+        if (!trusted && !bootstrapListenerActive) await loadCaddy(await runtimeConfiguration(state.active, true));
+        else if (trusted && bootstrapListenerActive && state.phase !== "error") await loadCaddy(await runtimeConfiguration(state.active));
+      } finally { await unlock(client); }
+    })().catch(() => console.error("Automatic HTTPS bootstrap monitoring failed; check the private Caddy service."));
+  }, 60_000).unref();
 }

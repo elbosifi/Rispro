@@ -107,6 +107,24 @@ export function bootstrapCaddyConfiguration() {
   return { admin: { listen: "unix//run/rispro-https/admin.sock|0600" }, apps: {} };
 }
 
+// This isolated listener exposes only the authentication and HTTPS settings
+// paths. The internal certificate is never used as a public-HTTPS fallback.
+export function temporaryBootstrapConfiguration(ip: string, gatewayToken: string) {
+  if (isIP(ip) !== 4 || !/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip) || !/^[a-f0-9]{64}$/.test(gatewayToken)) throw new Error("Invalid HTTPS bootstrap identity.");
+  return {
+    admin: { listen: "unix//run/rispro-https/admin.sock|0600" },
+    apps: {
+      pki: { certificate_authorities: { local: { install_trust: false } } },
+      tls: { certificates: { automate: [ip] }, automation: { policies: [{ subjects: [ip], issuers: [{ module: "internal" }] }] } },
+      http: { servers: { bootstrap: { listen: [":3443"], automatic_https: { disable_redirects: true }, tls_connection_policies: [{ default_sni: ip }],
+        routes: [{ match: [{ host: [ip], remote_ip: { ranges: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"] }, path: ["/", "/login", "/settings", "/assets/*", "/favicon.ico", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/auth/re-auth", "/api/settings/https", "/api/settings/https/status", "/api/settings/https/bootstrap-authorize", "/api/settings/https/check-dns", "/api/settings/https/test-connection", "/api/settings/https/activate"] },
+          { host: [ip], remote_ip: { ranges: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"] }, path: ["/api/settings/users-and-roles/page-visibility", "/api/settings/deployment-identity"], method: ["GET"] }],
+          handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "gateway:8080" }], headers: { request: { set: { "X-Rispro-Https-Gateway": [gatewayToken], "X-Rispro-Temporary-Bootstrap": [gatewayToken] } } } }], terminal: true },
+          { handle: [{ handler: "static_response", status_code: 404 }], terminal: true }] } } },
+    },
+  };
+}
+
 export function caddyConfiguration(config: HttpsConfiguration, credentialsPath: string, gatewayToken: string, staging = false) {
   if (!/^[a-f0-9]{64}$/.test(gatewayToken)) throw new Error("HTTPS gateway identity is unavailable.");
   return {

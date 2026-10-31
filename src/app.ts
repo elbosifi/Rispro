@@ -54,7 +54,7 @@ import { sopsRouter } from "./modules/sops/routes.js";
 import { gammaKnifeRouter, gammaKnifePublicRouter } from './modules/gamma-knife/gamma-knife-routes.js';
 import { mobileWidgetRouter, mobileWidgetAdminRouter } from "./modules/mobile-widget/mobile-widget-routes.js";
 import { enforceAutomaticHttps, httpsTransportPolicy } from "./modules/automatic-https/https-transport.js";
-import { recoverHttpsConfiguration, relayAcmeDnsUpdate } from "./modules/automatic-https/https-service.js";
+import { recoverHttpsConfiguration, relayAcmeDnsUpdate, startHttpsBootstrapMonitor } from "./modules/automatic-https/https-service.js";
 import { asyncRoute } from "./utils/async-route.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -88,6 +88,7 @@ export function createApp(): Application {
   app.set("trust proxy", env.trustProxy);
 
   void recoverHttpsConfiguration().catch(() => console.error("Automatic HTTPS recovery is pending; check the private Caddy service before activating HTTPS."));
+  startHttpsBootstrapMonitor();
 
   app.use(securityHeaders);
   app.use(requestIdMiddleware);

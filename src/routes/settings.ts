@@ -98,7 +98,9 @@ import { testRequestScanSmb } from "../services/request-scan-smb-service.js";
 import { MWL_POLICY_CATEGORY, REQUIRE_PROTOCOL_BEFORE_MWL_KEY } from "../services/mwl-eligibility-service.js";
 import { normalizePublicAppBaseUrl, PUBLIC_APP_URL_CATEGORY, PUBLIC_APP_URL_KEY } from "../config/public-app-url.js";
 import { activateHttps, checkHttpsConnection, checkHttpsDns, getHttpsSettings, getHttpsStatus, saveHttpsSettings } from "../modules/automatic-https/https-service.js";
-import { httpsManagementTransportReady, requireHttpsManagementTransport } from "../modules/automatic-https/https-transport.js";
+import { httpsManagementTransportReady, requireHttpsManagementTransport, temporaryBootstrapRequest, trustedHttpsRequest } from "../modules/automatic-https/https-transport.js";
+import { authorizeBootstrap } from "../modules/automatic-https/https-bootstrap.js";
+import { createRateLimiter } from "../middleware/rate-limit.js";
 
 function settingScalar(value: unknown): string {
   if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
@@ -322,12 +324,17 @@ settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
 settingsRouter.use("/https", requireAnyRole(["super_admin"]), (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store"); next();
 });
-settingsRouter.get("/https", asyncRoute(async (req, res) => { res.json({ ...await getHttpsSettings(), managementTransportReady: httpsManagementTransportReady(req) }); }));
-settingsRouter.put("/https", requireHttpsManagementTransport, asyncRoute(async (req, res) => { res.json({ ...await saveHttpsSettings(req.body, (req as AuthRequest).user!.sub as UserId), managementTransportReady: true }); }));
+const bootstrapCodeLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 5, message: "Too many bootstrap code attempts. Try again later.", key: () => "https-bootstrap" });
+settingsRouter.post("/https/bootstrap-authorize", bootstrapCodeLimit, asyncRoute(authorizeBootstrap));
+settingsRouter.get("/https", asyncRoute(async (req, res) => { res.json({ ...await getHttpsSettings(), temporaryBootstrap: temporaryBootstrapRequest(req), managementTransportReady: httpsManagementTransportReady(req) }); }));
+settingsRouter.put("/https", requireHttpsManagementTransport, asyncRoute(async (req, res) => {
+  if (!trustedHttpsRequest(req) && ["username", "password", "token"].some((key) => typeof req.body?.[key] === "string" && req.body[key].length > 0)) throw new HttpError(403, "Certificate credentials require HTTPS.");
+  res.json({ ...await saveHttpsSettings(req.body, (req as AuthRequest).user!.sub as UserId), temporaryBootstrap: temporaryBootstrapRequest(req), managementTransportReady: true });
+}));
 settingsRouter.post("/https/check-dns", requireHttpsManagementTransport, asyncRoute(async (_req, res) => { res.json(await checkHttpsDns()); }));
 settingsRouter.post("/https/test-connection", requireHttpsManagementTransport, asyncRoute(async (_req, res) => { res.json(await checkHttpsConnection()); }));
-settingsRouter.post("/https/activate", requireHttpsManagementTransport, asyncRoute(async (req, res) => { res.status(202).json(await activateHttps((req as AuthRequest).user!.sub as UserId)); }));
-settingsRouter.get("/https/status", asyncRoute(async (req, res) => { res.json({ ...await getHttpsStatus(), managementTransportReady: httpsManagementTransportReady(req) }); }));
+settingsRouter.post("/https/activate", requireHttpsManagementTransport, asyncRoute(async (req, res) => { res.status(202).json(await activateHttps((req as AuthRequest).user!.sub as UserId, temporaryBootstrapRequest(req))); }));
+settingsRouter.get("/https/status", asyncRoute(async (req, res) => { res.json({ ...await getHttpsStatus(), temporaryBootstrap: temporaryBootstrapRequest(req), managementTransportReady: httpsManagementTransportReady(req) }); }));
 
 settingsRouter.get(
   "/deployment-identity",

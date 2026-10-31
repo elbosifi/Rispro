@@ -2,19 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input } from "@/components/shared";
 import { ApiError } from "@/lib/api-client";
-import { activateAutomaticHttps, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, testAutomaticHttpsConnection, type AutomaticHttpsInput } from "@/lib/api/settings";
+import { activateAutomaticHttps, authorizeAutomaticHttpsBootstrap, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, testAutomaticHttpsConnection, type AutomaticHttpsInput } from "@/lib/api/settings";
 
 const defaults: AutomaticHttpsInput = { provider: "acmedns", enabled: true, redirectHttpToHttps: false, hostname: "", serverUrl: "", username: "", password: "", subdomain: "", fullDomain: "", token: "" };
 
-export default function AutomaticHttpsSection({ onReAuthRequired, reauthVersion }: { onReAuthRequired: (key: string[]) => void; reauthVersion: number }) {
+export default function AutomaticHttpsSection({ onReAuthRequired, reauthVersion, onTemporaryBootstrap }: { onReAuthRequired: (key: string[]) => void; reauthVersion: number; onTemporaryBootstrap?: (active: boolean) => void }) {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["automatic-https"], queryFn: fetchAutomaticHttpsSettings, retry: false,
     refetchInterval: (result) => result.state.data?.activationPending ? 5000 : false });
   const [draft, setDraft] = useState<AutomaticHttpsInput | null>(null);
   const [dnsValid, setDnsValid] = useState(false);
+  const [bootstrapCode, setBootstrapCode] = useState("");
   const data = query.data;
   const input = draft || { ...defaults, ...data, username: "", password: "", token: "" };
   const safeBrowser = Boolean(data?.managementTransportReady) && (window.location.protocol === "https:" || (["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port === "3001"));
+  const credentialTransport = safeBrowser && window.location.protocol === "https:";
   const reauth = useCallback((error: unknown) => {
     if (error instanceof ApiError && (error.status === 401 || (error.status === 403 && /reauth|re-auth|authentication/i.test(error.message)))) onReAuthRequired(["automatic-https"]);
   }, [onReAuthRequired]);
@@ -22,16 +24,28 @@ export default function AutomaticHttpsSection({ onReAuthRequired, reauthVersion 
     onSuccess: (saved) => { setDraft(null); setDnsValid(false); client.setQueryData(["automatic-https"], saved); }, onError: reauth });
   const dns = useMutation({ mutationFn: () => input.provider === "cloudflare" ? testAutomaticHttpsConnection() : checkAutomaticHttpsDns(), onSuccess: (result) => setDnsValid(result.valid), onError: reauth });
   const activate = useMutation({ mutationFn: activateAutomaticHttps, onSuccess: async () => { await client.invalidateQueries({ queryKey: ["automatic-https"] }); }, onError: reauth });
+  const authorize = useMutation({ mutationFn: () => authorizeAutomaticHttpsBootstrap(bootstrapCode), onSuccess: async () => { setBootstrapCode(""); await client.invalidateQueries({ queryKey: ["automatic-https"] }); }, onError: reauth });
   useEffect(() => { if (query.error) reauth(query.error); }, [query.error, reauth]);
   useEffect(() => { void client.invalidateQueries({ queryKey: ["automatic-https"] }); }, [reauthVersion, client]);
-  const busy = save.isPending || dns.isPending || activate.isPending || data?.activationPending;
-  const error = save.error || dns.error || activate.error || query.error;
+  useEffect(() => { onTemporaryBootstrap?.(Boolean(data?.temporaryBootstrap)); }, [data?.temporaryBootstrap, onTemporaryBootstrap]);
+  const busy = save.isPending || dns.isPending || activate.isPending || authorize.isPending || data?.activationPending;
+  const error = save.error || dns.error || activate.error || authorize.error || query.error;
   function field(key: keyof AutomaticHttpsInput, value: string | boolean) { setDraft({ ...input, [key]: value }); setDnsValid(false); }
 
   return <section aria-labelledby="automatic-https-title" className="space-y-4 border-t border-border pt-5">
     <h3 id="automatic-https-title" className="text-base font-semibold text-foreground">Automatic HTTPS</h3>
     <p className="text-sm text-muted-foreground">Certificates renew automatically while provider access and public DNS remain valid.</p>
-    {!safeBrowser ? <p role="status" className="text-sm text-muted-foreground">Enter credentials using trusted HTTPS, or open http://localhost:3001 on the server through a protected local connection or SSH port forward.</p> : null}
+    {!credentialTransport ? <div role="status" className="space-y-2 text-sm text-muted-foreground">
+      {data?.bootstrapUrl && !data.temporaryBootstrap ? <p><a className="underline" href={data.bootstrapUrl}>Open temporary HTTPS setup</a></p> : null}
+      <p>Enter credentials using trusted HTTPS or the verified temporary HTTPS setup.</p>
+      <p>On the trusted server console, run <code>bash scripts/https-bootstrap.sh</code>. Compare its SHA-256 certificate fingerprint with the browser certificate before accepting a temporary browser exception.</p>
+      {!data?.bootstrapUrl && !data?.temporaryBootstrap ? <p>Temporary HTTPS needs an unambiguous private server address. Local recovery remains available at http://localhost:3001.</p> : null}
+    </div> : null}
+    {data?.temporaryBootstrap && !data.managementTransportReady ? <div className="space-y-2">
+      <label htmlFor="https-bootstrap-code" className="block text-sm font-medium">Single-use bootstrap authorization code</label>
+      <Input id="https-bootstrap-code" type="password" autoComplete="off" value={bootstrapCode} onChange={(event) => setBootstrapCode(event.target.value)} disabled={busy} />
+      <Button type="button" disabled={busy || !bootstrapCode} onClick={() => authorize.mutate()}>Authorize temporary setup</Button>
+    </div> : null}
     {data && !data.provisioned ? <p role="status" className="text-sm text-muted-foreground">Run the supported Docker setup/update to provision HTTPS.</p> : null}
     <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={input.enabled} disabled={busy} onChange={(event) => field("enabled", event.target.checked)} />Enable Automatic HTTPS</label>
     {data?.activeHostname && !input.enabled ? <p className="text-sm text-destructive">Saving will stop HTTPS on port 443. Coordinate any external connection using that port before disabling HTTPS.</p> : null}
@@ -55,7 +69,7 @@ export default function AutomaticHttpsSection({ onReAuthRequired, reauthVersion 
         ["subdomain", "ACME-DNS subdomain", "text"], ["fullDomain", "ACME-DNS full domain", "text"],
       ] as const).map(([key, label, type]) => <div key={key}>
         <label htmlFor={`https-${key}`} className="block text-sm font-medium">{label}</label>
-        <Input id={`https-${key}`} type={type} dir="ltr" value={input[key]} disabled={busy || !safeBrowser}
+        <Input id={`https-${key}`} type={type} dir="ltr" value={input[key]} disabled={busy || !safeBrowser || ((key === "username" || key === "password" || key === "token") && !credentialTransport)}
           autoComplete={key === "password" || key === "token" ? "new-password" : "off"} onChange={(event) => field(key, event.target.value)}
           placeholder={(key === "username" || key === "password" || key === "token") && (data?.provider === input.provider ? data.credentialsConfigured : data?.providerConfigurations?.[input.provider]?.credentialsConfigured) ? "Saved; leave blank to retain" : undefined} />
       </div>)}

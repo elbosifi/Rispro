@@ -1,11 +1,21 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
+import { isIP } from "node:net";
+import jwt from "jsonwebtoken";
+import { env } from "../../config/env.js";
 import type { Request, Response, NextFunction } from "express";
 import { HttpError } from "../../utils/http-error.js";
 
 export function httpsRuntimeDirectory(): string { return process.env.RISPRO_HTTPS_RUNTIME_DIR || "storage/automatic-https"; }
 export function gatewayIdentity(): string { return readFileSync(process.env.RISPRO_HTTPS_GATEWAY_IDENTITY_FILE || "/run/secrets/https_gateway_identity", "utf8").trim(); }
+export function bootstrapIp(): string | null {
+  try {
+    const value = readFileSync(process.env.RISPRO_HTTPS_BOOTSTRAP_IP_FILE || "/run/secrets/https_bootstrap_ip", "utf8").trim();
+    return isIP(value) === 4 && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(value) ? value : null;
+  } catch { return null; }
+}
 export function equalSecret(a: string, b: string): boolean {
   const left = Buffer.from(a); const right = Buffer.from(b);
   return left.length > 0 && left.length === right.length && timingSafeEqual(left, right);
@@ -26,6 +36,20 @@ export function trustedHttpsRequest(req: HttpsTransportRequest): boolean {
   return Boolean(req.secure) && equalSecret(String(req.headers?.["x-rispro-https-gateway"] || ""), gatewayIdentity());
 }
 
+export function temporaryBootstrapRequest(req: HttpsTransportRequest): boolean {
+  return process.env.RISPRO_HTTPS_PROVISIONED === "true" && trustedHttpsRequest(req) && equalSecret(String(req.headers?.["x-rispro-temporary-bootstrap"] || ""), gatewayIdentity());
+}
+
+export const BOOTSTRAP_COOKIE = "rispro_https_bootstrap";
+export function bootstrapSessionHash(session: string): string { return createHash("sha256").update(session).digest("hex"); }
+export function bootstrapAuthorized(req: Request): boolean {
+  try {
+    const session = req.cookies?.[`${env.cookieName}_https`];
+    const value = jwt.verify(String(req.cookies?.[BOOTSTRAP_COOKIE] || ""), env.jwtSecret) as { purpose?: string; session?: string };
+    return Boolean(session && value.purpose === "https-bootstrap" && equalSecret(value.session || "", bootstrapSessionHash(session)));
+  } catch { return false; }
+}
+
 // Cookies are scoped to hosts, not ports. Separate names preserve existing HTTP
 // sessions while Secure HTTPS sessions are tested on the same LAN hostname.
 export function httpsCookieName(name: string, req?: HttpsTransportRequest): string { return req && trustedHttpsRequest(req) ? `${name}_https` : name; }
@@ -43,7 +67,10 @@ export function requireHttpsManagementTransport(req: Request, _res: Response, ne
   next();
 }
 
-export function httpsManagementTransportReady(req: Request): boolean { return trustedHttpsRequest(req) || protectedBootstrapRequest(req); }
+export function httpsManagementTransportReady(req: Request): boolean {
+  if (temporaryBootstrapRequest(req)) return bootstrapAuthorized(req);
+  return trustedHttpsRequest(req) || protectedBootstrapRequest(req);
+}
 
 export function enforceAutomaticHttps(req: Request, res: Response, next: NextFunction): void {
   const origin = activeHttpsOrigin();

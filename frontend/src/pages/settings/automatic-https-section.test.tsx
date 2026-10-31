@@ -3,20 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
 import AutomaticHttpsSection from "./automatic-https-section";
-import { activateAutomaticHttps, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, testAutomaticHttpsConnection, type AutomaticHttpsSettings } from "@/lib/api/settings";
+import { activateAutomaticHttps, authorizeAutomaticHttpsBootstrap, checkAutomaticHttpsDns, fetchAutomaticHttpsSettings, saveAutomaticHttpsSettings, testAutomaticHttpsConnection, type AutomaticHttpsSettings } from "@/lib/api/settings";
 
-vi.mock("@/lib/api/settings", () => ({ activateAutomaticHttps: vi.fn(), checkAutomaticHttpsDns: vi.fn(), fetchAutomaticHttpsSettings: vi.fn(), saveAutomaticHttpsSettings: vi.fn(), testAutomaticHttpsConnection: vi.fn() }));
+vi.mock("@/lib/api/settings", () => ({ activateAutomaticHttps: vi.fn(), authorizeAutomaticHttpsBootstrap: vi.fn(), checkAutomaticHttpsDns: vi.fn(), fetchAutomaticHttpsSettings: vi.fn(), saveAutomaticHttpsSettings: vi.fn(), testAutomaticHttpsConnection: vi.fn() }));
 const settings: AutomaticHttpsSettings = { provider: "acmedns", providerConfigurations: { acmedns: { serverUrl: "https://provider.example.org", subdomain: "actual-account", fullDomain: "actual-account.provider.example.org", credentialsConfigured: true }, cloudflare: null }, enabled: true, redirectHttpToHttps: false, httpRedirectActive: false, hostname: "rispro.nccb.com.ly", serverUrl: "https://provider.example.org", subdomain: "actual-account", fullDomain: "actual-account.provider.example.org", credentialsConfigured: true, encryptionReady: true, provisioned: true, managementTransportReady: true,
   cname: { type: "CNAME", name: "_acme-challenge.rispro.nccb.com.ly", target: "actual-account.provider.example.org" }, status: "Pending", activeHostname: null, activeProvider: null, issuer: null, expiresAt: null, renewal: "Pending activation", lastError: null, activationPending: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("location", new URL("http://localhost:3001"));
+  vi.stubGlobal("location", new URL("https://rispro.nccb.com.ly"));
   vi.mocked(fetchAutomaticHttpsSettings).mockResolvedValue(settings);
   vi.mocked(saveAutomaticHttpsSettings).mockResolvedValue(settings);
   vi.mocked(checkAutomaticHttpsDns).mockResolvedValue({ valid: true });
   vi.mocked(testAutomaticHttpsConnection).mockResolvedValue({ valid: true });
   vi.mocked(activateAutomaticHttps).mockResolvedValue({ accepted: true });
+  vi.mocked(authorizeAutomaticHttpsBootstrap).mockResolvedValue({ authorized: true });
 });
 
 it("shows Cloudflare token controls without ACME-DNS fields and requires a successful connection check", async () => {
@@ -75,4 +76,26 @@ it("keeps credentials disabled when a browser HTTPS origin has no verified hospi
   await screen.findByText("actual-account.provider.example.org");
   expect((screen.getByLabelText("ACME-DNS password") as HTMLInputElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Save Configuration" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("offers the temporary IP link on HTTP and blocks credentials even on localhost", async () => {
+  vi.stubGlobal("location", new URL("http://localhost:3001"));
+  vi.mocked(fetchAutomaticHttpsSettings).mockResolvedValue({ ...settings, bootstrapUrl: "https://192.168.10.5:3443/settings?section=deployment_identity" });
+  show();
+  expect((await screen.findByRole("link", { name: "Open temporary HTTPS setup" })).getAttribute("href")).toMatch(/^https:\/\/192\.168\.10\.5:3443/);
+  expect((screen.getByLabelText("ACME-DNS password") as HTMLInputElement).disabled).toBe(true);
+});
+
+it("requires a console code before enabling temporary HTTPS credentials", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("location", new URL("https://192.168.10.5:3443"));
+  vi.mocked(fetchAutomaticHttpsSettings).mockResolvedValueOnce({ ...settings, temporaryBootstrap: true, managementTransportReady: false })
+    .mockResolvedValue({ ...settings, temporaryBootstrap: true, managementTransportReady: true });
+  show();
+  await screen.findByLabelText("Single-use bootstrap authorization code");
+  expect((screen.getByLabelText("ACME-DNS password") as HTMLInputElement).disabled).toBe(true);
+  await user.type(screen.getByLabelText("Single-use bootstrap authorization code"), "0123456789abcdef");
+  await user.click(screen.getByRole("button", { name: "Authorize temporary setup" }));
+  await waitFor(() => expect(authorizeAutomaticHttpsBootstrap).toHaveBeenCalledWith("0123456789abcdef"));
+  await waitFor(() => expect((screen.getByLabelText("ACME-DNS password") as HTMLInputElement).disabled).toBe(false));
 });
