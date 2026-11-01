@@ -2,7 +2,7 @@
 // No clinical text or image bytes are written to local/session storage.
 export function createReportStore({ contextId, captureViewport, locateSource, fetcher = fetch }) {
   let state = { context: null, report: null, text: null, dirty: false, saving: false, busy: false, error: '', conflict: false, history: null, pendingCapture: null, captionEdits: {}, addendumText: '' };
-  let chain = Promise.resolve(), timer, generation = 0;
+  let chain = Promise.resolve(), timer, generation = 0, manualSaveRequired = false;
   let finalizeId=newId(),addendumId=newId(),creationId=newId();
   const listeners = new Set();
   const patch = update => { state = { ...state, ...update }; listeners.forEach(fn => fn()); };
@@ -23,7 +23,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     finally{clearTimeout(deadline);}
   };
   const failed = error => { patch({ error: error.message, conflict: error.status === 409 || state.conflict,
-    ...(error.status === 401 || error.status === 403 ? { context: { ...state.context, canEdit: false, canFinalize: false, blockedReason: error.message } } : {}) }); throw error; };
+    ...(error.status === 401 || error.status === 403 ? { report:state.report?{...state.report,canEdit:false,canFinalize:false,finalizeReasons:[error.message]}:null,context: { ...state.context, canEdit: false, canFinalize: false, blockedReason: error.message } } : {}) }); throw error; };
   const serial = work => {
     const result = chain.then(work);
     chain = result.catch(() => undefined);
@@ -39,6 +39,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
       try {
         const report = await request(base() + '/draft', 'PUT', { expectedRevision: state.report.revision, sections: state.text });
         patch({ report, dirty: generation !== submitted });
+        if(generation===submitted)manualSaveRequired=false;
       } catch (error) { failed(error); } finally { patch({ saving: false }); }
     });
   }
@@ -77,6 +78,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     getSnapshot: () => state,
     async load() {
       const context = await request('/api/native-reporting/contexts/' + contextId);
+      manualSaveRequired=false;
       patch({ context, report: context.report, text: context.report?.sections ?? null, dirty: false, conflict: false, error: '', captionEdits: {}, pendingCapture: null });
       return context;
     },
@@ -92,14 +94,16 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
         await flush();
         const report=await request('/api/native-reporting/reports/'+id);
         generation++;finalizeId=newId();addendumId=newId();
+        manualSaveRequired=false;
         patch({report,text:report.sections,dirty:false,error:'',conflict:false,history:null,captionEdits:{},addendumText:'',context:{...state.context,canEdit:report.canEdit,canFinalize:report.canFinalize}});
       });
     },
-    edit(name, value) {
+    edit(name, value, {dictated=false}={}) {
       generation++;
       patch({ text: { ...state.text, [name]: value }, dirty: true });
       clearTimeout(timer);
-      if (!state.error && !state.conflict) timer = setTimeout(() => save().catch(() => undefined), 1000);
+      if(dictated)manualSaveRequired=true;
+      if (!manualSaveRequired && !state.error && !state.conflict) timer = setTimeout(() => save().catch(() => undefined), 1000);
     },
     save: flush,
     finalize(requestId=finalizeId) {

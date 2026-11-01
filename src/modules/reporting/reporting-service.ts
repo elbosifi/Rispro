@@ -62,7 +62,14 @@ async function access(actor: Actor, appointmentId: number) {
   const manager = me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
   const canEdit = enabled && canReport && (assigned || manager) && row.appointmentStatus === "completed"
     && row.requiresReport && !row.reportingHold && !row.workflowHold && ["CT","MR","MRI"].includes(row.modalityCode.toUpperCase());
-  return { row, me, configuration, enabled, canEdit, canFinalize: canEdit && me.canFinalizeReports };
+  const finalizeReasons:string[]=[];
+  if(!enabled)finalizeReasons.push('Native reporting is disabled by viewer configuration.');
+  if(!canReport)finalizeReasons.push('Reporting permission is required for this modality.');
+  if(!assigned&&!manager)finalizeReasons.push('The assigned reporting doctor or a reporting supervisor is required.');
+  if(row.appointmentStatus!=="completed"||!row.requiresReport||row.reportingHold||row.workflowHold)finalizeReasons.push('The linked examination is held, incomplete, or does not require a report.');
+  if(!["CT","MR","MRI"].includes(row.modalityCode.toUpperCase()))finalizeReasons.push('Native reporting is unavailable for this modality.');
+  if(!me.canFinalizeReports)finalizeReasons.push('Signing permission is required.');
+  return { row, me, configuration, enabled, canEdit, canFinalize: canEdit && me.canFinalizeReports, finalizeReasons };
 }
 async function context(actor: Actor, contextId: string, appointmentId?: number, db: Pick<PoolClient,"query"> = pool) {
   const session = await findViewerContext(uuid(contextId), actor.userId, db);
@@ -105,7 +112,7 @@ export async function resolveReportContext(actor: Actor, contextId: string) {
   let blockedReason: string | null = null;
   try { assertSource(session,a.configuration); await assertMapping(pool, session); } catch (e) { blockedReason = (e as Error).message; }
   return { contextId, appointmentId: session.appointmentId, primaryStudyUid: session.studyInstanceUid,
-    enabled: a.enabled, canEdit: a.canEdit && !blockedReason, canFinalize: a.canFinalize && !blockedReason, blockedReason,
+    enabled: a.enabled, canEdit: a.canEdit && !blockedReason, canFinalize: a.canFinalize && !blockedReason, finalizeReasons:[...a.finalizeReasons,...(blockedReason?[blockedReason]:[])], blockedReason,
     identity: { ...identity(a.row), studyDate: session.studyDate || "" }, report: await getReport(actor, session.appointmentId) };
 }
 function identity(row: Awaited<ReturnType<typeof access>>["row"]): Identity {

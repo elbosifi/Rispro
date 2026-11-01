@@ -14,7 +14,7 @@ import {pool} from '../../db/pool.js';
 import {DEFAULT_REPORTING_POLICY,readReportingPolicy,updateReportingPolicy} from './reporting-policy.js';
 import {authoritativeOrthancArchiveKey,__setAuthoritativeOrthancSettingsForTests,__setAuthoritativeOrthancFetchForTests,__resetAuthoritativeOrthancForTests,type AuthoritativeOrthancSettings} from '../../services/authoritative-orthanc-service.js';
 import {upsertHistoricalPacsStudies,runHistoricalPacsSyncCycle} from '../../services/historical-pacs-index-service.js';
-import {listWorkspaceStudies,archiveStatus} from './workspace-study-service.js';
+import {listWorkspaceStudies,archiveStatus,requireStudy} from './workspace-study-service.js';
 import {createWorkspaceReport,getWorkspaceStudy,saveWorkspaceDraft,finalizeWorkspaceReport,reviewWorkspaceReport,deleteWorkspaceDraft,workspaceHistory,restoreWorkspaceRevision,getWorkspaceReport,addWorkspaceAddendum} from './workspace-report-service.js';
 import {doctorDashboard,assignedWork} from './workspace-dashboard-service.js';
 import {getDoctorReportingAppointments} from '../doctor-portal/cases-service.js';
@@ -100,6 +100,41 @@ async function bookedStudy(i:number) {
   s.accessionNumber='V2-'+String(booking).padStart(6,'0');await upsertHistoricalPacsStudies([s]);
   return {s,ct,patient,booking};
 }
+
+test('panel metadata prefers only an exact verified RIS association and never uses estimated DOB',async()=>{
+  const {s,ct,patient,booking}=await bookedStudy(97);
+  const exam=(await pool.query('select id,name_en,name_ar from exam_types where modality_id=$1 order by id limit 1',[ct])).rows[0];assert.ok(exam);
+  await pool.query('update appointments_v2.bookings set exam_type_id=$2 where id=$1',[booking,exam.id]);
+  await pool.query("update patients set estimated_date_of_birth='1980-11-02',demographics_estimated=false,sex='F' where id=$1",[patient]);
+  let access=await requireStudy(doctor,s.orthancStudyId);
+  assert.equal(access.identity.examination,exam.name_en||exam.name_ar);assert.equal(access.identity.birthDate,'1980-11-02');assert.equal(access.identity.sex,'F');assert.equal(access.identity.studyDate,s.studyDate);
+  await pool.query('update patients set demographics_estimated=true where id=$1',[patient]);
+  access=await requireStudy(doctor,s.orthancStudyId);assert.equal(access.identity.birthDate,null);
+  await pool.query('update appointments_v2.bookings set study_instance_uid=null where id=$1',[booking]);
+  access=await requireStudy(doctor,s.orthancStudyId,pool,false,'view');assert.ok(access.associationIssue);assert.equal(access.identity.examination,s.studyDescription);assert.equal(access.identity.birthDate,null);
+});
+
+test('backend signing explanations agree with eligibility for permission, policy, designated review and stale verification',async()=>{
+  const draft=await create(noSign,98),original=await readReportingPolicy();
+  let policy=original;
+  try {
+  let read=await getWorkspaceReport(noSign,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/Signing permission/);
+  policy=await updateReportingPolicy(manager,{...original,signing:'qualified'});
+  read=await getWorkspaceReport(noSign,draft.id);assert.equal(read.canFinalize,true);assert.deepEqual(read.finalizeReasons,[]);
+  policy=await updateReportingPolicy(manager,{...policy,enabled:false});
+  read=await getWorkspaceReport(noSign,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/disabled by reporting policy/);
+  policy=await updateReportingPolicy(manager,{...policy,enabled:true,signing:'permission',reviewEligibility:'designated'});
+  const reviewer=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[other.userId])).rows[0].id;
+  await reviewWorkspaceReport(noSign,draft.id,{expectedRevision:draft.revision,action:'submit',preferredReviewerId:Number(reviewer)});
+  read=await getWorkspaceReport(doctor,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/designated reviewer/);
+  assert.equal((await getWorkspaceReport(other,draft.id)).canFinalize,true);
+  await pool.query("update historical_pacs_sync_state set last_success_at=now()-interval '1 hour'");
+  read=await getWorkspaceReport(other,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/unavailable or stale/);
+  } finally {
+  await pool.query('update historical_pacs_sync_state set last_success_at=now()');
+  await updateReportingPolicy(manager,{...policy,...original,version:policy.version});
+  }
+});
 
 test('unresolved same-patient V2 association permits verified viewing and context but never links or mutates reports',async()=>{
   const {s,booking,patient}=await bookedStudy(96),oldEnabled=env.ohifEnabled;
@@ -247,8 +282,11 @@ test('mandatory review follows the creator role, including when another consulta
   let p=await readReportingPolicy();p=await updateReportingPolicy(manager,{...p,review:'mandatory',mandatoryReviewRoles:['resident']});
   await pool.query("update doctor_portal.doctor_profiles set doctor_role='resident' where user_id=$1",[doctor.userId]);
   let r=await create(doctor,9);r=await saveWorkspaceDraft(doctor,r.id,{expectedRevision:r.revision,sections:content});
+  assert.equal(r.canFinalize,false);assert.match(r.finalizeReasons.join(' '),/independent review/);
   await assert.rejects(()=>finalizeWorkspaceReport(other,r.id,{expectedRevision:r.revision,requestId:randomUUID(),confirmed:true,signerUserId:other.userId}),/Signing permission/);
   r=await reviewWorkspaceReport(doctor,r.id,{expectedRevision:r.revision,action:'submit',comment:'Training review'});
+  assert.equal(r.canFinalize,false);assert.match(r.finalizeReasons.join(' '),/requester cannot sign/);
+  const eligible=await getWorkspaceReport(other,r.id);assert.equal(eligible.canFinalize,true);assert.deepEqual(eligible.finalizeReasons,[]);
   await assert.rejects(()=>finalizeWorkspaceReport(doctor,r.id,{expectedRevision:r.revision,requestId:randomUUID(),confirmed:true,signerUserId:doctor.userId}),/Signing permission/);
   const requestId=randomUUID(),expected=r.revision;
   const signed=await finalizeWorkspaceReport(other,r.id,{expectedRevision:expected,requestId,confirmed:true,signerUserId:other.userId});

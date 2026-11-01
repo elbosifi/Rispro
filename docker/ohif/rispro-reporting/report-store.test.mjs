@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createReportStore} from './src/report-store.js';
+import {setTimeout as delay} from 'node:timers/promises';
 const initial={id:1,revision:1,status:'draft',sections:{clinicalHistory:'',comparison:'',technique:'',findings:'',impression:''},keyImages:[]};
+test('dictation cancels scheduled autosave and remains unsaved through subsequent typing until explicit Save',async()=>{
+  const {store,calls}=fixture(async(url,body)=>Response.json({...initial,revision:2,sections:body.sections}));
+  await store.load();store.edit('findings','typed');store.edit('findings','typed dictated',{dictated:true});
+  store.edit('impression','later typing');await delay(1100);
+  assert.equal(calls.length,1);assert.equal(store.getSnapshot().dirty,true);
+  await store.save();assert.equal(calls.length,2);assert.equal(store.getSnapshot().dirty,false);store.destroy();
+});
 function fixture(handler) {
   const calls=[];
   const store=createReportStore({contextId:'context',captureViewport:()=>{throw Error('Capture must use the real browser adapter');},locateSource:()=>{},fetcher:async(url,options)=>{

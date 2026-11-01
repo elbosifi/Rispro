@@ -1102,6 +1102,7 @@ describe("Reporting Assignment Board DB-backed integration", { skip: skipEnv }, 
           assert.ok(await native.getReport(manager,first.appointmentId));
           const readOnly=await fixture(supervisor),resolved=await native.resolveReportContext(manager,readOnly.contextId);
           assert.equal(resolved.canEdit,false);assert.equal(resolved.canFinalize,false);
+          assert.ok('finalizeReasons' in resolved);assert.match(resolved.finalizeReasons.join(' '),/Reporting permission is required for this modality/);
           await assert.rejects(()=>native.createReport(manager,readOnly.contextId,readOnly.appointmentId),/reporting permission/);
         }finally{await pool.query("update doctor_portal.doctor_modality_permissions set can_report=true where doctor_id=$1 and modality_id=$2",[supervisor.doctorId,ctModalityId]);}
       });

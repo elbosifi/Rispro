@@ -33,17 +33,20 @@ export async function prepareWorkspaceV2({pool,temp}) {
   return {audioPath,cleanup,delayNextTranscription:()=>{transcriptionDelay=1200;}};
   }catch(error){await cleanup();throw error;}
 }
-export async function runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixture}) {
+async function waitReport(page,id) {
+  await page.waitForFunction(id=>{const scope=JSON.parse(document.querySelector('.rispro-report')?.getAttribute('data-dictation-context')||'[]');return scope.at(-2)===id&&scope.at(-1)==='draft';},id);
+}
+export async function runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixture,pool}) {
   const contextId=new URL(page.url()).searchParams.get('risproContext');
   const readContext=async()=>{const response=await context.request.get(origin+'/api/native-reporting/contexts/'+contextId);assert.equal(response.status(),200);return response.json();};
   let authorized=await readContext();assert.equal(authorized.v2,true);const primary=authorized.report;assert.ok(primary?.id);
   const created=await context.request.post(origin+'/api/native-reporting/workspace/studies/'+authorized.studyKey+'/reports',{data:{mode:'independent',reportType:'second_opinion',requestId:randomUUID()}});assert.equal(created.status(),201);const second=await created.json();assert.notEqual(second.id,primary.id);
   await page.reload();await page.getByRole('button',{name:'Report',exact:true}).first().click();
   const picker=panel.getByLabel('Report selection');await picker.selectOption(String(second.id));
-  await page.waitForFunction(id=>document.querySelector('.rispro-report')?.getAttribute('data-dictation-context')===`native-report:${id}:draft`,second.id);
+  await waitReport(page,second.id);
   await panel.getByLabel('Findings',{exact:true}).fill('SYNTHETIC independent second interpretation.');await panel.getByLabel('Impression',{exact:true}).fill('SYNTHETIC independent impression.');await panel.getByRole('button',{name:'Save',exact:true}).click();await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
   await picker.selectOption(String(primary.id));
-  await page.waitForFunction(id=>document.querySelector('.rispro-report')?.getAttribute('data-dictation-context')===`native-report:${id}:draft`,primary.id);
+  await waitReport(page,primary.id);
   await panel.getByLabel('Findings',{exact:true}).fill('Before after');await panel.getByRole('button',{name:'Save',exact:true}).click();await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
   const findings=panel.getByLabel('Findings',{exact:true});await findings.focus();await findings.evaluate(el=>el.setSelectionRange(7,7));
   await panel.getByRole('button',{name:'Dictate into Field',exact:true}).click();await panel.getByRole('button',{name:'Stop Dictation',exact:true}).waitFor();await page.waitForTimeout(1000);
@@ -53,10 +56,14 @@ export async function runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixt
   fixture.delayNextTranscription();await findings.focus();await findings.evaluate(el=>el.setSelectionRange(0,0));
   await panel.getByRole('button',{name:'Dictate into Field',exact:true}).click();await panel.getByRole('button',{name:'Stop Dictation',exact:true}).waitFor();await page.waitForTimeout(600);
   const staleRequest=page.waitForRequest('**/api/medical-dictation/transcribe');await panel.getByRole('button',{name:'Stop Dictation',exact:true}).click();await staleRequest;
-  await picker.selectOption(String(second.id));await page.waitForFunction(id=>document.querySelector('.rispro-report')?.getAttribute('data-dictation-context')===`native-report:${id}:draft`,second.id);
+  await picker.selectOption(String(second.id));await waitReport(page,second.id);
   await page.waitForTimeout(1500);assert.equal(await panel.getByLabel('Findings',{exact:true}).inputValue(),'SYNTHETIC independent second interpretation.');
-  await picker.selectOption(String(primary.id));await page.waitForFunction(id=>document.querySelector('.rispro-report')?.getAttribute('data-dictation-context')===`native-report:${id}:draft`,primary.id);
+  await picker.selectOption(String(primary.id));await waitReport(page,primary.id);
   assert.equal(await findings.inputValue(),'Before OHIF dictated finding after');
+  if(process.env.OHIF_REPORTING_WORKFLOW==='1') {
+    await (await import('./ohif-reporting-workflow-acceptance.mjs')).runReportingWorkflow({page,panel,context,origin,c,temp,fixture,pool,primary,second,signerUserId:authorized.signerUserId});
+    return;
+  }
   await panel.getByRole('button',{name:/^Key Images/}).click();await panel.getByRole('button',{name:'Add Key Image',exact:true}).click();
   await panel.locator('figure img').waitFor();
   const firstReport=await (await context.request.get(origin+'/api/native-reporting/reports/'+primary.id)).json();const independent=await (await context.request.get(origin+'/api/native-reporting/reports/'+second.id)).json();

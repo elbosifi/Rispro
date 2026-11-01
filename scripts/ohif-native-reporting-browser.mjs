@@ -258,7 +258,7 @@ try{
     await panel.getByLabel('Findings',{exact:true}).fill('SYNTHETIC '+c.modality+' findings.\nNo clinical interpretation.');
     await panel.getByLabel('Impression',{exact:true}).fill('SYNTHETIC '+c.modality+' impression.');
     await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
-    if(workspaceV2){await (await import('./ohif-workspace-v2-acceptance.mjs')).runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixture:workspaceFixture});continue;}
+    if(workspaceV2){await (await import('./ohif-workspace-v2-acceptance.mjs')).runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixture:workspaceFixture,pool});continue;}
     await page.locator('[data-cy="side-panel-header-right"]').click();await panel.waitFor({state:'hidden'});
     await page.getByRole('button',{name:'Report',exact:true}).first().click();await panel.waitFor({state:'visible'});
     assert.equal(await panel.getByLabel('Impression',{exact:true}).inputValue(),'SYNTHETIC '+c.modality+' impression.');
@@ -441,6 +441,7 @@ try{
   }
   // The two live patient tabs retain independent report/context identities.
   for(let index=0;index<pages.length;index++)assert.match(await pages[index].getByRole('region',{name:'RISpro report'}).textContent(),new RegExp('SYNTHETIC '+cases[index].modality));
+  if(process.env.OHIF_REPORTING_WORKFLOW==='1')await (await import('./ohif-reporting-workflow-acceptance.mjs')).runPatientSwitch({pages,context,origin,fixture:workspaceFixture});
   await pool.query('update ohif_viewer_settings set native_reporting_enabled=false where singleton_key=true');
   await pages[0].reload();await pages[0].getByRole('button',{name:'Report',exact:true}).first().click();
   await pages[0].getByRole('region',{name:'RISpro report'}).getByText('Final — signed',{exact:true}).waitFor();

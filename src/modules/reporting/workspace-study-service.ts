@@ -47,12 +47,14 @@ export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false
   const duplicate=await db.query('select 1 from historical_pacs_studies where study_instance_uid=$1 and orthanc_study_id<>$2 limit 1',[study.study_instance_uid,key]);
   if(duplicate.rowCount) throw new HttpError(409,'Ambiguous Study Instance UID in the archive. Reconcile study identity.');
   if(write&&!freshness.fresh) throw new HttpError(409,'The archive index is stale. Synchronize it before changing reports.');
-  const matches=(await db.query<{id:string;patient_id:string;patient_dicom_id:string;accession:string;assigned_doctor_id:string|null;status:string;requires_report:boolean;held:boolean}>(`
+  const matches=(await db.query<{id:string;patient_id:string;patient_dicom_id:string;accession:string;assigned_doctor_id:string|null;status:string;requires_report:boolean;held:boolean;examination:string|null;birth_date:string|null;sex:string|null}>(`
     select b.id,b.patient_id,b.status,b.requires_report,cta.assigned_doctor_id,
-      ('V2-' || lpad(b.id::text,6,'0')) accession,
+      ('V2-' || lpad(b.id::text,6,'0')) accession, coalesce(nullif(trim(et.name_en),''),nullif(trim(et.name_ar),'')) examination,
+      case when not p.demographics_estimated then p.estimated_date_of_birth::text end birth_date,p.sex,
       coalesce((select value from patient_identifiers where patient_id=p.id and is_primary order by id limit 1),nullif(p.identifier_value,''),p.national_id) patient_dicom_id,
       (exists(select 1 from appointments_v2.complementary_recall_requests recall where recall.original_appointment_id=b.id and recall.status not in ('completed','cancelled','withdrawn') and recall.reporting_disposition='supplement_original_report') or exists(select 1 from doctor_portal.reporting_board_case_holds h where h.appointment_id=b.id and h.cleared_at is null)) held
     from appointments_v2.bookings b join patients p on p.id=b.patient_id
+    left join exam_types et on et.id=b.exam_type_id
     left join doctor_portal.case_team_assignments cta on cta.appointment_id=b.id and cta.assignment_type='reporting' and cta.status='active'
     where b.study_instance_uid=$1 or exists(select 1 from study_source_resolutions s where s.appointment_id=b.id and s.study_instance_uid=$1 and s.source_kind='authoritative_orthanc')`,[study.study_instance_uid])).rows;
   if(matches.length>1 || matches.some(b=>b.patient_dicom_id!==study.patient_id || study.accession_number&&study.accession_number!==b.accession)) throw new HttpError(409,'Study/appointment identity is conflicting or ambiguous. Reconciliation is required.');
@@ -71,7 +73,14 @@ export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false
     }
   }
   if(write&&appointment&&(appointment.held||appointment.status!=='completed'||!appointment.requires_report)) throw new HttpError(409,'The linked examination is held, incomplete, or does not require a report.');
-  return {me,policy,freshness,study,appointment,associationIssue,identity:studyIdentity(study)};
+  // RIS details are used only after the exact UID, patient ID and accession checks above.
+  const identity=studyIdentity(study);
+  if(appointment) {
+    identity.examination=appointment.examination||identity.examination;
+    identity.birthDate=appointment.birth_date||identity.birthDate;
+    identity.sex=appointment.sex||identity.sex;
+  }
+  return {me,policy,freshness,study,appointment,associationIssue,identity};
 }
 export function studyIdentity(s:WorkspaceStudy):Identity {
   return {patientName:s.patient_name_raw||'',patientIdentifier:s.patient_id,accession:s.accession_number||'',examination:s.study_description||s.modalities_in_study.join('/'),studyDate:s.study_date||'',birthDate:s.patient_birth_date,sex:s.patient_sex,modality:s.modalities_in_study.filter(c=>!['SR','PR','SEG','KO','DOC'].includes(c)).join('/')};

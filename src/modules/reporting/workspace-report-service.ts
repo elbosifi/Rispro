@@ -41,7 +41,7 @@ export async function workspaceStudyRegistry(db:PoolClient,a:Access,adoptLegacy=
 }
 const registry=workspaceStudyRegistry;
 function canReview(a:Access,report:ReportRow) {
-  return a.policy.reviewEligibility!=='designated' || supervisor(a.me) || Number(report.preferred_reviewer_id)===a.me.profile!.id;
+  return a.policy.reviewEligibility!=='designated' || supervisor(a.me) || Number(report.preferred_reviewer_id)===Number(a.me.profile!.id);
 }
 export function canEditWorkspaceReport(a:Access,report:ReportRow) {
   if(report.status==='final'||report.deleted_at||!a.policy.enabled||!a.freshness.fresh||a.associationIssue) return false;
@@ -50,16 +50,23 @@ export function canEditWorkspaceReport(a:Access,report:ReportRow) {
   return !report.review_requested_at || canReview(a,report);
 }
 const canEdit=canEditWorkspaceReport;
-function canSign(a:Access,report:ReportRow) {
-  const qualified=a.policy.signing==='qualified'||a.me.canFinalizeReports;
-  if(!qualified||!a.policy.enabled||report.deleted_at||!a.freshness.fresh||a.associationIssue) return false;
+export function workspaceSigningReasons(a:Access,report:ReportRow):string[] {
+  const reasons:string[]=[];
+  if(a.policy.signing!=='qualified'&&!a.me.canFinalizeReports) reasons.push('Signing permission is required under the current reporting policy.');
+  if(!a.policy.enabled) reasons.push('Native reporting is disabled by reporting policy.');
+  if(report.deleted_at) reasons.push('This report has been deleted.');
+  if(!a.freshness.fresh) reasons.push('Archive verification is unavailable or stale. Synchronize before signing.');
+  if(a.associationIssue) reasons.push(a.associationIssue);
   // A signed addendum corrects an immutable final; draft review transitions cannot
   // be applied retroactively to that already completed signature.
-  if(report.status==='final')return true;
+  if(report.status==='final')return reasons;
   const reviewRequired=a.policy.signing==='review'||a.policy.review==='mandatory'&&a.policy.mandatoryReviewRoles.includes(report.author_doctor_role||a.me.doctorRole||'');
-  if(reviewRequired&&(!report.review_requested_at||Number(report.review_requested_by)===Number(a.me.profile!.userId))) return false;
-  return !report.review_requested_at||canReview(a,report);
+  if(reviewRequired&&!report.review_requested_at) reasons.push('An independent review must be requested before signing under the current reporting policy.');
+  else if(reviewRequired&&Number(report.review_requested_by)===Number(a.me.profile!.userId)) reasons.push('An independent reviewer must sign this report; the review requester cannot sign it.');
+  if(report.review_requested_at&&!canReview(a,report)) reasons.push('Only the designated reviewer or a reporting supervisor can sign this submitted report.');
+  return reasons;
 }
+const canSign=(a:Access,report:ReportRow)=>workspaceSigningReasons(a,report).length===0;
 function canDelete(a:Access,report:ReportRow,contributors:number) {
   if(!a.policy.enabled||report.status!=='draft'||report.review_requested_at||report.deleted_at||a.policy.deletion==='disabled'||a.associationIssue) return false;
   return supervisor(a.me)||a.policy.deletion==='creator'&&Number(report.author_user_id)===Number(a.me.profile!.userId)&&contributors<=1;
@@ -73,7 +80,7 @@ async function view(db:Pick<PoolClient,'query'>,report:ReportRow,a:Access,studyK
     contributors,lastEditor:report.last_editor_name||report.author_name,createdAt:report.created_at,deletedAt:report.deleted_at,
     reviewRequestedBy:report.review_requested_by,reviewRequestedAt:report.review_requested_at,preferredReviewerId:report.preferred_reviewer_id,
     reviewEnabled:a.policy.enabled&&!a.associationIssue&&(a.policy.review!=='none'||Boolean(report.review_requested_at)),blockedReason:a.associationIssue||(a.freshness.fresh?null:'Archive verification is unavailable or stale. The preserved report is read-only.'),
-    canEdit:canEdit(a,report),canFinalize:canSign(a,report),canReview:canReview(a,report),canDelete:canDelete(a,report,contributors.length)&&a.freshness.fresh,canRecover:supervisor(a.me)&&Boolean(report.deleted_at)&&a.policy.enabled&&a.freshness.fresh&&!a.associationIssue,canRestoreRevision:a.policy.restoreRevisions&&canEdit(a,report)&&!report.review_requested_at};
+    canEdit:canEdit(a,report),canFinalize:canSign(a,report),finalizeReasons:workspaceSigningReasons(a,report),canReview:canReview(a,report),canDelete:canDelete(a,report,contributors.length)&&a.freshness.fresh,canRecover:supervisor(a.me)&&Boolean(report.deleted_at)&&a.policy.enabled&&a.freshness.fresh&&!a.associationIssue,canRestoreRevision:a.policy.restoreRevisions&&canEdit(a,report)&&!report.review_requested_at};
 }
 export const workspaceReportResponse=view;
 export async function getWorkspaceStudy(actor:Actor,key:string) {
@@ -153,7 +160,8 @@ export async function getWorkspaceReport(actor:Actor,id:number) {
   if(!report||report.deleted_at&&!supervisor(a.me)) throw new HttpError(404,'Report not found.');
   await logAuditEntry({entityType:'native_report',entityId:id,actionType:'native_report_read',newValues:{revision:report.revision},changedByUserId:actor.userId});
   const result=await view(pool,report,a,record.orthanc_study_id);
-  return {...result,blockedReason:identityChanged?'Patient/study identity changed. Reconciliation is required; preserved report content is read-only.':result.blockedReason};
+  const blockedReason=identityChanged?'Patient/study identity changed. Reconciliation is required; preserved report content is read-only.':result.blockedReason;
+  return {...result,blockedReason,finalizeReasons:identityChanged?[blockedReason!,...result.finalizeReasons]:result.finalizeReasons};
 }
 export async function withWorkspaceReport<T>(actor:Actor,id:number,expected:unknown,work:(db:PoolClient,report:ReportRow,a:Access,study:StudyRecord)=>Promise<T>,retryRequestId?:string) {
   const expectedRevision=revision(expected);

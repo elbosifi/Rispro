@@ -1,5 +1,21 @@
-.rispro-report{height:100%;overflow:auto;padding:12px;color:#eee;font-size:13px;background:#111d2d;display:flex;flex-direction:column;gap:12px;min-width:240px}
-.rispro-report-identity{position:sticky;top:-12px;background:#111d2d;z-index:2;border-bottom:1px solid #526375;padding:8px 0;overflow-wrap:anywhere}
+.rispro-report{color-scheme:dark;height:100%;overflow:auto;padding:10px;color:#eee;font-size:13px;line-height:1.4;background:#111d2d;display:flex;flex-direction:column;gap:8px;min-width:240px}
+.rispro-report-identity{border-bottom:1px solid #526375;padding:4px 0 8px;overflow-wrap:anywhere}
 .rispro-report label{display:flex;flex-direction:column;gap:5px}.rispro-report textarea{width:100%;resize:vertical;background:#071322;color:#fff;border:1px solid #53677e;border-radius:4px;padding:8px;font:inherit;line-height:1.45}
 .rispro-report textarea:focus{outline:2px solid #60a5fa}.rispro-report textarea[readonly]{background:#172332}.rispro-report-major>span{font-size:16px;font-weight:600}
 .rispro-report-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.rispro-report [role=alert]{background:#512724;padding:10px;white-space:pre-wrap}.rispro-report figure{margin:0;padding:8px;border:1px solid #53677e}.rispro-report figure img{width:100%;height:auto;max-height:280px;object-fit:contain}.rispro-report-text{white-space:pre-wrap;overflow-wrap:anywhere}
+/* This extension runs in OHIF's React/theme bundle. Use its controls and dark palette,
+   rather than importing the RIS frontend's separate React/shared-component runtime. */
+.rispro-report select,.rispro-report input{width:100%;min-width:0;min-height:32px;background:#071322;color:#fff;border:1px solid #53677e;border-radius:4px;padding:5px 8px;font:inherit}
+.rispro-report select option,.rispro-report select optgroup{background:#071322;color:#fff}
+.rispro-report select option:checked{background:#24466b;color:#fff}
+.rispro-report select:hover:not(:disabled),.rispro-report input:hover:not(:disabled){border-color:#93c5fd}
+.rispro-report select:focus-visible,.rispro-report input:focus-visible,.rispro-report summary:focus-visible{outline:2px solid #60a5fa;outline-offset:2px}
+.rispro-report input::placeholder,.rispro-report textarea::placeholder{color:#adbdce;opacity:1}
+.rispro-report select:disabled,.rispro-report input:disabled,.rispro-report textarea:disabled,.rispro-report option:disabled{color:#adbdce;background:#172332;opacity:1;cursor:not-allowed}
+.rispro-report-demographics{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;color:#d0dbe7}
+.rispro-report-examination{margin:4px 0;font-weight:600;white-space:normal;overflow-wrap:anywhere}
+.rispro-report p{margin:0}.rispro-report-reason{color:#fcdba0;font-size:12px}
+.rispro-report-dictation{display:flex;flex-direction:column;gap:4px;border-bottom:1px solid #526375;padding-bottom:8px;font-size:12px}
+.rispro-report-target{color:#b9dafd}.rispro-report summary{cursor:pointer;color:#b9dafd;padding:4px 0}
+.rispro-report details[open]>:not(summary){margin-top:6px}.rispro-report meter{width:100%;height:14px}
+.rispro-report a{color:#93c5fd;text-decoration:underline}.rispro-report a:hover{color:#dbeafe}

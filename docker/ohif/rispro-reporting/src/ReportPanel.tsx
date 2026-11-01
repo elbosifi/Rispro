@@ -2,6 +2,7 @@ import React, { useState, useSyncExternalStore } from 'react';
 import { Button, Input, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@ohif/ui-next';
 import './reporting.css';
 import DictationAdapter from './dictation-adapter';
+import {ageAtExamination,finalizeDisabledReasons} from './report-presentation';
 
 const labels={clinicalHistory:'Clinical history',comparison:'Comparison',technique:'Technique',findings:'Findings',impression:'Impression'};
 export default function ReportPanel({store}) {
@@ -10,20 +11,24 @@ export default function ReportPanel({store}) {
   const [mode,setMode]=useState('independent'),[reportType,setReportType]=useState('primary');
   const addendum=s.addendumText;
   const run=work=>Promise.resolve().then(work).catch(store.setError);
-  const report=s.report,identity=report?.identity || s.context?.identity;
-  const editable=s.context?.canEdit && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
+  const report=s.report,identity=s.context?.identity?{...report?.identity,...s.context.identity}:report?.identity;
+  const editable=(report?.canEdit??s.context?.canEdit) && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
+  const finalizeReasons=finalizeDisabledReasons(s),age=ageAtExamination(identity?.birthDate,identity?.studyDate);
+  const dictationContext=JSON.stringify([s.context?.contextId,s.context?.primaryStudyUid,identity?.patientIdentifier,identity?.accession,report?.id,report?.status]);
   const selection=report?.keyImages || [];
   const confirmAction=()=>run(async()=>{
     if(confirm==='finalize') await store.finalize();
     else await store.addendum(addendum);
     setConfirm(null);
   });
-  return <section className="rispro-report" data-dictation-context={`native-report:${report?.id}:${report?.status}`} aria-label="RISpro report" onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()}>
+  return <section className="rispro-report" data-dictation-context={dictationContext} aria-label="RISpro report" onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()}>
     {s.context?.v2&&<><label>Report<select aria-label="Report selection" value={report?.id||''} disabled={s.busy||s.conflict} onChange={e=>{const selectedId=Number(e.target.value);run(()=>store.selectReport(selectedId));}}><option value="" disabled>Select report</option>{s.context.reports?.map(r=><option key={r.id} value={r.id}>{r.author} · {r.reportType} · {r.status} · #{r.id}</option>)}</select></label><a href={'/doctor/reporting/studies/'+s.context.studyKey} target="_blank" rel="noopener noreferrer">All reports / Create independent report</a></>}
     <header className="rispro-report-identity">
-      <strong dir="auto">{identity?.patientName}</strong><div>{identity?.patientIdentifier}</div>
-      <div>Accession: {identity?.accession}</div><div>{identity?.examination} · {identity?.studyDate}</div>
-      <strong>{report?.status==='final'?'Final — signed':report?'Draft':'No native report'}</strong>
+      <strong dir="auto">{identity?.patientName||'Patient name unavailable'}</strong>
+      <div className="rispro-report-demographics"><span>ID: {identity?.patientIdentifier||'Unavailable'}</span><span>Age at exam: {age===null?'Unavailable':`${age} y`}</span><span>Sex: {identity?.sex||'Unavailable'}</span></div>
+      <div className="rispro-report-examination" dir="auto">{identity?.examination||'Examination description unavailable'}</div>
+      <div className="rispro-report-demographics"><span>Study: {identity?.studyDate||'Unavailable'}</span><span>Accession: {identity?.accession||'Unavailable'}</span></div>
+      <strong>{report?.status==='final'?'Final — signed':report?.status==='in_review'?'In review':report?'Draft':'No native report'}</strong>
       {report && <div>Author: {report.author}{report.finalizer && <><br/>Signed: {report.finalizer} · {new Date(report.finalizedAt).toLocaleString()}</>}</div>}
     </header>
     {s.error && <div role="alert">{s.error}</div>}
@@ -35,7 +40,7 @@ export default function ReportPanel({store}) {
       <Button disabled={!s.context.canEdit || s.busy} onClick={()=>run(()=>store.create({mode:s.context?.policy?.collaboration==='both'?mode:s.context?.policy?.collaboration||mode,reportType}))}>Create RISpro Report</Button>
     </>}
     {report && <>
-      <DictationAdapter report={report} enabled={editable} onError={store.setError}/>
+      <DictationAdapter report={report} contextKey={dictationContext} enabled={editable} onError={store.setError}/>
       <nav className="rispro-report-actions">
         <Button variant="outline" onClick={()=>setTab('report')}>Report</Button>
         <Button variant="outline" onClick={()=>setTab('images')}>Key Images ({selection.length})</Button>
@@ -44,17 +49,18 @@ export default function ReportPanel({store}) {
       </nav>
       {['draft','in_review'].includes(report.status) && <div className="rispro-report-actions">
         <Button disabled={!editable || s.saving} onClick={()=>run(store.save)}>Save</Button>
-        <Button disabled={!s.context?.canFinalize || s.busy || s.conflict || !!s.pendingCapture} onClick={()=>setConfirm('finalize')}>Finalize</Button>
+        <Button disabled={finalizeReasons.length>0} aria-describedby={finalizeReasons.length?'rispro-finalize-reason':undefined} onClick={()=>setConfirm('finalize')}>Finalize</Button>
         <span role="status">{s.saving?'Saving…':s.error && (s.dirty || Object.keys(s.captionEdits).length)?'Save failed':s.dirty || Object.keys(s.captionEdits).length?'Unsaved changes':'Saved'}</span>
       </div>}
+      {['draft','in_review'].includes(report.status)&&finalizeReasons.length>0&&<p id="rispro-finalize-reason" className="rispro-report-reason" role="status">{finalizeReasons.join(' ')}</p>}
       {s.conflict && <Button variant="outline" onClick={()=>{
         if(window.confirm('Discard the text currently retained in this tab and load the server report? Copy any unsaved text you need before continuing.')) run(store.load);
       }}>Reload saved report</Button>}
       {tab==='report' && <>
         {Object.entries(labels).map(([key,label])=><label key={key} className={key==='findings'||key==='impression'?'rispro-report-major':''}>
           <span>{label}{!['findings','impression'].includes(key)?' (optional)':''}</span>
-          <textarea aria-label={label} dir="auto" value={s.text?.[key] || ''} readOnly={!editable}
-            rows={key==='findings'?9:key==='impression'?5:2} onChange={e=>store.edit(key,e.target.value)}/>
+          <textarea aria-label={label} data-report-field={key} dir="auto" value={s.text?.[key] || ''} readOnly={!editable}
+            rows={key==='findings'?7:key==='impression'?4:2} onChange={e=>store.edit(key,e.target.value,{dictated:e.target.dataset.dictationInserting==='true'})}/>
         </label>)}
         {report.addenda?.map(a=><article key={a.id}><h3>Signed addendum</h3><p className="rispro-report-text" dir="auto">{a.text}</p><p>{a.author} · {new Date(a.signedAt).toLocaleString()}</p></article>)}
         {report.status==='final' && s.context?.canFinalize && <>

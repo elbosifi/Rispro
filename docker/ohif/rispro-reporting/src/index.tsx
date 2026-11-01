@@ -16,7 +16,7 @@ function show(servicesManager) {
 }
 const extension={
   id,
-  getPanelModule(){return [{name:'report',iconName:'tab-linear',iconLabel:'Report',label:'Report',component:()=>store?<ReportPanel store={store}/>:null}];},
+  getPanelModule(){return [{name:'report',iconName:'clipboard',iconLabel:'Report',label:'Report',component:()=>store?<ReportPanel store={store}/>:null}];},
   getToolbarModule({servicesManager}){return [{name:'risproReport',defaultComponent:({action,label})=><Button variant="ghost" onClick={()=>{
     show(servicesManager);if(action==='capture')store.capture().catch(store.setError);
   }}>{label}</Button>}];},
