@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -200,6 +200,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   localStorage.removeItem("rispro-language");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -1079,6 +1080,42 @@ describe("AppointmentManageModal", () => {
     expect((await screen.findByTestId("request-documents-panel")).getAttribute("data-compact-mobile-workspace")).toBe("true");
     await waitFor(() => expect(screen.getByText("Protocol and notes").closest("details")?.open).toBe(false));
     expect(screen.getAllByRole("button", { name: "More actions" })).toHaveLength(1);
+  });
+
+  it("opens the mobile panel when fresh protocol data replaces an empty placeholder and respects later manual choices", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    let resolveDetail!: (value: AppointmentWithDetails) => void;
+    mocks.getAppointmentById.mockReturnValueOnce(new Promise<AppointmentWithDetails>((resolve) => { resolveDetail = resolve; }));
+    renderModal({ initialTab: "documents", initialAppointment: appointment });
+    const details = (await screen.findByText("Protocol and notes")).closest("details")!;
+    await waitFor(() => expect(details.open).toBe(false));
+    await act(async () => resolveDetail({ ...appointment, protocolAssignmentSummary: { assignmentId: 1, protocolName: null, versionNumber: null, freeTextProtocol: "MRI brain", scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } }));
+    await waitFor(() => expect(details.open).toBe(true));
+    expect(screen.getByText("MRI brain")).toBeTruthy();
+    fireEvent.click(screen.getByText("Protocol and notes"));
+    await waitFor(() => expect(details.open).toBe(false));
+  });
+
+  it("refreshes a cached appointment on reopening and polls only while open", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["appointment-manage-modal", 42], appointment);
+    const assigned = { ...appointment, protocolAssignmentSummary: { assignmentId: 5, protocolName: null, versionNumber: null, freeTextProtocol: "Updated remotely", scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } };
+    mocks.getAppointmentById.mockResolvedValue(assigned);
+    const view = (open: boolean) => <LanguageProvider><QueryClientProvider client={client}><AppointmentManageModal appointmentId={42} open={open} onClose={vi.fn()} initialTab="documents" initialAppointment={appointment} /></QueryClientProvider></LanguageProvider>;
+    const { rerender } = render(view(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(client.getQueryData(["appointment-manage-modal", 42])).toEqual(assigned);
+    expect(mocks.getAppointmentById).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(mocks.getAppointmentById).toHaveBeenCalledTimes(2);
+    rerender(view(false));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.getAppointmentById).toHaveBeenCalledTimes(2);
+    rerender(view(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.getAppointmentById).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
   });
 
   it("keeps meaningful protocol content open on mobile and retains header More when no footer is available", async () => {

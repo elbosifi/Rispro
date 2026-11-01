@@ -33,6 +33,8 @@ function mapModalityProtocolAssignment(raw: RawRecord): ModalityProtocolAssignme
     freeTextProtocol: rawString(raw.free_text_protocol), modality: String(raw.modality).toUpperCase() as "CT" | "MRI",
     scannerId: rawNumber(raw.scanner_id), scannerName: rawString(raw.scanner_name), scannerVendor: rawString(raw.scanner_vendor),
     protocolNotes: rawString(raw.protocol_notes), contrastNotes: rawString(raw.contrast_notes),
+    libraryContrastPolicy: rawString(raw.library_contrast_policy), libraryOralContrastPolicy: rawString(raw.library_oral_contrast_policy),
+    libraryBowelPreparation: rawString(raw.library_bowel_preparation), libraryPreparationNotes: rawString(raw.library_preparation_notes),
     assignedBy: rawString(raw.assigned_by), assignedAt: rawString(raw.assigned_at), status: String(raw.status) as "ASSIGNED" | "MODIFIED",
     ctPhases: rawArray(raw.ct_phases).map((phase) => ({
       orderIndex: Number(phase.order_index), phasePresetName: rawString(phase.phase_preset_name), customPhaseName: rawString(phase.custom_phase_name),

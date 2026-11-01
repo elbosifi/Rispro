@@ -88,7 +88,8 @@ vi.mock("@/lib/appointment-printing", () => ({
   printIrSpecimenLabelById: (...args: unknown[]) => printIrSpecimenLabelByIdMock(...args),
 }));
 
-vi.mock("@/lib/protocol-printing", () => ({
+vi.mock("@/lib/protocol-printing", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/protocol-printing")>(),
   printProtocolSheet: (...args: unknown[]) => printProtocolSheetMock(...args),
   buildModalityProtocolPrintSheet: vi.fn((appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment) => ({
     patientName: appointment.englishFullName || appointment.arabicFullName,
@@ -1897,7 +1898,8 @@ describe("ModalityPage modality board", () => {
 
   it("renders Assigned CT Protocol with CT phase terminology", async () => {
     const user = await openBoard([appointment({ id: 7, accessionNumber: "ACC-CT-PROTOCOL" })]);
-    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment());
+    const phase = { ...ctAssignment().ctPhases[0], timingType: "BOLUS_TRACKING", bolusTrackingSite: "Aorta", triggerHu: 120, postTriggerDelaySeconds: 8 };
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(ctAssignment({ ctPhases: [phase], libraryContrastPolicy: "IV contrast", libraryPreparationNotes: "Fast for four hours" }));
 
     await user.click(screen.getByTestId("modality-board-row-7"));
 
@@ -1907,6 +1909,10 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Phase")).toBeTruthy();
     expect(within(drawer).queryByText("Sequence")).toBeNull();
     expect(within(drawer).getByText("Liver to symphysis")).toBeTruthy();
+    expect(within(drawer).getAllByText("IV contrast").length).toBeGreaterThan(0);
+    expect(within(drawer).getByText("Fast for four hours")).toBeTruthy();
+    expect(within(drawer).getByText("Bolus tracking · Aorta · 120 HU · +8 sec")).toBeTruthy();
+    expect(within(drawer).getByText(/Assigned at:/)).toBeTruthy();
     expect(within(drawer).getByRole("button", { name: /Patient instructions/ }).getAttribute("aria-expanded")).toBe("false");
     expect(within(drawer).queryByText("Renal protocol")).toBeNull();
     expect(within(drawer).queryByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeNull();

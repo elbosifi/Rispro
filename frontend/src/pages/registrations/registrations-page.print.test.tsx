@@ -1,8 +1,8 @@
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RegistrationsPage from "./registrations-page";
 import { LanguageProvider } from "@/providers/language-provider-component";
 import { todayIsoDateLy } from "@/lib/date-format";
@@ -159,6 +159,7 @@ function registrationAppointment(overrides: Record<string, unknown> = {}) {
 }
 
 describe("RegistrationsPage print actions", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
     localStorage.setItem("rispro-language", "en");
@@ -907,10 +908,22 @@ describe("RegistrationsPage print actions", () => {
     expect(screen.getAllByText(/No protocol assigned/i).length).toBeGreaterThan(0);
   });
 
+  it("refreshes the list when a protocol is assigned on another workstation", async () => {
+    vi.useFakeTimers();
+    const assigned = registrationAppointment({ protocolAssignmentSummary: { assignmentId: 14, protocolName: null, versionNumber: null, freeTextProtocol: "New remote assignment", scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } });
+    fetchAppointmentsMock.mockResolvedValueOnce([registrationAppointment()]).mockResolvedValue([assigned]);
+    renderRegistrationsPage();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getAllByText("No protocol assigned").length).toBeGreaterThan(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_100); });
+    expect(screen.getAllByText("Protocol: Free-text protocol").length).toBeGreaterThan(0);
+    expect(fetchAppointmentsMock).toHaveBeenCalledTimes(2);
+  });
+
   it("shows the authoritative missing-request blocker only for applicable CT/MRI rows and opens request documents", async () => {
     fetchAppointmentsMock.mockResolvedValueOnce([
       registrationAppointment({ id: 11, accessionNumber: "CT-MISSING", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false }),
-      registrationAppointment({ id: 12, accessionNumber: "MRI-MISSING", modalityCode: "MRI", modalityNameEn: "MRI", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false }),
+      registrationAppointment({ id: 12, accessionNumber: "MRI-MISSING", modalityCode: "MR", modalityNameEn: "MRI", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: false, protocolAssignmentSummary: { assignmentId: 12, protocolName: null, versionNumber: null, freeTextProtocol: "MRI brain with contrast", scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } }),
       registrationAppointment({ id: 13, accessionNumber: "CT-READY", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true }),
       registrationAppointment({ id: 14, accessionNumber: "CT-ASSIGNED", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: true, hasQualifyingRequestDocument: true, protocolAssignmentSummary: { assignmentId: 14, protocolName: "CT Head", versionNumber: "1", freeTextProtocol: null, scannerName: null, scannerVendor: null, assignedBy: null, assignedAt: null, protocolNotes: null, contrastNotes: null } }),
       registrationAppointment({ id: 15, accessionNumber: "MAMMO", modalityCode: "MG", modalityNameEn: "Mammo", requireRequestDocumentForProtocolQueue: true, protocolQueueAppliesToAppointment: false, hasQualifyingRequestDocument: false }),
@@ -920,6 +933,12 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     expect(await screen.findAllByRole("button", { name: "Missing request" })).toHaveLength(4);
+    const mrRow = within(getAppointmentRow("MRI-MISSING"));
+    expect(mrRow.getByRole("button", { name: "Missing request" })).toBeTruthy();
+    expect(mrRow.getByText("Protocol assigned")).toBeTruthy();
+    expect(mrRow.getByText("Protocol: Free-text protocol")).toBeTruthy();
+    expect(mrRow.queryByText("No protocol assigned")).toBeNull();
+    expect(mrRow.getByRole("button", { name: "Print protocol" })).toBeTruthy();
     expect(within(getAppointmentRow("CT-READY")).getByText("No protocol assigned")).toBeTruthy();
     expect(within(getAppointmentRow("CT-ASSIGNED")).getByText("Protocol assigned")).toBeTruthy();
     expect(within(getAppointmentRow("MAMMO")).queryByRole("button", { name: "Missing request" })).toBeNull();

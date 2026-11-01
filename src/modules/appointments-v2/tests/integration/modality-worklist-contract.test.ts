@@ -20,6 +20,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createTestApp>>;
   let authCookie: string;
+  let insertedMrModalityId: string | undefined;
 
   before(async () => {
     if (!await canReachDatabase()) {
@@ -38,6 +39,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     await pool.query("delete from cd_robot_deliveries where requested_by_user_id = $1", [testData.userId]);
     await app.close();
     await testDb.cleanup();
+    if (insertedMrModalityId) await pool.query("delete from modalities where id = $1", [insertedMrModalityId]);
   });
 
   function guard() {
@@ -241,10 +243,17 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(row?.status, "in-progress");
   });
 
-  it("returns active free-text MR protocol assignments in the worklist and detail read", async () => {
+  it("retains free-text MR and MRI assignments through completion, reopening, and cancellation", async () => {
     guard();
-    const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = 'MRI' limit 1");
-    assert.ok(mrModality.rows[0]?.id, "an MRI modality is required for the regression fixture");
+    const insertedMr = await pool.query<{ id: string }>(
+      `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
+       values ($1, $1, 'MR', 10, true) on conflict (code) do nothing returning id::text`,
+      [`${TEST_PREFIX} MR`]
+    );
+    insertedMrModalityId = insertedMr.rows[0]?.id;
+    for (const code of ["MR", "MRI"]) {
+    const mrModality = await pool.query<{ id: string }>("select id::text from modalities where upper(code) = $1 limit 1", [code]);
+    assert.ok(mrModality.rows[0]?.id, `${code} modality is required for the regression fixture`);
     const mrModalityId = Number(mrModality.rows[0].id);
     const examType = await pool.query<{ id: string }>(
       `
@@ -252,7 +261,7 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
         values ($1, $2, $3, $4, true)
         returning id::text
       `,
-      [mrModalityId, `${TEST_PREFIX} MR Exam`, `${TEST_PREFIX} MR Exam`, `${TEST_PREFIX}MR_EXAM`]
+      [mrModalityId, `${TEST_PREFIX} ${code} Exam`, `${TEST_PREFIX} ${code} Exam`, `${TEST_PREFIX}${code}_EXAM`]
     );
     const bookingId = await createBooking(testData.patientId, mrModalityId, Number(examType.rows[0].id));
     const assignmentResult = await pool.query<{ id: string }>(
@@ -287,6 +296,40 @@ describe("V2 modality worklist backend contract", { skip: skipEnv }, () => {
     assert.equal(Number(detail.data.assignment?.assignment_id), assignmentId);
     assert.equal(detail.data.assignment?.modality, "MRI");
     assert.equal(detail.data.assignment?.free_text_protocol, "MRI brain with contrast");
+
+    const list = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(app.baseUrl, `/api/v2/read/appointments?patientId=${testData.patientId}&status=completed`, { cookie: authCookie });
+    const appointmentDetail = await fetchJson<{ appointment: Record<string, unknown> }>(app.baseUrl, `/api/v2/read/appointments/${bookingId}`, { cookie: authCookie });
+    assert.equal(Number(list.data.appointments.find((item) => Number(item.id) === bookingId)?.protocol_assignment_id), assignmentId);
+    assert.equal(Number(appointmentDetail.data.appointment.protocol_assignment_id), assignmentId);
+
+    const reopened = await fetchJson(app.baseUrl, `/api/v2/read/appointments/${bookingId}/status`, { method: "POST", body: { status: "arrived", reason: "Reopen test" }, cookie: authCookie });
+    assert.equal(reopened.status, 200, JSON.stringify(reopened.data));
+    const afterArrival = await fetchJson<{ appointment: Record<string, unknown> }>(app.baseUrl, `/api/v2/read/appointments/${bookingId}`, { cookie: authCookie });
+    assert.equal(afterArrival.data.appointment.status, "arrived");
+    assert.equal(Number(afterArrival.data.appointment.protocol_assignment_id), assignmentId);
+    const discontinue = await fetchJson(app.baseUrl, `/api/v2/read/appointments/${bookingId}/status`, { method: "POST", body: { status: "discontinued", reason: "Discontinue test" }, cookie: authCookie });
+    assert.equal(discontinue.status, 200, JSON.stringify(discontinue.data));
+    const discontinuedDetail = await fetchJson<{ assignment: Record<string, unknown> | null }>(app.baseUrl, `/api/v2/read/modality/appointments/${bookingId}/protocol-assignment`, { cookie: authCookie });
+    const discontinuedWorklist = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(app.baseUrl, `/api/v2/read/modality/worklist?modalityId=${mrModalityId}&scope=all`, { cookie: authCookie });
+    assert.equal(Number(discontinuedDetail.data.assignment?.assignment_id), assignmentId);
+    assert.equal(Number(discontinuedWorklist.data.appointments.find((item) => Number(item.id) === bookingId)?.protocol_assignment_id), assignmentId);
+    const reopenedScanning = await fetchJson(app.baseUrl, `/api/v2/read/appointments/${bookingId}/reopen-for-scanning`, { method: "POST", body: { reason: "Reopen test" }, cookie: authCookie });
+    assert.equal(reopenedScanning.status, 200, JSON.stringify(reopenedScanning.data));
+    const afterReopen = await fetchJson<{ appointment: Record<string, unknown> }>(app.baseUrl, `/api/v2/read/appointments/${bookingId}`, { cookie: authCookie });
+    assert.equal(afterReopen.data.appointment.status, "waiting");
+    assert.equal(Number(afterReopen.data.appointment.protocol_assignment_id), assignmentId);
+    const assignments = await pool.query<{ id: string; free_text_protocol: string }>("select id::text, free_text_protocol from appointment_protocol_assignments where appointment_id = $1", [bookingId]);
+    assert.equal(assignments.rows.length, 1);
+    assert.equal(Number(assignments.rows[0].id), assignmentId);
+    assert.equal(assignments.rows[0].free_text_protocol, "MRI brain with contrast");
+    await pool.query("update appointment_protocol_assignments set status = 'CANCELLED' where id = $1", [assignmentId]);
+    const cancelled = await fetchJson<{ assignment: unknown }>(app.baseUrl, `/api/v2/read/modality/appointments/${bookingId}/protocol-assignment`, { cookie: authCookie });
+    const cancelledDetail = await fetchJson<{ appointment: Record<string, unknown> }>(app.baseUrl, `/api/v2/read/appointments/${bookingId}`, { cookie: authCookie });
+    const cancelledWorklist = await fetchJson<{ appointments: Array<Record<string, unknown>> }>(app.baseUrl, `/api/v2/read/modality/worklist?modalityId=${mrModalityId}&scope=all`, { cookie: authCookie });
+    assert.equal(cancelled.data.assignment, null);
+    assert.equal(cancelledDetail.data.appointment.protocol_assignment_id, null);
+    assert.equal(cancelledWorklist.data.appointments.find((item) => Number(item.id) === bookingId)?.protocol_assignment_id, null);
+    }
   });
 
   it("summarizes only the most recent CD delivery status while preserving success counts", async () => {

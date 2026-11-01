@@ -245,6 +245,7 @@ export function AppointmentManageModal({
   const [reopenForScanningError, setReopenForScanningError] = useState<string | null>(null);
   const legacyStatusKeyRef = useRef<string | null>(null);
   const protocolPanelContextKeyRef = useRef<string | null>(null);
+  const protocolPanelHadAssignmentRef = useRef(false);
   const onTabChangeRef = useRef(onTabChange);
   useEffect(() => {
     onTabChangeRef.current = onTabChange;
@@ -273,7 +274,10 @@ export function AppointmentManageModal({
     },
     enabled: open && normalizedAppointmentId !== null,
     placeholderData: initialAppointment?.id === normalizedAppointmentId ? initialAppointment : undefined,
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: open ? 15_000 : false,
+    refetchIntervalInBackground: false,
   });
   const appointment = appointmentQuery.data ?? null;
 
@@ -726,13 +730,19 @@ export function AppointmentManageModal({
   useEffect(() => {
     if (!open) {
       protocolPanelContextKeyRef.current = null;
+      protocolPanelHadAssignmentRef.current = false;
       return;
     }
     if (!appointment) return;
     const contextKey = `${appointment.id}:${isMobileViewport ? "mobile" : "desktop"}`;
-    if (protocolPanelContextKeyRef.current === contextKey) return;
-    protocolPanelContextKeyRef.current = contextKey;
-    setProtocolPanelOpen(isMobileViewport ? Boolean(appointment.protocolAssignmentSummary || appointment.notes?.trim()) : true);
+    const hasAssignment = Boolean(appointment.protocolAssignmentSummary);
+    if (protocolPanelContextKeyRef.current !== contextKey) {
+      protocolPanelContextKeyRef.current = contextKey;
+      setProtocolPanelOpen(isMobileViewport ? Boolean(hasAssignment || appointment.notes?.trim()) : true);
+    } else if (hasAssignment && !protocolPanelHadAssignmentRef.current) {
+      setProtocolPanelOpen(true);
+    }
+    protocolPanelHadAssignmentRef.current = hasAssignment;
   }, [appointment, isMobileViewport, open]);
 
   useEffect(() => {

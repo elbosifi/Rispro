@@ -40,7 +40,7 @@ test("modality worklist exposes the active protocol assignment in the same query
   assert.match(source, /left join lateral \(/);
   assert.match(source, /from appointment_protocol_assignments assignment/);
   assert.match(source, /assignment\.status <> 'CANCELLED'/);
-  assert.match(source, /b\.status not in \('cancelled', 'discontinued', 'voided'\)/);
+  assert.match(source, /b\.status not in \('cancelled', 'voided'\)/);
   assert.match(source, /limit 1\r?\n\s*\) protocol_assignment on true/);
 });
 

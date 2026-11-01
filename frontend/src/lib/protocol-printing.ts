@@ -1,5 +1,5 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { ModalityProtocolAssignment } from "@/types/api";
+import type { ModalityCtProtocolPhase, ModalityProtocolAssignment } from "@/types/api";
 import { pushToast } from "@/lib/toast";
 
 export type ProtocolPrintModality = "CT" | "MRI";
@@ -42,6 +42,7 @@ export interface ProtocolPrintSheet {
   assignedAt: string | null;
   protocolInstructions: string | null;
   contrastInstructions: string | null;
+  libraryGuidance?: string | null;
   ctPhases?: ProtocolPrintCtPhase[];
   mriSequences?: ProtocolPrintMriSequence[];
 }
@@ -212,6 +213,7 @@ function html(sheet: ProtocolPrintSheet): string {
       <div class="box"><strong>Protocol instructions</strong><br>${longText(sheet.protocolInstructions)}</div>
       <div class="box"><strong>Contrast/preparation instructions</strong><br>${longText(sheet.contrastInstructions)}</div>
     </div>
+    ${sheet.libraryGuidance ? `<div class="box"><strong>Current library guidance</strong><br>${longText(sheet.libraryGuidance)}</div>` : ""}
   </section>
   <section>
     <h2>${sheet.modality === "CT" ? "CT phases" : "MRI sequences"}</h2>
@@ -259,6 +261,18 @@ function effectiveValue(override: string | null | undefined, fallback: string | 
   return override?.trim() || (fallback == null ? null : String(fallback));
 }
 
+export function formatModalityCtPhaseTiming(phase: ModalityCtProtocolPhase): string | null {
+  if (phase.timingType === "NON_CONTRAST") return "Non-contrast";
+  if (phase.timingType === "FIXED_DELAY_INJECTION_START") return `${phase.delaySeconds == null ? "Delay" : `${phase.delaySeconds} sec`} after start of IV contrast`;
+  if (phase.timingType === "FIXED_DELAY_INJECTION_END") return `${phase.delaySeconds == null ? "Delay" : `${phase.delaySeconds} sec`} after completion of IV contrast`;
+  if (phase.timingType === "BOLUS_TRACKING") return ["Bolus tracking", phase.bolusTrackingSite, phase.triggerHu == null ? null : `${phase.triggerHu} HU`, phase.postTriggerDelaySeconds == null ? null : `+${phase.postTriggerDelaySeconds} sec`].filter(Boolean).join(" · ");
+  if (phase.timingOverride?.trim()) return phase.timingOverride;
+  if (phase.presetContrastStatus === "NON_CONTRAST") return "Non-contrast";
+  if (phase.presetTimingType === "FIXED_DELAY") return `Fixed delay${phase.presetDelaySeconds == null ? "" : ` · ${phase.presetDelaySeconds} sec`} (legacy preset)`;
+  if (phase.presetTimingType === "BOLUS_TRACKING") return ["Bolus tracking (legacy preset)", phase.presetBolusTrackingSite, phase.presetTriggerHu == null ? null : `${phase.presetTriggerHu} HU`].filter(Boolean).join(" · ");
+  return (phase.timingType && phase.delaySeconds != null ? `${phase.timingType} ${phase.delaySeconds}s` : phase.timingType) || phase.presetInstructions || null;
+}
+
 export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment): ProtocolPrintSheet {
   const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ") || null;
   const base = {
@@ -275,12 +289,18 @@ export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDeta
     scanner,
     assignedBy: assignment.assignedBy,
     assignedAt: assignment.assignedAt,
-    protocolInstructions: assignment.freeTextProtocol ?? assignment.protocolNotes,
+    protocolInstructions: [assignment.freeTextProtocol, assignment.protocolNotes].filter(Boolean).join("\n\n") || null,
     contrastInstructions: assignment.contrastNotes,
+    libraryGuidance: [
+      assignment.libraryContrastPolicy && `IV contrast policy: ${assignment.libraryContrastPolicy}`,
+      assignment.libraryOralContrastPolicy && `Oral contrast policy: ${assignment.libraryOralContrastPolicy}`,
+      assignment.libraryBowelPreparation && `Bowel preparation: ${assignment.libraryBowelPreparation}`,
+      assignment.libraryPreparationNotes && `Preparation notes: ${assignment.libraryPreparationNotes}`,
+    ].filter(Boolean).join("\n") || null,
   };
   if (assignment.modality === "CT") return {
     ...base, modality: "CT",
-    ctPhases: assignment.ctPhases.map((phase) => ({ orderIndex: phase.orderIndex, phase: effectiveValue(phase.customPhaseName, phase.phasePresetName), timing: effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType), coverage: effectiveValue(phase.coverageOverride, phase.coverage), reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes), instructions: effectiveValue(phase.instructionsOverride, phase.instructions), isRequired: phase.isRequired })),
+    ctPhases: assignment.ctPhases.map((phase) => ({ orderIndex: phase.orderIndex, phase: effectiveValue(phase.customPhaseName, phase.phasePresetName), timing: formatModalityCtPhaseTiming(phase), coverage: effectiveValue(phase.coverageOverride, phase.coverage), reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes), instructions: effectiveValue(phase.instructionsOverride, phase.instructions), isRequired: phase.isRequired })),
   };
   return {
     ...base, modality: "MRI",

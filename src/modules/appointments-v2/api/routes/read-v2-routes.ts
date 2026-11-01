@@ -85,7 +85,7 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
             protocol.name as protocol_name,
             version.version_number,
             assignment.free_text_protocol,
-            upper(coalesce(protocol.modality, (select code from modalities where id = b.modality_id))) as modality,
+            ${protocolingModalityCodeSql("coalesce(protocol.modality, (select code from modalities where id = b.modality_id))")} as modality,
             assignment.scanner_id,
             scanner.name as scanner_name,
             scanner.vendor as scanner_vendor,
@@ -102,7 +102,7 @@ const PROTOCOL_ASSIGNMENT_JOIN = `
           left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
           where assignment.appointment_id = b.id
             and assignment.status <> 'CANCELLED'
-            and upper(coalesce(protocol.modality, (select code from modalities where id = b.modality_id))) in ('CT', 'MRI')
+            and ${protocolingModalityAppliesSql(protocolingModalityCodeSql("coalesce(protocol.modality, (select code from modalities where id = b.modality_id))"))}
           order by assignment.updated_at desc, assignment.id desc
           limit 1
         ) protocol_assignment on true`;
@@ -1566,7 +1566,7 @@ router.get(
         left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
         where assignment.appointment_id = b.id
           and assignment.status <> 'CANCELLED'
-          and b.status not in ('cancelled', 'discontinued', 'voided')
+          and b.status not in ('cancelled', 'voided')
           and ${protocolingModalityAppliesSql(protocolingModalityCodeSql("coalesce(protocol.modality, m.code)"))}
         order by assignment.updated_at desc, assignment.id desc
         limit 1

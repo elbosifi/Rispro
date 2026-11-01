@@ -45,7 +45,7 @@ import {
 } from "@/components/shared";
 import { createCdRobotDelivery, fetchAppointmentLookups, fetchCdRobotDeliveries, fetchCdRobotDestinations, fetchModalityHistoricalPacsCandidates, fetchModalityPatientHistory, fetchModalityProtocolAssignment, fetchModalityWorklist, fetchRequestScanStatus, fetchStatistics, recordModalityHistoricalPacsAttestation, retryCdRobotDelivery, searchModalityHistoricalPacsPatientId, completeAppointment, updateAppointmentStatus, type CdRobotDelivery, type ModalityHistoricalPacsCandidatesResponse } from "@/lib/api-hooks";
 import { printAppointmentSlipById, printIrSpecimenLabelById } from "@/lib/appointment-printing";
-import { buildModalityProtocolPrintSheet, printProtocolSheet } from "@/lib/protocol-printing";
+import { buildModalityProtocolPrintSheet, formatModalityCtPhaseTiming, printProtocolSheet } from "@/lib/protocol-printing";
 import { chooseLocalized, t, type TranslationKey } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
 import { formatDateLy, formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
@@ -2803,6 +2803,7 @@ function ProtocolAssignmentPanel({
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <Badge variant="neutral" size="sm">{t(protocolLanguage, "modality.readOnly")}</Badge>
             {hasMeaningfulValue(assignment.assignedBy) ? <span>{t(protocolLanguage, "modality.assignedBy")} {assignment.assignedBy}</span> : null}
+            {assignment.assignedAt ? <span>{chooseLocalized(protocolLanguage, "وقت التعيين", "Assigned at")}: {formatDateTimeLy(assignment.assignedAt)}</span> : null}
           </div>
         </div>
         <Button type="button" variant="secondary" size="sm" aria-label={t(protocolLanguage, "modality.printProtocol")} onClick={() => printProtocolSheet(printSheet)}>
@@ -2822,6 +2823,16 @@ function ProtocolAssignmentPanel({
       </div>
 
       {hasContrastNotes ? <div className="mt-3"><DetailField label={t(protocolLanguage, "modality.contrastPreparation")} value={assignment.contrastNotes} /></div> : null}
+
+      {[assignment.libraryContrastPolicy, assignment.libraryOralContrastPolicy, assignment.libraryBowelPreparation, assignment.libraryPreparationNotes].some(hasMeaningfulValue) ? (
+        <section className="mt-3 space-y-2" aria-label={chooseLocalized(protocolLanguage, "إرشادات المكتبة الحالية", "Current library guidance")}>
+          <h4 className="text-xs font-semibold">{chooseLocalized(protocolLanguage, "إرشادات المكتبة الحالية", "Current library guidance")}</h4>
+          {hasMeaningfulValue(assignment.libraryContrastPolicy) ? <DetailField label={chooseLocalized(protocolLanguage, "سياسة التباين الوريدي", "IV contrast policy")} value={assignment.libraryContrastPolicy} /> : null}
+          {hasMeaningfulValue(assignment.libraryOralContrastPolicy) ? <DetailField label={chooseLocalized(protocolLanguage, "سياسة التباين الفموي", "Oral contrast policy")} value={assignment.libraryOralContrastPolicy} /> : null}
+          {hasMeaningfulValue(assignment.libraryBowelPreparation) ? <DetailField label={chooseLocalized(protocolLanguage, "تحضير الأمعاء", "Bowel preparation")} value={assignment.libraryBowelPreparation} /> : null}
+          {hasMeaningfulValue(assignment.libraryPreparationNotes) ? <DetailField label={chooseLocalized(protocolLanguage, "ملاحظات التحضير", "Preparation notes")} value={assignment.libraryPreparationNotes} /> : null}
+        </section>
+      ) : null}
 
       {scanner ? (
         <section dir="ltr" className="mt-3" aria-label={t(protocolLanguage, "modality.scannerExecution")}>
@@ -2859,7 +2870,7 @@ function ProtocolAssignmentPanel({
             <tbody className="divide-y divide-slate-200">
               {assignment.ctPhases.map((phase) => {
                 const phaseName = effectiveValue(phase.customPhaseName, phase.phasePresetName);
-                const timing = effectiveValue(phase.timingOverride, phase.delaySeconds != null ? `${phase.timingType ?? "Delay"} ${phase.delaySeconds}s` : phase.timingType);
+                const timing = formatModalityCtPhaseTiming(phase);
                 const coverage = effectiveValue(phase.coverageOverride, phase.coverage);
                 const reconstruction = effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes);
                 const instructions = effectiveValue(phase.instructionsOverride, phase.instructions);

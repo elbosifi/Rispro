@@ -1371,6 +1371,10 @@ export interface ModalityMriProtocolSequence {
 }
 
 export interface ModalityProtocolAssignment {
+  libraryContrastPolicy?: string | null;
+  libraryOralContrastPolicy?: string | null;
+  libraryBowelPreparation?: string | null;
+  libraryPreparationNotes?: string | null;
   assignmentId: number;
   appointmentId: number;
     protocolId: number | null;

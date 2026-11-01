@@ -93,6 +93,8 @@ describe("Reception protocol assignment read summary", () => {
     assert.match(routes, /left join protocols protocol/);
     assert.match(routes, /left join protocol_versions version/);
     assert.match(routes, /coalesce\(protocol\.modality/);
+    assert.match(routes, /protocolingModalityCodeSql\("coalesce\(protocol\.modality, \(select code from modalities where id = b\.modality_id\)\)"\)/);
+    assert.equal((routes.match(/\$\{PROTOCOL_ASSIGNMENT_JOIN\}/g) ?? []).length, 2);
     assert.match(routes, /order by assignment\.updated_at desc, assignment\.id desc/);
     assert.match(routes, /limit 1/);
   });

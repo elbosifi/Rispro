@@ -207,6 +207,8 @@ export default function RegistrationsPage() {
     queryKey: ["registrations", filters, patientIdParam],
     queryFn: () => fetchAppointments(buildRegistrationAppointmentQuery({ ...filters, patientId: patientIdParam || undefined })),
     staleTime: 1000 * 30,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   const {
     data: slipSettings,
@@ -652,7 +654,7 @@ export default function RegistrationsPage() {
   function protocolVersionText(appointment: AppointmentWithDetails): string | null {
     const summary = appointment.protocolAssignmentSummary;
     if (!summary) return null;
-    return [summary.protocolName || (summary.freeTextProtocol ? t("modality.protocol") : t("modality.protocolAssigned")), summary.versionNumber ? `v${summary.versionNumber}` : null]
+    return [summary.protocolName || (summary.freeTextProtocol ? t("modality.freeTextProtocol") : t("modality.protocolAssigned")), summary.versionNumber ? `v${summary.versionNumber}` : null]
       .filter(Boolean)
       .join(" ");
   }
@@ -677,7 +679,7 @@ export default function RegistrationsPage() {
 
   function usesProtocolWorkflow(appointment: AppointmentWithDetails): boolean {
     const modality = (appointment.modalityCode || appointment.modalityNameEn || "").toUpperCase();
-    return modality === "CT" || modality === "MRI";
+    return modality === "CT" || modality === "MR" || modality === "MRI";
   }
 
   function ProtocolStatus({ appointment }: { appointment: AppointmentWithDetails }) {
@@ -686,9 +688,11 @@ export default function RegistrationsPage() {
       appointment.protocolQueueAppliesToAppointment === true &&
       appointment.hasQualifyingRequestDocument === false;
 
-    if (requestDocumentMissing) {
-      return (
-        <div className="mt-1.5 text-[10.5px] leading-snug">
+    const summary = appointment.protocolAssignmentSummary;
+    if (!requestDocumentMissing && !usesProtocolWorkflow(appointment)) return null;
+    return (
+      <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-snug text-muted-foreground">
+        {requestDocumentMissing ? (
           <button
             type="button"
             className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-900 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
@@ -699,27 +703,17 @@ export default function RegistrationsPage() {
           >
             {t("registrations.missingRequest")}
           </button>
-        </div>
-      );
-    }
-
-    if (!usesProtocolWorkflow(appointment)) return null;
-    const summary = appointment.protocolAssignmentSummary;
-    if (!summary) {
-      return (
-        <div className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">
+        ) : null}
+        {usesProtocolWorkflow(appointment) && !summary ? (
           <span className="inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 font-semibold text-slate-600">
             {t("modality.noProtocolAssigned")}
           </span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-snug text-muted-foreground">
+        ) : null}
+        {usesProtocolWorkflow(appointment) && summary ? <>
         <div className="flex items-center gap-2"><span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">{t("modality.protocolAssigned")}</span><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" aria-label={t("modality.printProtocol")} title={t("modality.printProtocol")} onClick={(event) => { event.stopPropagation(); handleProtocolPrint(appointment); }}>{t("modality.printProtocol")}</Button></div>
         <p className="truncate text-foreground">{t("modality.protocol")}: {protocolVersionText(appointment)}</p>
         {summary.scannerName ? <p className="truncate">{t("modality.scanner")}: {summary.scannerName}</p> : null}
+        </> : null}
       </div>
     );
   }

@@ -69,6 +69,10 @@ export interface ModalityProtocolAssignment {
   scanner_vendor: string | null;
   protocol_notes: string | null;
   contrast_notes: string | null;
+  library_contrast_policy: string | null;
+  library_oral_contrast_policy: string | null;
+  library_bowel_preparation: string | null;
+  library_preparation_notes: string | null;
   assigned_by: string | null;
   assigned_at: string | null;
   status: "ASSIGNED" | "MODIFIED";
@@ -99,6 +103,10 @@ function mapAssignment(row: RawRecord): Omit<ModalityProtocolAssignment, "ct_pha
     scanner_vendor: textOrNull(row.scanner_vendor),
     protocol_notes: textOrNull(row.protocol_notes),
     contrast_notes: textOrNull(row.contrast_notes),
+    library_contrast_policy: textOrNull(row.library_contrast_policy),
+    library_oral_contrast_policy: textOrNull(row.library_oral_contrast_policy),
+    library_bowel_preparation: textOrNull(row.library_bowel_preparation),
+    library_preparation_notes: textOrNull(row.library_preparation_notes),
     assigned_by: textOrNull(row.assigned_by),
     assigned_at: textOrNull(row.assigned_at),
     status: String(row.status) as "ASSIGNED" | "MODIFIED",
@@ -179,6 +187,10 @@ export async function getModalityProtocolAssignment(
         scanner.vendor as scanner_vendor,
         assignment.protocol_notes,
         assignment.contrast_notes,
+        protocol.contrast_policy as library_contrast_policy,
+        protocol.oral_contrast_policy as library_oral_contrast_policy,
+        protocol.bowel_preparation as library_bowel_preparation,
+        protocol.preparation_notes as library_preparation_notes,
         coalesce(doctor.display_name, assigned_user.full_name) as assigned_by,
         assignment.assigned_at::text as assigned_at,
         assignment.status
@@ -191,7 +203,7 @@ export async function getModalityProtocolAssignment(
       left join users assigned_user on assigned_user.id = assignment.assigned_by
       left join doctor_portal.doctor_profiles doctor on doctor.user_id = assigned_user.id
       where booking.id = $1
-        and booking.status not in ('cancelled', 'discontinued', 'voided')
+        and booking.status not in ('cancelled', 'voided')
         and ${protocolingModalityAppliesSql(protocolingModalityCodeSql("coalesce(protocol.modality, modality.code)"))}
         and assignment.status <> 'CANCELLED'
       order by assignment.updated_at desc, assignment.id desc

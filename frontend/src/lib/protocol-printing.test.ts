@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pushToast } from "./toast";
-import { printProtocolSheet, type ProtocolPrintSheet } from "./protocol-printing";
+import { formatModalityCtPhaseTiming, printProtocolSheet, type ProtocolPrintSheet } from "./protocol-printing";
 
 vi.mock("./toast", () => ({ pushToast: vi.fn() }));
 
@@ -52,6 +52,10 @@ describe("printProtocolSheet", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("preserves CT bolus tracking details in the timing used for printing", () => {
+    expect(formatModalityCtPhaseTiming({ orderIndex: 1, phasePresetName: null, customPhaseName: "Arterial", contrastStatus: null, timingType: "BOLUS_TRACKING", delaySeconds: null, timingOverride: null, coverage: null, coverageOverride: null, reconstructionNotes: null, reconstructionOverride: null, instructions: null, instructionsOverride: null, bolusTrackingSite: "Aorta", triggerHu: 120, postTriggerDelaySeconds: 8, isRequired: true })).toBe("Bolus tracking · Aorta · 120 HU · +8 sec");
   });
 
   it("writes a self-contained protocol sheet into a writable print window", () => {
