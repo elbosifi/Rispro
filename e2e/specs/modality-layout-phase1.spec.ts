@@ -62,6 +62,7 @@ test("synthetic CT identity and workspace remain visible at workstation and mobi
         expect(box.right).toBeLessThanOrEqual(footerBox!.x + footerBox!.width + 1);
       }
       if (width < 1024) {
+        await expect(drawer.getByTestId("clinical-desktop-navigation")).toHaveCount(0);
         const moreIcon = await footer.getByRole("button", { name: "Appointment actions" }).locator("svg").boundingBox();
         expect(moreIcon!.width).toBeGreaterThanOrEqual(16);
         const switcher = drawer.getByRole("group", { name: "Clinical workspace" });
@@ -71,6 +72,15 @@ test("synthetic CT identity and workspace remain visible at workstation and mobi
         await switcher.getByRole("button", { name: "Protocol" }).click();
         await expect(drawer.getByTestId("clinical-protocol-content")).toBeVisible();
       } else {
+        const navigation = drawer.getByTestId("clinical-desktop-navigation");
+        await expect(navigation.getByRole("button", { name: "Previous studies" })).toBeVisible();
+        const navBox = await navigation.boundingBox();
+        const docBox = await drawer.getByTestId("clinical-request-documents").boundingBox();
+        expect(docBox!.y).toBeLessThanOrEqual(navBox!.y + 2);
+        await navigation.getByRole("button", { name: "Previous studies" }).click();
+        await expect(drawer.getByTestId("clinical-previous-studies-region")).toBeVisible();
+        await drawer.getByRole("button", { name: "Appointment", exact: true }).click();
+        await expect(drawer.getByTestId("clinical-desktop-navigation")).toBeVisible();
         const details = drawer.getByRole("button", { name: "Patient and acquisition details" });
         await details.click();
         const openWorkspace = await drawer.getByTestId("clinical-workspace").boundingBox();

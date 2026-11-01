@@ -1,0 +1,128 @@
+[
+  {
+    "width": 1440,
+    "height": 900,
+    "banner": {
+      "x": 37,
+      "y": 81,
+      "width": 1322,
+      "height": 44
+    },
+    "footer": {
+      "x": 17,
+      "y": 814,
+      "width": 1406,
+      "height": 69
+    },
+    "workspace": {
+      "x": 37,
+      "y": 150,
+      "width": 1366,
+      "height": 648
+    },
+    "protocol": {
+      "x": 726,
+      "y": 150,
+      "width": 677,
+      "height": 648
+    },
+    "documents": {
+      "x": 37,
+      "y": 150,
+      "width": 677,
+      "height": 648
+    }
+  },
+  {
+    "width": 1366,
+    "height": 768,
+    "banner": {
+      "x": 37,
+      "y": 81,
+      "width": 1248,
+      "height": 79.78125
+    },
+    "footer": {
+      "x": 17,
+      "y": 682,
+      "width": 1332,
+      "height": 69
+    },
+    "workspace": {
+      "x": 37,
+      "y": 185.78125,
+      "width": 1292,
+      "height": 480.21875
+    },
+    "protocol": {
+      "x": 689,
+      "y": 185.78125,
+      "width": 640,
+      "height": 480.21875
+    },
+    "documents": {
+      "x": 37,
+      "y": 185.78125,
+      "width": 640,
+      "height": 480.21875
+    }
+  },
+  {
+    "width": 768,
+    "height": 1024,
+    "banner": {
+      "x": 37,
+      "y": 81,
+      "width": 650,
+      "height": 157.78125
+    },
+    "footer": {
+      "x": 17,
+      "y": 924,
+      "width": 734,
+      "height": 83
+    },
+    "workspace": {
+      "x": 37,
+      "y": 370.796875,
+      "width": 694,
+      "height": 524.1875
+    },
+    "protocol": {
+      "x": 37,
+      "y": 370.796875,
+      "width": 694,
+      "height": 524.1875
+    },
+    "documents": null
+  },
+  {
+    "width": 390,
+    "height": 844,
+    "banner": {
+      "x": 21,
+      "y": 81,
+      "width": 304,
+      "height": 149.78125
+    },
+    "footer": {
+      "x": 9,
+      "y": 766,
+      "width": 372,
+      "height": 61
+    },
+    "workspace": {
+      "x": 21,
+      "y": 402.796875,
+      "width": 348,
+      "height": 644.1875
+    },
+    "protocol": {
+      "x": 21,
+      "y": 402.796875,
+      "width": 348,
+      "height": 644.1875
+    },
+    "documents": null
+  }
+]
