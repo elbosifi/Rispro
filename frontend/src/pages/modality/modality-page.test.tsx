@@ -1752,6 +1752,7 @@ describe("ModalityPage modality board", () => {
     await user.click(screen.getByTestId("modality-board-row-6"));
 
     const workspace = await screen.findByTestId("clinical-workspace");
+    await user.click(screen.getByRole("button", { name: /^Documents$/ }));
     expect(workspace).toBeTruthy();
     expect(within(workspace).getByTestId("clinical-protocol")).toBeTruthy();
     expect(within(workspace).getByTestId("clinical-request-documents")).toBeTruthy();
@@ -1772,7 +1773,7 @@ describe("ModalityPage modality board", () => {
 
     expect(screen.getByTestId("clinical-workspace")).toBeTruthy();
     expect(within(workspace).queryByRole("button", { name: "Delete" })).toBeNull();
-    expect(workspace.className).toContain("lg:grid-cols-1");
+    expect(workspace.className).toContain("lg:grid-cols-2");
   });
 
   it("contains the clinical workspace while preserving protocol-first mobile order", async () => {
@@ -1806,8 +1807,7 @@ describe("ModalityPage modality board", () => {
     expect(header?.parentElement).toBe(drawer);
     expect(workspaceRegion.parentElement).toBe(screen.getByTestId("clinical-dialog-scroll-region"));
     expect(footer.parentElement).toBe(drawer);
-    expect(dialogContent?.className).toContain("h-[calc(100dvh-1rem)]");
-    expect(dialogContent?.className).toContain("sm:h-[94dvh]");
+    expect(dialogContent?.className).toContain("h-full");
     expect(dialogContent?.className).not.toContain("h-screen");
     expect(within(footer).getByRole("button", { name: "Close" })).toBeTruthy();
     expect(within(footer).getByRole("button", { name: "Back to waiting" })).toBeTruthy();
@@ -1919,7 +1919,7 @@ describe("ModalityPage modality board", () => {
     expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(7);
   });
 
-  it("keeps the protocol card LTR, collapses Arabic instructions, and hides empty metadata", async () => {
+  it("keeps the protocol card LTR, shows Arabic instructions, and hides empty metadata", async () => {
     const arabicInstructions = "الصيام 6 ساعات\nإحضار التقارير السابقة";
     const user = await openBoard([
       appointment({
@@ -1954,12 +1954,11 @@ describe("ModalityPage modality board", () => {
     expect(within(panel).queryByTestId("clinical-acquisition-table")).toBeNull();
 
     const disclosure = within(panel).getByRole("button", { name: /Patient instructions/ });
-    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
-    expect(within(panel).queryByText(arabicInstructions)).toBeNull();
-    await user.click(disclosure);
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     const instruction = within(panel).getByText((text) => text.includes("الصيام 6 ساعات"));
     expect(instruction.getAttribute("dir")).toBe("auto");
+    await user.click(disclosure);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("renders CT acquisition columns in scanner order only when rows exist", async () => {
@@ -2048,6 +2047,7 @@ describe("ModalityPage modality board", () => {
 
     await user.click(row);
     const drawer = await screen.findByTestId("selected-appointment-drawer");
+    await user.click(within(drawer).getByRole("button", { name: "Patient and acquisition details" }));
     expect(within(drawer).getByText("Performed on")).toBeTruthy();
     expect(within(drawer).getByText("Philips Ingenia Elition 3T")).toBeTruthy();
     expect(within(drawer).getByText("Started")).toBeTruthy();
@@ -2099,7 +2099,7 @@ describe("ModalityPage modality board", () => {
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");
     expect(await within(drawer).findByText("No protocol assigned")).toBeTruthy();
-    expect(within(drawer).queryByRole("button", { name: /protocol/i })).toBeNull();
+    expect(within(drawer).queryByRole("button", { name: /assign protocol|change protocol/i })).toBeNull();
     expect(within(drawer).queryByText(/Change protocol/i)).toBeNull();
     expect(within(drawer).queryByText(/Assign protocol/i)).toBeNull();
   });

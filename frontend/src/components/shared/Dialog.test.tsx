@@ -26,6 +26,13 @@ it.each([false, true])("reserves top-bar space only for an opted-in dictation wi
   expect((backdrop.lastElementChild as HTMLElement).style.maxHeight).toBe(reserveDictationToolbar ? "calc(100dvh - 88px)" : "calc(100vh - 32px)");
 });
 
+it("reserves top-bar space for an opted-in window without dictation context", () => {
+  render(<Dialog open onClose={vi.fn()}><DialogContent reserveTopBar aria-label="Clinical window">Content</DialogContent></Dialog>);
+  const backdrop = screen.getByRole("dialog", { name: "Clinical window" });
+  expect(backdrop.style.top).toBe("3.5rem");
+  expect((backdrop.lastElementChild as HTMLElement).style.maxHeight).toBe("calc(100dvh - 88px)");
+});
+
 describe("Dialog body scroll lock", () => {
   it("locks page scrolling while open and restores the original position and styles", () => {
     document.body.style.overflow = "auto";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { RotateCcw, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -62,11 +62,11 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
   const [rotation, setRotation] = useState(0);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mainSize, setMainSize] = useState({ width: 760, height: 640 });
-  const mainPreviewRef = useRef<HTMLDivElement>(null);
+  const [mainPreviewElement, setMainPreviewElement] = useState<HTMLDivElement | null>(null);
   const file = useMemo(() => ({ url: `/api/documents/${document.id}/view`, withCredentials: true }), [document.id]);
 
   useEffect(() => {
-    const element = mainPreviewRef.current;
+    const element = mainPreviewElement;
     if (!element) return;
     const updateSize = () => setMainSize({ width: Math.max(240, element.clientWidth - 16), height: Math.max(240, element.clientHeight - 16) });
     updateSize();
@@ -78,7 +78,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
       if (frame !== null) cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [expanded]);
+  }, [expanded, mainPreviewElement]);
 
   useEffect(() => {
     if (!pdfDocument || !pageCount) return;
@@ -136,7 +136,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
     {expandAction}
     {openDocumentAction}
   </>;
-  const documentUtilityBar = previewError ? null : <div className="flex min-h-9 min-w-0 shrink-0 items-center justify-end gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document utilities">{pageTools}</div>;
+  const documentUtilityBar = previewError ? null : <div className="flex min-h-9 min-w-0 shrink-0 flex-wrap items-center justify-start gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="Document utilities">{pageTools}</div>;
 
   return (
     <Document
@@ -161,7 +161,7 @@ export default function PdfDocumentPreview({ document, labels, includeOpenAction
           ) : (
             <>
               {annotationToolbar ? <div className="flex min-h-9 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-0.5" role="toolbar" aria-label="PDF document controls">{annotationToolbar}</div> : null}
-              <div ref={mainPreviewRef} className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-2">
+              <div ref={setMainPreviewElement} className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-2">
                 <div className="flex min-w-full flex-col items-center gap-4">
                   {pages.map((pageNumber) => (
                     <div key={pageNumber} className="relative shrink-0">

@@ -565,6 +565,12 @@ export default function ModalityPage() {
   const [documentAppointmentId, setDocumentAppointmentId] = useState<number | null>(null);
   const selectedAppointmentId = navigationState.appointmentId;
   const [selectedAppointmentTab, setSelectedAppointmentTab] = useState<"appointment" | "previousStudies">("appointment");
+  const [mobileClinicalPane, setMobileClinicalPane] = useState<"protocol" | "documents">("protocol");
+  const [expandedClinicalPane, setExpandedClinicalPane] = useState<"protocol" | "documents" | null>(null);
+  useEffect(() => {
+    setMobileClinicalPane("protocol");
+    setExpandedClinicalPane(null);
+  }, [selectedAppointmentId]);
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
@@ -1883,23 +1889,29 @@ export default function ModalityPage() {
         <DialogContent
           maxWidth="min(98vw, 1560px)"
           scrollable={false}
-          className="!m-2 !w-[calc(100%-1rem)] !max-w-[calc(100%-1rem)] !p-0 h-[calc(100dvh-1rem)] !max-h-[calc(100dvh-1rem)] overflow-hidden rounded-xl sm:!m-4 sm:!w-[calc(100%-2rem)] sm:!max-w-[calc(100%-2rem)] sm:h-[94dvh] sm:!max-h-[94dvh] sm:rounded-2xl"
+          reserveTopBar
+          className="!m-2 !w-[calc(100%-1rem)] !max-w-[calc(100%-1rem)] !p-0 h-full overflow-hidden rounded-xl sm:!m-4 sm:!w-[calc(100%-2rem)] sm:!max-w-[calc(100%-2rem)] sm:rounded-2xl"
         >
           {selectedAppointment ? (
             <div data-testid="selected-appointment-drawer" className="flex h-full min-h-0 flex-col">
               <DialogHeader
                 closeLabel={chooseLocalized(language, "إغلاق الموعد", "Close appointment")}
-                className="!mb-0 shrink-0 !items-start border-b border-slate-200 bg-white px-3 py-2.5 sm:px-6 sm:py-3 [&>button]:!h-11 [&>button]:!min-h-11 [&>button]:!w-11 [&>button]:shrink-0"
+                className="!mb-0 max-h-[40dvh] shrink-0 !items-start overflow-y-auto border-b border-slate-200 bg-white px-3 py-2 sm:px-5 [&>button]:!h-11 [&>button]:!min-h-11 [&>button]:!w-11 [&>button]:shrink-0"
               >
                 <div data-testid="clinical-patient-banner" className="min-w-0">
-                  <div className="flex min-w-0 items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{chooseLocalized(language, "الموعد المختار", "Selected appointment")}</p>
-                      <DialogTitle className="break-words !text-base sm:!text-lg">{selectedName}</DialogTitle>
-                      {selectedSecondaryName && selectedSecondaryName !== selectedName ? <p lang={language === "ar" ? "en" : "ar"} dir={language === "ar" ? "ltr" : "rtl"} className="mt-0.5 break-words text-[11px] leading-4 text-muted-foreground">{selectedSecondaryName}</p> : null}
-                      <p lang={language} dir={language === "ar" ? "rtl" : "ltr"} className="mt-1 break-words text-sm font-semibold text-foreground">{selectedExam}</p>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+                    <div className="min-w-0">
+                      <DialogTitle className="break-words !text-base" dir="auto">{selectedName}</DialogTitle>
+                      {selectedSecondaryName && selectedSecondaryName !== selectedName ? <p lang={language === "ar" ? "en" : "ar"} dir={language === "ar" ? "ltr" : "rtl"} className="break-words text-[11px] leading-4 text-muted-foreground">{selectedSecondaryName}</p> : null}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span dir="ltr" className="[unicode-bidi:isolate]">MRN: <span>{selectedAppointment.mrn || EMPTY_VALUE}</span></span>
+                      <span dir="ltr" className="[unicode-bidi:isolate]">{chooseLocalized(language, "المعرف الأساسي", "Primary ID")}: <span>{selectedAppointment.patientPrimaryIdentifierValue ? primaryIdentifierText(language, selectedAppointment) : selectedAppointment.nationalId || EMPTY_VALUE}</span></span>
+                      <span>{formatAgeSex(language, selectedAppointment)}</span>
+                      <span dir="ltr" className="[unicode-bidi:isolate]">{t(language, "modality.fieldAccession")}: <span>{selectedAppointment.accessionNumber || EMPTY_VALUE}</span></span>
+                    </div>
+                    <p lang={language} dir={language === "ar" ? "rtl" : "ltr"} className="min-w-0 flex-1 basis-48 break-words text-sm font-semibold text-foreground"><span title={selectedModality}>{selectedModality}</span> · <span title={selectedExam}>{selectedExam}</span></p>
+                    <div className="hidden shrink-0 items-center gap-1 sm:flex">
                       <Button variant="secondary" size="icon" className="!h-11 !min-h-11 !w-11" aria-label={t(language, "common.print")} title={t(language, "common.print")} onClick={() => handlePrint(selectedAppointment.id)}><Printer size={16} /></Button>
                       {isIrModality ? <Button variant="secondary" size="icon" className="!h-11 !min-h-11 !w-11" aria-label={t(language, "modality.specimenLabel.print")} title={t(language, "modality.specimenLabel.print")} onClick={() => openSpecimenLabel(selectedAppointment)}><Printer size={16} /></Button> : null}
                     </div>
@@ -1912,31 +1924,13 @@ export default function ModalityPage() {
                     {selectedAppointment.modalitySafetyWorkflowType === "mri_primary_implant_screening" ? <span data-testid="clinical-mobile-mri-screening"><MriPrimaryScreeningBadges result={selectedAppointment.mriPrimaryScreening?.result ?? null} compact /></span> : null}
                     {!hasPrimaryIdentifier(selectedAppointment) ? <Badge variant="warning" size="sm">{chooseLocalized(language, "لا يوجد معرف أساسي", "No primary ID")}</Badge> : null}
                   </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                    <span>{t(language, "modality.fieldAccession")}: <span dir="ltr" className="font-mono-data [unicode-bidi:isolate] font-semibold text-foreground">{selectedAppointment.accessionNumber}</span></span>
-                    <span>{selectedModality}</span>
-                  </div>
-                  <div className="hidden lg:flex lg:min-w-0 lg:flex-wrap lg:items-start lg:gap-x-5 lg:gap-y-2 lg:border-t lg:border-slate-100 lg:pt-2 lg:mt-3">
-                    <ClinicalBannerField label={chooseLocalized(language, "معرف المريض", "MRN / primary ID")} value={selectedAppointment.mrn} />
-                    <ClinicalBannerField label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")} value={selectedAppointment.patientPrimaryIdentifierValue ? primaryIdentifierText(language, selectedAppointment) : selectedAppointment.nationalId ? selectedAppointment.nationalId : null} />
-                    <ClinicalBannerField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
-                    <ClinicalBannerField label={t(language, "modality.fieldExam")} value={selectedExam} />
-                    <ClinicalBannerField label={t(language, "modality.fieldModality")} value={selectedModality} />
-                    <ClinicalBannerField label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
-                    {selectedAppointment.acquisitionSummary?.equipmentName ? <ClinicalBannerField label={chooseLocalized(language, "أُجري على", "Performed on")} value={selectedAppointment.acquisitionSummary.equipmentName} /> : null}
-                    {selectedAppointment.acquisitionSummary?.startedAt ? <ClinicalBannerField label={chooseLocalized(language, "بدأ التصوير", "Started")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.startedAt)} /> : null}
-                    {selectedAppointment.acquisitionSummary?.endedAt ? <ClinicalBannerField label={chooseLocalized(language, "انتهى التصوير", "Finished")} value={formatDateTimeLy(selectedAppointment.acquisitionSummary.endedAt)} /> : null}
-                    {selectedAppointment.acquisitionSummary?.durationSeconds != null ? <ClinicalBannerField label={chooseLocalized(language, "مدة الفحص", "Duration")} value={formatDurationMinutes(language, Math.floor(selectedAppointment.acquisitionSummary.durationSeconds / 60))} /> : null}
-                    {selectedAppointment.acquisitionSummary ? <ClinicalBannerField label={chooseLocalized(language, "المصدر", "Source")} value="MPPS" /> : null}
-                    {selectedAppointment.acquisitionSummary?.performedStatus === "DISCONTINUED" && selectedAppointment.acquisitionSummary.discontinuationReason ? <ClinicalBannerField label={chooseLocalized(language, "السبب", "Reason")} value={selectedAppointment.acquisitionSummary.discontinuationReason} /> : null}
-                  </div>
                 </div>
               </DialogHeader>
               <div data-testid="clinical-dialog-scroll-region" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 pb-[env(safe-area-inset-bottom)] lg:flex lg:flex-col lg:overflow-hidden">
               <Tabs value={selectedAppointmentTab} onValueChange={(value) => setSelectedAppointmentTab(value as "appointment" | "previousStudies")}>
                 <div className="shrink-0 px-3 pt-2 sm:px-6 sm:pt-3">
-                <DisclosureSection title={t(language, "modality.patientDetails")} className="lg:hidden" defaultOpen={false}>
-                  <div data-testid="clinical-mobile-details" className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                <DisclosureSection title={t(language, "modality.patientDetails")} defaultOpen={false}>
+                  <div data-testid="clinical-mobile-details" className="grid max-h-48 min-w-0 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
                     <ClinicalMobileDetailField label={t(language, "settings.fieldMRN")} value={selectedAppointment.mrn} dir="ltr" />
                     <ClinicalMobileDetailField label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")} value={selectedAppointment.patientPrimaryIdentifierValue || selectedAppointment.nationalId} dir="ltr" />
                     <ClinicalMobileDetailField label={t(language, "settings.fieldAge")} value={formatAgeSex(language, selectedAppointment)} />
@@ -1960,8 +1954,13 @@ export default function ModalityPage() {
                 </div>
                 {selectedAppointmentTab === "appointment" ? <>
               <main data-testid="clinical-workspace-region" className="min-h-0 flex-none overflow-visible bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4 lg:flex-1 lg:overflow-hidden">
-                <div data-testid="clinical-workspace" className={`grid min-w-0 gap-3 lg:h-full lg:min-h-0 ${selectedAppointment.protocolAssignmentSummary || selectedProtocolQuery.data || selectedProtocolQuery.isLoading || selectedProtocolQuery.isFetching || selectedProtocolQuery.isError ? "grid-cols-1 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)] lg:grid-rows-1" : "grid-cols-1 lg:grid-cols-1 lg:grid-rows-1"}`}>
-                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className="order-1 min-w-0 lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+                <div className="mb-2 flex gap-2 lg:hidden" role="group" aria-label={chooseLocalized(language, "مساحة العمل السريرية", "Clinical workspace")}>
+                  <Button type="button" size="sm" className="!min-h-11" variant={mobileClinicalPane === "protocol" ? "primary" : "secondary"} aria-pressed={mobileClinicalPane === "protocol"} onClick={() => setMobileClinicalPane("protocol")}>{chooseLocalized(language, "البروتوكول", "Protocol")}</Button>
+                  <Button type="button" size="sm" className="!min-h-11" variant={mobileClinicalPane === "documents" ? "primary" : "secondary"} aria-pressed={mobileClinicalPane === "documents"} onClick={() => setMobileClinicalPane("documents")}>{chooseLocalized(language, "المستندات", "Documents")}</Button>
+                </div>
+                <div data-testid="clinical-workspace" className={`grid min-w-0 grid-cols-1 gap-3 lg:h-full lg:min-h-0 lg:grid-rows-1 ${expandedClinicalPane ? "lg:grid-cols-1" : "lg:grid-cols-2"}`}>
+                  <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className={`order-1 min-w-0 lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain ${mobileClinicalPane === "protocol" ? "block" : "hidden"} ${expandedClinicalPane === "documents" ? "lg:hidden" : "lg:block"}`}>
+                    <div className="mb-2 hidden justify-end lg:flex"><Button type="button" size="sm" variant="secondary" aria-pressed={expandedClinicalPane === "protocol"} onClick={() => setExpandedClinicalPane(expandedClinicalPane === "protocol" ? null : "protocol")}>{expandedClinicalPane === "protocol" ? chooseLocalized(language, "استعادة العرض المقسم", "Restore split view") : chooseLocalized(language, "توسيع البروتوكول", "Expand protocol")}</Button></div>
                     <ProtocolAssignmentPanel
                       key={selectedAppointment.id}
                       appointment={selectedAppointment}
@@ -1973,7 +1972,7 @@ export default function ModalityPage() {
                     />
                   </section>
 
-                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className="order-2 flex min-w-0 flex-col lg:order-1 lg:h-full lg:min-h-0">
+                  <section data-testid="clinical-request-documents" aria-label={chooseLocalized(language, "وثائق الطلب", "Request documents")} className={`order-2 min-w-0 flex-col lg:order-1 lg:h-full lg:min-h-0 ${mobileClinicalPane === "documents" ? "flex" : "hidden"} ${expandedClinicalPane === "protocol" ? "lg:hidden" : "lg:flex"}`}>
                     <RequestDocumentsPanel
                       appointmentId={selectedAppointment.id}
                       patientId={selectedAppointment.patientId}
@@ -1981,6 +1980,9 @@ export default function ModalityPage() {
                       previewMode="inline"
                       layout="workspace"
                       compactMobileWorkspace
+                      pdfInitialSizingMode="fit-width"
+                      expanded={expandedClinicalPane === "documents"}
+                      onExpandedChange={(expanded) => setExpandedClinicalPane(expanded ? "documents" : null)}
                       enableLocalScan
                       newDocumentType="clinical_document"
                       title={chooseLocalized(language, "وثائق طلب الفحص", "Examination request documents")}
@@ -2015,7 +2017,7 @@ export default function ModalityPage() {
               </Tabs>
               </div>
 
-              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-nowrap gap-2 border-t border-slate-200 bg-white px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] !justify-start sm:flex-wrap sm:px-5 sm:py-3 sm:pb-3 sm:!justify-end">
+              <DialogFooter data-testid="clinical-operational-footer" className="!m-0 shrink-0 flex-nowrap !gap-2 border-t border-slate-200 bg-white px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] !justify-start sm:flex-wrap sm:px-5 sm:py-3 sm:pb-3 sm:!justify-end">
                 <Button
                   type="button"
                   variant="secondary"
@@ -2110,7 +2112,7 @@ export default function ModalityPage() {
                   <span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span>
                 </Button>
                 </div>
-                <AnchoredMenu
+                <div className="shrink-0 lg:hidden"><AnchoredMenu
                   open={mobileAppointmentMenuOpen}
                   onOpenChange={setMobileAppointmentMenuOpen}
                   dir={isArabic ? "rtl" : "ltr"}
@@ -2120,11 +2122,11 @@ export default function ModalityPage() {
                       type="button"
                       variant="secondary"
                       size="icon"
-                      className="!h-11 !min-h-11 !w-11 !inline-flex shrink-0 lg:!hidden"
+                      className="!h-11 !min-h-11 !w-11 !p-0 !inline-flex shrink-0 lg:!hidden"
                       aria-label={chooseLocalized(language, "إجراءات الموعد", "Appointment actions")}
                       title={chooseLocalized(language, "إجراءات الموعد", "Appointment actions")}
                     >
-                      <MoreHorizontal size={18} aria-hidden="true" />
+                      <MoreHorizontal size={18} className="shrink-0" aria-hidden="true" />
                     </Button>
                   }
                 >
@@ -2137,7 +2139,7 @@ export default function ModalityPage() {
                     {selectedAppointment.status === "arrived" ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted" disabled={statusMutation.isPending} onClick={() => { handleRequestStatusChange(selectedAppointment, "waiting"); setMobileAppointmentMenuOpen(false); }}><TimerReset size={16} aria-hidden="true" /><span>{chooseLocalized(language, "إرجاع للانتظار", "Back to waiting")}</span></button> : null}
                     {ACTIVE_STATUSES.has(selectedAppointment.status) ? <button type="button" role="menuitem" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium hover:bg-muted disabled:opacity-50" disabled={statusMutation.isPending} onClick={() => { setStatusAction({ appointment: selectedAppointment, status: "discontinued", reasonRequired: true }); setStatusReason(""); setMobileAppointmentMenuOpen(false); }}><Ban size={16} aria-hidden="true" /><span>{chooseLocalized(language, "إيقاف الحالة", "Discontinue")}</span></button> : null}
                   </div>
-                </AnchoredMenu>
+                </AnchoredMenu></div>
               </DialogFooter>
             </div>
           ) : null}
@@ -2660,21 +2662,6 @@ function SplitHistoricalPacsStudyAttestation({ language, appointmentId, study, o
 }
 
 
-function ClinicalBannerField({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number | null | undefined;
-}) {
-  return (
-    <div className="min-w-[9rem] max-w-full">
-      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-      <p className="mt-0.5 truncate text-xs font-semibold text-foreground" title={value == null ? undefined : String(value)}>{value ?? EMPTY_VALUE}</p>
-    </div>
-  );
-}
-
 function ClinicalMobileDetailField({
   label,
   value,
@@ -2752,7 +2739,7 @@ function ProtocolAssignmentPanel({
 }) {
   const { language: protocolLanguage } = useLanguage();
   const patientInstructionsId = useId();
-  const [patientInstructionsOpen, setPatientInstructionsOpen] = useState(false);
+  const [patientInstructionsOpen, setPatientInstructionsOpen] = useState(true);
   const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
   const appointmentNotes = appointment.notes?.trim() || null;
   const patientInstructionItems = [specialInstructions]
@@ -2858,9 +2845,9 @@ function ProtocolAssignmentPanel({
       ) : null}
 
       {hasStructuredRows && assignment.modality === "CT" ? (
-        <div className="mt-4 overflow-x-auto">
-          <table data-testid="clinical-acquisition-table" dir="ltr" className="min-w-full table-fixed text-left text-xs">
-            <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="mt-4">
+          <table data-testid="clinical-acquisition-table" dir="ltr" className="block w-full text-left text-xs">
+            <thead className="sr-only">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
                 <th className="w-36 px-2 py-2">Phase</th>
@@ -2871,7 +2858,7 @@ function ProtocolAssignmentPanel({
                 <th className="w-44 px-2 py-2">Instructions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
+            <tbody className="block space-y-2 [&_td]:block [&_td]:min-w-0 [&_td]:break-words [&_td]:before:block [&_td]:before:text-[10px] [&_td]:before:font-semibold [&_td]:before:text-muted-foreground [&_td]:before:content-[attr(data-label)]">
               {assignment.ctPhases.map((phase) => {
                 const phaseName = effectiveValue(phase.customPhaseName, phase.phasePresetName);
                 const timing = formatModalityCtPhaseTiming(phase);
@@ -2879,14 +2866,14 @@ function ProtocolAssignmentPanel({
                 const reconstruction = effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes);
                 const instructions = effectiveValue(phase.instructionsOverride, phase.instructions);
                 return (
-                  <tr key={`${phase.orderIndex}-${phaseName ?? "phase"}`}>
-                    <td className="px-2 py-2 font-mono">{phase.orderIndex}</td>
-                    <td className="px-2 py-2"><ValueWithPreset value={phaseName} preset={defaultText(phase.phasePresetName)} /></td>
-                    <td className="px-2 py-2"><ValueWithPreset value={timing} preset={defaultText(phase.timingType)} /></td>
-                    <td className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(phase.coverage)} /></td>
-                    <td className="px-2 py-2"><ValueWithPreset value={reconstruction} preset={defaultText(phase.reconstructionNotes)} /></td>
-                    <td className="px-2 py-2">{phase.isRequired ? "Yes" : "No"}</td>
-                    <td className="px-2 py-2"><ValueWithPreset value={instructions} preset={defaultText(phase.instructions)} /></td>
+                  <tr key={`${phase.orderIndex}-${phaseName ?? "phase"}`} className="grid grid-cols-1 rounded-lg border border-slate-200 sm:grid-cols-2">
+                    <td data-label="Order" className="px-2 py-2 font-mono">{phase.orderIndex}</td>
+                    <td data-label="Phase" className="px-2 py-2"><ValueWithPreset value={phaseName} preset={defaultText(phase.phasePresetName)} /></td>
+                    <td data-label="Timing" className="px-2 py-2"><ValueWithPreset value={timing} preset={defaultText(phase.timingType)} /></td>
+                    <td data-label="Coverage" className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(phase.coverage)} /></td>
+                    <td data-label="Reconstruction" className="px-2 py-2"><ValueWithPreset value={reconstruction} preset={defaultText(phase.reconstructionNotes)} /></td>
+                    <td data-label="Required" className="px-2 py-2">{phase.isRequired ? "Yes" : "No"}</td>
+                    <td data-label="Instructions" className="px-2 py-2"><ValueWithPreset value={instructions} preset={defaultText(phase.instructions)} /></td>
                   </tr>
                 );
               })}
@@ -2894,9 +2881,9 @@ function ProtocolAssignmentPanel({
           </table>
         </div>
       ) : hasStructuredRows ? (
-        <div className="mt-4 overflow-x-auto">
-          <table data-testid="clinical-acquisition-table" dir="ltr" className="min-w-full table-fixed text-left text-xs">
-            <thead className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="mt-4">
+          <table data-testid="clinical-acquisition-table" dir="ltr" className="block w-full text-left text-xs">
+            <thead className="sr-only">
               <tr>
                 <th className="w-16 px-2 py-2">Order</th>
                 <th className="w-32 px-2 py-2">Scanner</th>
@@ -2909,7 +2896,7 @@ function ProtocolAssignmentPanel({
                 <th className="w-44 px-2 py-2">Notes</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
+            <tbody className="block space-y-2 [&_td]:block [&_td]:min-w-0 [&_td]:break-words [&_td]:before:block [&_td]:before:text-[10px] [&_td]:before:font-semibold [&_td]:before:text-muted-foreground [&_td]:before:content-[attr(data-label)]">
               {assignment.mriSequences.map((sequence) => {
                 const sequenceName = effectiveValue(sequence.vendorSequenceName, sequence.sequencePresetName ?? sequence.genericFamily ?? sequence.weighting);
                 const plane = effectiveValue(sequence.planeOverride, sequence.defaultPlane);
@@ -2921,16 +2908,16 @@ function ProtocolAssignmentPanel({
                 const timingPreset = [defaultText(sequence.defaultBValues), defaultText(sequence.defaultDynamicTiming)].filter(Boolean).join(" / ") || null;
                 const notes = effectiveValue(sequence.notesOverride, sequence.notes);
                 return (
-                  <tr key={`${sequence.orderIndex}-${sequenceName ?? "sequence"}`}>
-                    <td className="px-2 py-2 font-mono">{sequence.orderIndex}</td>
-                    <td className="px-2 py-2">{sequence.scannerName ?? scanner ?? EMPTY_VALUE}</td>
-                    <td className="px-2 py-2"><ValueWithPreset value={sequenceName} preset={defaultText(sequence.sequencePresetName)} /></td>
-                    <td className="px-2 py-2">{sequence.vendorSequenceName ?? EMPTY_VALUE}</td>
-                    <td className="px-2 py-2"><ValueWithPreset value={plane} preset={defaultText(sequence.defaultPlane)} /></td>
-                    <td className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(sequence.defaultCoverage)} /></td>
-                    <td className="px-2 py-2"><ValueWithPreset value={timing} preset={timingPreset} /></td>
-                    <td className="px-2 py-2">{sequence.isRequired ? "Yes" : "No"}</td>
-                    <td className="px-2 py-2"><ValueWithPreset value={notes} preset={defaultText(sequence.notes)} /></td>
+                  <tr key={`${sequence.orderIndex}-${sequenceName ?? "sequence"}`} className="grid grid-cols-1 rounded-lg border border-slate-200 sm:grid-cols-2">
+                    <td data-label="Order" className="px-2 py-2 font-mono">{sequence.orderIndex}</td>
+                    <td data-label="Scanner" className="px-2 py-2">{sequence.scannerName ?? scanner ?? EMPTY_VALUE}</td>
+                    <td data-label="Sequence" className="px-2 py-2"><ValueWithPreset value={sequenceName} preset={defaultText(sequence.sequencePresetName)} /></td>
+                    <td data-label="Vendor name" className="px-2 py-2">{sequence.vendorSequenceName ?? EMPTY_VALUE}</td>
+                    <td data-label="Plane" className="px-2 py-2"><ValueWithPreset value={plane} preset={defaultText(sequence.defaultPlane)} /></td>
+                    <td data-label="Coverage" className="px-2 py-2"><ValueWithPreset value={coverage} preset={defaultText(sequence.defaultCoverage)} /></td>
+                    <td data-label="b-values / timing" className="px-2 py-2"><ValueWithPreset value={timing} preset={timingPreset} /></td>
+                    <td data-label="Required" className="px-2 py-2">{sequence.isRequired ? "Yes" : "No"}</td>
+                    <td data-label="Notes" className="px-2 py-2"><ValueWithPreset value={notes} preset={defaultText(sequence.notes)} /></td>
                   </tr>
                 );
               })}

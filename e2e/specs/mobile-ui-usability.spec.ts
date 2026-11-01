@@ -499,9 +499,12 @@ test("modality appointment dialog keeps clinical content and actions reachable o
 
     const scrollRegion = page.getByTestId("clinical-dialog-scroll-region");
     const initialScrollMetrics = await scrollRegion.evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, scrollTop: element.scrollTop }));
-    expect(initialScrollMetrics.scrollHeight).toBeGreaterThan(initialScrollMetrics.clientHeight);
-    await scrollRegion.evaluate((element) => element.scrollBy({ top: 360, behavior: "auto" }));
-    await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    if (initialScrollMetrics.scrollHeight > initialScrollMetrics.clientHeight) {
+      await scrollRegion.evaluate((element) => element.scrollBy({ top: 360, behavior: "auto" }));
+      await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    } else {
+      await expect(drawer.getByTestId("clinical-protocol")).toBeVisible();
+    }
     const scrollTopAfterWheel = await scrollRegion.evaluate((element) => element.scrollTop);
     results.push({ language, scrollHeight: initialScrollMetrics.scrollHeight, clientHeight: initialScrollMetrics.clientHeight, scrollTopAfterWheel });
 
@@ -511,6 +514,7 @@ test("modality appointment dialog keeps clinical content and actions reachable o
     await page.screenshot({ path: path.join(screenshotRoot, `${language}-390-protocol.png`) });
 
     const requestDocuments = drawer.getByTestId("clinical-request-documents");
+    await drawer.getByRole("group", { name: language === "ar" ? "مساحة العمل السريرية" : "Clinical workspace" }).getByRole("button", { name: language === "ar" ? "المستندات" : "Documents", exact: true }).click();
     await requestDocuments.scrollIntoViewIfNeeded();
     await expect(requestDocuments).toBeVisible();
     await expect(requestDocuments).toContainText("e2e-request.pdf");

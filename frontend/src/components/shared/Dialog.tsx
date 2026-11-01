@@ -159,13 +159,14 @@ interface DialogContentProps extends HTMLAttributes<HTMLDivElement> {
   maxWidth?: string;
   scrollable?: boolean;
   reserveDictationToolbar?: boolean;
+  reserveTopBar?: boolean;
 }
 
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ children, maxWidth = "400px", scrollable = true, reserveDictationToolbar = false, className = "", ...props }, ref) => {
+  ({ children, maxWidth = "400px", scrollable = true, reserveDictationToolbar = false, reserveTopBar = false, className = "", ...props }, ref) => {
     const { onClose } = useDialog();
     const dictation = useDictation();
-    const toolbarInset = reserveDictationToolbar && Boolean(dictation);
+    const toolbarInset = reserveTopBar || (reserveDictationToolbar && Boolean(dictation));
     const contentRef = useRef<HTMLDivElement>(null);
     const stackEntryRef = useRef<DialogStackEntry | null>(null);
 
