@@ -1,0 +1,103 @@
+{
+  "viewport": [
+    768,
+    1024
+  ],
+  "target": {
+    "x": 17,
+    "y": 32,
+    "width": 734,
+    "height": 961
+  },
+  "overflowX": false,
+  "regions": [
+    {
+      "tag": "DIV",
+      "id": "clinical-patient-banner",
+      "x": 41,
+      "y": 44,
+      "width": 642,
+      "height": 127
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-dialog-scroll-region",
+      "x": 17,
+      "y": 184,
+      "width": 734,
+      "height": 739
+    },
+    {
+      "tag": "MAIN",
+      "id": "clinical-workspace-region",
+      "x": 17,
+      "y": 308,
+      "width": 734,
+      "height": 1226
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-workspace",
+      "x": 37,
+      "y": 324,
+      "width": 694,
+      "height": 1194
+    },
+    {
+      "tag": "SECTION",
+      "id": "clinical-protocol",
+      "x": 37,
+      "y": 324,
+      "width": 694,
+      "height": 114
+    },
+    {
+      "tag": "SECTION",
+      "id": "modality-protocol-section",
+      "x": 37,
+      "y": 324,
+      "width": 694,
+      "height": 114
+    },
+    {
+      "tag": "SECTION",
+      "id": "clinical-request-documents",
+      "x": 37,
+      "y": 450,
+      "width": 694,
+      "height": 1068
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-document-workspace",
+      "x": 37,
+      "y": 450,
+      "width": 694,
+      "height": 1068
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 137,
+      "y": 466,
+      "width": 494,
+      "height": 640
+    },
+    {
+      "tag": "ASIDE",
+      "id": "document-rail",
+      "x": 37,
+      "y": 1172,
+      "width": 694,
+      "height": 346
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-operational-footer",
+      "x": 17,
+      "y": 923,
+      "width": 734,
+      "height": 69
+    }
+  ]
+}

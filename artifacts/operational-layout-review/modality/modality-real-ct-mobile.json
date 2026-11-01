@@ -1,0 +1,119 @@
+{
+  "viewport": [
+    390,
+    844
+  ],
+  "target": {
+    "x": 9,
+    "y": 9,
+    "width": 372,
+    "height": 826
+  },
+  "overflowX": false,
+  "regions": [
+    {
+      "tag": "DIV",
+      "id": "clinical-patient-banner",
+      "x": 21,
+      "y": 19,
+      "width": 304,
+      "height": 123
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-dialog-scroll-region",
+      "x": 9,
+      "y": 153,
+      "width": 372,
+      "height": 621
+    },
+    {
+      "tag": "MAIN",
+      "id": "clinical-workspace-region",
+      "x": 9,
+      "y": 273,
+      "width": 372,
+      "height": 1585
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-workspace",
+      "x": 21,
+      "y": 285,
+      "width": 348,
+      "height": 1561
+    },
+    {
+      "tag": "SECTION",
+      "id": "clinical-protocol",
+      "x": 21,
+      "y": 285,
+      "width": 348,
+      "height": 571
+    },
+    {
+      "tag": "SECTION",
+      "id": "modality-protocol-section",
+      "x": 21,
+      "y": 285,
+      "width": 348,
+      "height": 571
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-protocol-content",
+      "x": 38,
+      "y": 463,
+      "width": 314,
+      "height": 78
+    },
+    {
+      "tag": "SECTION",
+      "id": "clinical-patient-instructions",
+      "x": 38,
+      "y": 775,
+      "width": 314,
+      "height": 64
+    },
+    {
+      "tag": "SECTION",
+      "id": "clinical-request-documents",
+      "x": 21,
+      "y": 868,
+      "width": 348,
+      "height": 978
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-document-workspace",
+      "x": 21,
+      "y": 868,
+      "width": 348,
+      "height": 978
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": -52,
+      "y": 882,
+      "width": 494,
+      "height": 640
+    },
+    {
+      "tag": "ASIDE",
+      "id": "document-rail",
+      "x": 21,
+      "y": 1586,
+      "width": 348,
+      "height": 260
+    },
+    {
+      "tag": "DIV",
+      "id": "clinical-operational-footer",
+      "x": 9,
+      "y": 774,
+      "width": 372,
+      "height": 61
+    }
+  ]
+}

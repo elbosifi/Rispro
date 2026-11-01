@@ -1,0 +1,13 @@
+import {chromium} from 'playwright';
+import {resolve,relative} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {readdirSync,writeFileSync} from 'node:fs';
+const root=resolve('artifacts/operational-layout-review');
+const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:900}});
+await page.goto(pathToFileURL(resolve(root,'report/index.html')).href);console.log('REPORT',await page.title(),await page.locator('img').count(),await page.locator('img').evaluateAll(es=>es.filter(e=>!e.complete||e.naturalWidth===0).map(e=>e.getAttribute('src'))));
+await page.screenshot({path:resolve(root,'report/report-top.png')});
+const dirs=['registration','modality','doctor','proposed'];const files=dirs.flatMap(d=>readdirSync(resolve(root,d)).filter(f=>f.endsWith('.png')).map(f=>`${d}/${f}`));
+const cards=files.map(f=>`<figure><img src="../${f}"><figcaption>${f}</figcaption></figure>`).join('');
+writeFileSync(resolve(root,'report/contact-sheet.html'),`<!doctype html><meta charset="utf-8"><style>body{margin:0;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:#e8edf5;font:11px Arial}figure{margin:0;background:white;padding:4px}img{width:100%;height:195px;object-fit:contain}figcaption{height:25px;overflow:hidden}</style>${cards}`);
+await page.setViewportSize({width:1600,height:Math.ceil(files.length/4)*230});await page.goto(pathToFileURL(resolve(root,'report/contact-sheet.html')).href);await page.screenshot({path:resolve(root,'report/contact-sheet.png'),fullPage:true});console.log('CAPTURES',files.length);
+await browser.close();

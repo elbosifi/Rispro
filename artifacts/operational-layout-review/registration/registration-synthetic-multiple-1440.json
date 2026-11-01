@@ -1,0 +1,127 @@
+{
+  "viewport": [
+    1440,
+    900
+  ],
+  "target": {
+    "x": 0,
+    "y": 56,
+    "width": 1440,
+    "height": 844
+  },
+  "overflowX": false,
+  "regions": [
+    {
+      "tag": "DIV",
+      "id": "compact-document-appointment-header",
+      "x": 37,
+      "y": 77,
+      "width": 1334,
+      "height": 63
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-header-badge-cluster",
+      "x": 536,
+      "y": 81,
+      "width": 270,
+      "height": 32
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-document-workspace",
+      "x": 29,
+      "y": 165,
+      "width": 1382,
+      "height": 714
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 223,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 1313,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 2403,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 3493,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 4583,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 5673,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 6763,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 7853,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 8943,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "CANVAS",
+      "id": null,
+      "x": 166,
+      "y": 10033,
+      "width": 760,
+      "height": 1074
+    },
+    {
+      "tag": "ASIDE",
+      "id": "document-rail",
+      "x": 1071,
+      "y": 165,
+      "width": 340,
+      "height": 714
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "viewport": [
+    1440,
+    900
+  ],
+  "target": {
+    "x": 29,
+    "y": 80,
+    "width": 1382,
+    "height": 796
+  },
+  "overflowX": false,
+  "regions": [
+    {
+      "tag": "HEADER",
+      "id": null,
+      "x": 30,
+      "y": 81,
+      "width": 1380,
+      "height": 78
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-document-workspace",
+      "x": 38,
+      "y": 171,
+      "width": 904,
+      "height": 696
+    },
+    {
+      "tag": "ASIDE",
+      "id": "document-rail",
+      "x": 762,
+      "y": 171,
+      "width": 180,
+      "height": 696
+    },
+    {
+      "tag": "DIV",
+      "id": "protocol-entry-pane",
+      "x": 951,
+      "y": 172,
+      "width": 450,
+      "height": 641
+    }
+  ]
+}

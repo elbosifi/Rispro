@@ -1,0 +1,47 @@
+{
+  "viewport": [
+    390,
+    844
+  ],
+  "target": {
+    "x": 0,
+    "y": 56,
+    "width": 390,
+    "height": 788
+  },
+  "overflowX": false,
+  "regions": [
+    {
+      "tag": "DIV",
+      "id": "compact-document-appointment-header",
+      "x": 19,
+      "y": 73,
+      "width": 320,
+      "height": 236
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-header-badge-cluster",
+      "x": 19,
+      "y": 211,
+      "width": 320,
+      "height": 32
+    },
+    {
+      "tag": "DIV",
+      "id": "appointment-document-workspace",
+      "x": 17,
+      "y": 326,
+      "width": 356,
+      "height": 381
+    },
+    {
+      "tag": "ASIDE",
+      "id": "document-rail",
+      "x": 17,
+      "y": 603,
+      "width": 356,
+      "height": 104
+    }
+  ]
+}
