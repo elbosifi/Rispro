@@ -9,6 +9,7 @@ import type { ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow, Protocol
 import * as apiHooks from "@/lib/api-hooks";
 import { t as translate, type TranslationKey } from "@/lib/i18n";
 import { buildRadiantPatientUrl } from "@/lib/radiant";
+import { printProtocolSheet } from "@/lib/protocol-printing";
 import { DoctorProtocolsPage, ProtocolingAppointmentWorkspace } from "./doctor-protocols-page";
 import { transcribeDictation } from "@/lib/medical-dictation-api";
 import { DictationProvider } from "@/providers/dictation-provider";
@@ -92,7 +93,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/lib/toast", () => ({ pushToast: vi.fn() }));
-vi.mock("@/lib/protocol-printing", () => ({ printProtocolSheet: vi.fn() }));
+vi.mock("@/lib/protocol-printing", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/protocol-printing")>(), printProtocolSheet: vi.fn() }));
 vi.mock("@/providers/language-provider", () => ({ useLanguage: () => ({ language: "en", isArabic: false, t: (key: TranslationKey, params?: Record<string, string | number>) => translate("en", key, params) }) }));
 vi.mock("@/v2/appointments/api", () => ({
   rescheduleV2Booking: mockRescheduleBooking,
@@ -1139,8 +1140,10 @@ describe("Doctor protocoling request documents", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
 
+    fireEvent.change(screen.getByRole("textbox", { name: "Free-text protocol" }), { target: { value: "Updated unsaved instructions" } });
     await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
+    expect(printProtocolSheet).toHaveBeenCalledWith(expect.objectContaining({ prescriptionType: "free-text", protocolInstructions: "Updated unsaved instructions", unsavedDraft: true }));
     expect(screen.queryByRole("menu")).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
@@ -1981,7 +1984,33 @@ describe("Doctor protocoling usability enhancements", () => {
     const textarea = screen.getByRole("textbox", { name: "Free-text protocol" }) as HTMLTextAreaElement;
     expect(textarea.value).toContain("CT Chest Standard");
     expect(textarea.value).toContain("Arterial Phase");
+    expect(textarea.value).toContain("Bolus tracking · Abdominal aorta · 150 HU · +18 sec");
     expect(textarea.value).toContain("Standard chest protocol notes");
+    fireEvent.change(textarea, { target: { value: "Current customized instructions" } });
+    await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
+    expect(printProtocolSheet).toHaveBeenCalledWith(expect.objectContaining({ prescriptionType: "customized", protocolName: "CT Chest Standard", versionNumber: "1.7", protocolInstructions: "Current customized instructions", unsavedDraft: true }));
+    expect(vi.mocked(printProtocolSheet).mock.calls.at(-1)?.[0].ctPhases).toBeUndefined();
+  });
+
+  it("prints the assigned CT phase timing shown in the doctor preview", async () => {
+    const assigned: ProtocolAssignment = { assignmentId: 55, protocolId: libraryProtocol.id, protocolVersionId: 201, protocolName: libraryProtocol.name, versionNumber: "1.0", scannerId: null, scannerName: null, protocolNotes: "Patient prep", contrastNotes: "Contrast note", freeTextProtocol: null, status: "ASSIGNED", assignedBy: 3, assignedAt: "2026-07-22T08:00:00Z" };
+    const assignedAppointment = { ...appointment, assignment: assigned };
+    const ctPhase = phase(1, 1, "Arterial Phase");
+    const versionDetail = { protocol: libraryProtocol, version: { ...activeVersion, id: 201, versionNumber: "1.0", status: "RETIRED" as const }, ctPhases: [ctPhase], mriSequences: [], ctTechniques: [] };
+    vi.mocked(apiHooks.fetchProtocolLibraryProtocols).mockResolvedValue([libraryProtocol]);
+    vi.mocked(apiHooks.fetchProtocolLibraryVersionDetail).mockResolvedValue(versionDetail);
+    mockFetchAppointments.mockResolvedValue([assignedAppointment]);
+    mockFetchAppointmentDetail.mockResolvedValue({ appointment: assignedAppointment, assignmentDetail: { assignment: assigned, ctPhases: [ctPhase], mriSequences: [] } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DoctorProtocolsPage me={me} /></QueryClientProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "Change" }));
+    expect(await screen.findByText("The current assignment uses v1.0. Saving assigns the current active version v1.7.")).toBeTruthy();
+    expect((await screen.findAllByText("Bolus tracking · Abdominal aorta · 150 HU · +18 sec")).length).toBeGreaterThan(0);
+    expect(apiHooks.fetchProtocolLibraryVersionDetail).toHaveBeenCalledWith(201);
+    await userEvent.click(screen.getByRole("button", { name: "More protocol actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Print protocol" }));
+    expect(printProtocolSheet).toHaveBeenCalledWith(expect.objectContaining({ prescriptionType: "saved", versionNumber: "1.0", contrastInstructions: "Contrast note", ctPhases: [expect.objectContaining({ timing: "Bolus tracking · Abdominal aorta · 150 HU · +18 sec" })] }));
   });
 
   it("triggers assign and save via Ctrl+Enter and Ctrl+S keyboard shortcuts", async () => {

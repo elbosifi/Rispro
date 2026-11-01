@@ -1913,8 +1913,8 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).getByText("Fast for four hours")).toBeTruthy();
     expect(within(drawer).getByText("Bolus tracking · Aorta · 120 HU · +8 sec")).toBeTruthy();
     expect(within(drawer).getByText(/Assigned at:/)).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: /Patient instructions/ }).getAttribute("aria-expanded")).toBe("false");
-    expect(within(drawer).queryByText("Renal protocol")).toBeNull();
+    expect(within(drawer).getByText("Renal protocol")).toBeTruthy();
+    expect(within(drawer).getByText("Current library reference — not an assignment-time snapshot")).toBeTruthy();
     expect(within(drawer).queryByText("This protocol was assigned by the doctor. Changes to scanner execution should be documented separately.")).toBeNull();
     expect(fetchModalityProtocolAssignmentMock).toHaveBeenCalledWith(7);
   });
@@ -2014,6 +2014,23 @@ describe("ModalityPage modality board", () => {
     expect(within(drawer).queryByText("Phase")).toBeNull();
     expect(within(drawer).getByText("rectum-centered")).toBeTruthy();
     expect(within(drawer).getByText("oblique axial")).toBeTruthy();
+  });
+
+  it.each(["CT", "MRI"] as const)("shows customized %s text as active and suppresses linked library rows", async (modality) => {
+    const base = modality === "CT" ? ctAssignment() : mriAssignment();
+    const user = await openBoard([appointment({ id: 8, modalityCode: modality, modalityNameEn: modality })]);
+    fetchModalityProtocolAssignmentMock.mockResolvedValue({ ...base, appointmentId: 8, freeTextProtocol: "Custom active instructions", protocolNotes: "Patient-specific prep", contrastNotes: "Patient-specific contrast", libraryPreparationNotes: "Library prep" });
+    await user.click(screen.getByTestId("modality-board-row-8"));
+    const panel = within(await screen.findByTestId("selected-appointment-drawer")).getByTestId("modality-protocol-section");
+    expect(await within(panel).findByText("Customized protocol — active instructions")).toBeTruthy();
+    expect(within(panel).getByText("Custom active instructions")).toBeTruthy();
+    expect(within(panel).getByText(/Reference protocol:/).textContent).toContain(base.protocolName);
+    expect(within(panel).getByText(/Reference protocol:/).textContent).toContain(`v${base.versionNumber}`);
+    expect(within(panel).getByText("Patient-specific prep")).toBeTruthy();
+    expect(within(panel).getByText("Patient-specific prep").className).toContain("whitespace-pre-wrap");
+    expect(within(panel).getByText("Patient-specific contrast")).toBeTruthy();
+    expect(within(panel).getByText("Current library reference — not an assignment-time snapshot")).toBeTruthy();
+    expect(within(panel).queryByTestId("clinical-acquisition-table")).toBeNull();
   });
 
   it("shows compact MPPS equipment and duration on the board and richer acquisition detail in the selected drawer", async () => {

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pushToast } from "./toast";
-import { formatModalityCtPhaseTiming, printProtocolSheet, type ProtocolPrintSheet } from "./protocol-printing";
+import { buildModalityProtocolPrintSheet, formatModalityCtPhaseTiming, printProtocolSheet, type ProtocolPrintSheet } from "./protocol-printing";
+import type { AppointmentWithDetails } from "@/lib/mappers";
+import type { ModalityProtocolAssignment } from "@/types/api";
 
 vi.mock("./toast", () => ({ pushToast: vi.fn() }));
 
@@ -54,8 +56,70 @@ describe("printProtocolSheet", () => {
     vi.restoreAllMocks();
   });
 
-  it("preserves CT bolus tracking details in the timing used for printing", () => {
-    expect(formatModalityCtPhaseTiming({ orderIndex: 1, phasePresetName: null, customPhaseName: "Arterial", contrastStatus: null, timingType: "BOLUS_TRACKING", delaySeconds: null, timingOverride: null, coverage: null, coverageOverride: null, reconstructionNotes: null, reconstructionOverride: null, instructions: null, instructionsOverride: null, bolusTrackingSite: "Aorta", triggerHu: 120, postTriggerDelaySeconds: 8, isRequired: true })).toBe("Bolus tracking · Aorta · 120 HU · +8 sec");
+  it.each([
+    [{ timingType: "MANUAL", timingOverride: "Delayed scan at 5 minutes", presetContrastStatus: "NON_CONTRAST" }, "Delayed scan at 5 minutes"],
+    [{ timingType: "NON_CONTRAST" }, "Non-contrast"],
+    [{ timingType: "FIXED_DELAY_INJECTION_START", delaySeconds: 70 }, "70 sec after start of IV contrast"],
+    [{ timingType: "FIXED_DELAY_INJECTION_END", delaySeconds: 30 }, "30 sec after completion of IV contrast"],
+    [{ timingType: "BOLUS_TRACKING", bolusTrackingSite: "Aorta", triggerHu: 120, postTriggerDelaySeconds: 8 }, "Bolus tracking · Aorta · 120 HU · +8 sec"],
+    [{ presetTimingType: "FIXED_DELAY", presetDelaySeconds: 70 }, "Legacy fixed delay, 70 sec"],
+    [{ timingType: "FIXED_DELAY_INJECTION_START" }, "Delay after start of IV contrast"],
+    [{ timingOverride: "Manual legacy override", presetContrastStatus: "NON_CONTRAST" }, "Manual legacy override"],
+    [{ presetInstructions: "Breath hold" }, "Timing not specified"],
+  ])("formats authoritative CT timing %#", (overrides, expected) => {
+    const timing = { timingType: null, timingOverride: null, delaySeconds: null, ...overrides };
+    expect(formatModalityCtPhaseTiming(timing)).toBe(expected);
+  });
+
+  it.each(["CT", "MRI"] as const)("prints customized %s free text without library acquisition rows", (modality) => {
+    const printWindow = mockPrintWindow();
+    vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
+    const assignment = {
+      modality, protocolId: 1, protocolName: "Library protocol", versionNumber: "2.1", freeTextProtocol: "Active custom prescription",
+      protocolNotes: "Patient prep", contrastNotes: "Doctor contrast note", libraryPreparationNotes: "Current library prep",
+      ctPhases: [{ orderIndex: 1, customPhaseName: "Original phase" }],
+      mriSequences: [{ orderIndex: 1, sequencePresetName: "Original sequence" }],
+    } as unknown as ModalityProtocolAssignment;
+    const appointment = { patientId: 1, englishFullName: "Test patient" } as AppointmentWithDetails;
+    const result = buildModalityProtocolPrintSheet(appointment, assignment);
+    printProtocolSheet(result);
+    const html = String(printWindow.document.write.mock.calls[0]?.[0]);
+    expect(html).toContain("Customized protocol — active instructions");
+    expect(html).toContain("Active custom prescription");
+    expect(html).toContain("Reference protocol");
+    expect(html).toContain("Library protocol v2.1");
+    expect(html).toContain("Patient prep");
+    expect(html).toContain("Doctor contrast note");
+    expect(html).toContain("Current library reference — not an assignment-time snapshot");
+    expect(html).toContain("Current library prep");
+    expect(html).not.toContain("Original phase");
+    expect(html).not.toContain("Original sequence");
+    expect(html).not.toContain("<table");
+  });
+
+  it("prints standalone free text without a structured table", () => {
+    const printWindow = mockPrintWindow();
+    vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
+    const assignment = { modality: "MRI", protocolId: null, freeTextProtocol: "Free prescription", protocolNotes: "Prepare patient", contrastNotes: "No contrast", ctPhases: [], mriSequences: [] } as unknown as ModalityProtocolAssignment;
+    printProtocolSheet(buildModalityProtocolPrintSheet({ patientId: 1 } as AppointmentWithDetails, assignment));
+    const html = String(printWindow.document.write.mock.calls[0]?.[0]);
+    expect(html).toContain("Free prescription");
+    expect(html).toContain("Prepare patient");
+    expect(html).toContain("No contrast");
+    expect(html).not.toContain("<table");
+  });
+
+  it("retains saved CT acquisition rows and their structured timing", () => {
+    const printWindow = mockPrintWindow();
+    vi.spyOn(window, "open").mockReturnValue(printWindow as unknown as Window);
+    const assignment = { modality: "CT", protocolId: 1, protocolName: "CT Liver", versionNumber: "1.0", freeTextProtocol: null, protocolNotes: "Patient prep", contrastNotes: "Contrast note", ctPhases: [{ orderIndex: 1, customPhaseName: "Arterial", timingType: "FIXED_DELAY_INJECTION_START", delaySeconds: 70, timingOverride: null, isRequired: true }], mriSequences: [] } as unknown as ModalityProtocolAssignment;
+    printProtocolSheet(buildModalityProtocolPrintSheet({ patientId: 1 } as AppointmentWithDetails, assignment));
+    const html = String(printWindow.document.write.mock.calls[0]?.[0]);
+    expect(html).toContain("CT phases");
+    expect(html).toContain("Arterial");
+    expect(html).toContain("70 sec after start of IV contrast");
+    expect(html).toContain("Patient prep");
+    expect(html).toContain("Contrast note");
   });
 
   it("writes a self-contained protocol sheet into a writable print window", () => {

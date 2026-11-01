@@ -73,7 +73,7 @@ import {
   type ProtocolAnatomyRegionPayload,
 } from "@/lib/api-hooks";
 import type { CtPhasePreset, DoctorMe, DoctorProtocolingAppointment, DoctorProtocolingAppointmentDetail, HistoricalPacsCandidate, ImagingScanner, MriSequencePreset, PatientIdentityReconciliationSummary, ProtocolAnatomyRegion, ProtocolAssignmentPayload, ProtocolLibraryCtPhaseRow, ProtocolLibraryCtTechniqueRow, ProtocolLibraryMriSequenceRow, ProtocolLibraryProtocol, ProtocolLibraryVersionDetail } from "@/types/api";
-import { printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
+import { formatModalityCtPhaseTiming as formatCtPhaseTiming, printProtocolSheet, type ProtocolPrintSheet } from "@/lib/protocol-printing";
 import { pushToast } from "@/lib/toast";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
 import { AnchoredMenu, Badge, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, SearchInput, Textarea } from "@/components/shared";
@@ -1173,17 +1173,6 @@ function nextMajorVersion(version: string): string {
 
 type CtPhaseDisplayRow = { timingType: string | null; timingOverride: string | null; delaySeconds: number | null; bolusTrackingSite?: string | null; triggerHu?: number | null; postTriggerDelaySeconds?: number | null; coverageOverride: string | null; reconstructionOverride: string | null; instructionsOverride: string | null; presetContrastStatus?: string | null; presetTimingType?: string | null; presetDelaySeconds?: number | null; presetBolusTrackingSite?: string | null; presetTriggerHu?: number | null; presetDefaultCoverage?: string | null; presetReconstructionNotes?: string | null; presetInstructions?: string | null; };
 
-function formatCtPhaseTiming(row: CtPhaseDisplayRow): string {
-  if (row.timingType === "NON_CONTRAST") return "Non-contrast";
-  if (row.timingType === "FIXED_DELAY_INJECTION_START") return `${row.delaySeconds ?? 0} sec after start of IV contrast`;
-  if (row.timingType === "FIXED_DELAY_INJECTION_END") return `${row.delaySeconds ?? 0} sec after completion of IV contrast`;
-  if (row.timingType === "BOLUS_TRACKING") return ["Bolus tracking", row.bolusTrackingSite, row.triggerHu == null ? null : `${row.triggerHu} HU`, row.postTriggerDelaySeconds ? `+${row.postTriggerDelaySeconds} sec` : null].filter(Boolean).join(" · ");
-  if (row.presetContrastStatus === "NON_CONTRAST") return "Non-contrast";
-  if (row.presetTimingType === "FIXED_DELAY") return `Fixed delay${row.presetDelaySeconds == null ? "" : ` · ${row.presetDelaySeconds} sec`} (legacy preset)`;
-  if (row.presetTimingType === "BOLUS_TRACKING") return ["Bolus tracking", row.presetBolusTrackingSite, row.presetTriggerHu == null ? null : `${row.presetTriggerHu} HU`].filter(Boolean).join(" · ");
-  return row.timingOverride ?? row.presetInstructions ?? "Timing not specified";
-}
-
 function effectiveCtPhaseCoverage(row: CtPhaseDisplayRow): string | null { return row.coverageOverride ?? row.presetDefaultCoverage ?? null; }
 function effectiveCtPhaseReconstruction(row: CtPhaseDisplayRow): string | null { return row.reconstructionOverride ?? row.presetReconstructionNotes ?? null; }
 function effectiveCtPhaseInstructions(row: CtPhaseDisplayRow): string | null { return row.instructionsOverride ?? row.presetInstructions ?? null; }
@@ -1350,7 +1339,7 @@ function CtProtocolRowForm({ draft, presets, setDraft, onSave, onCancel }: { dra
   const effectiveCoverage = draft.coverageOverride?.trim() || selectedPreset?.defaultCoverage?.trim() || null;
   return (
     <div className="space-y-3" role="group" aria-label={`${draft.customPhaseName || "CT phase"} editor`}>
-      {legacyPreset && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Legacy preset: {selectedPreset?.name ?? "Unknown preset"} · {formatCtPhaseTiming({ ...draft, presetContrastStatus: selectedPreset?.contrastStatus, presetTimingType: selectedPreset?.timingType, presetDelaySeconds: selectedPreset?.delaySeconds, presetBolusTrackingSite: selectedPreset?.bolusTrackingSite, presetTriggerHu: selectedPreset?.triggerHu, presetInstructions: selectedPreset?.instructions })}</p>}
+      {legacyPreset && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Legacy preset: {selectedPreset?.name ?? "Unknown preset"} · {formatCtPhaseTiming({ ...draft, presetContrastStatus: selectedPreset?.contrastStatus, presetTimingType: selectedPreset?.timingType, presetDelaySeconds: selectedPreset?.delaySeconds, presetBolusTrackingSite: selectedPreset?.bolusTrackingSite, presetTriggerHu: selectedPreset?.triggerHu })}</p>}
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Phase name"><Input aria-label="Phase name" value={textValue(draft.customPhaseName)} onChange={(event) => setDraft({ ...draft, customPhaseName: editableText(event.target.value) })} /></Field>
         <Field label="Timing"><select aria-label="Timing" className={"input-premium " + (inputClass())} value={draft.timingType ?? ""} onChange={(event) => setDraft({ ...draft, timingType: (event.target.value || null) as ProtocolLibraryCtPhaseRowPayload["timingType"] })}>{legacyPreset && <option value="">Keep legacy preset timing</option>}<option value="NON_CONTRAST">Non-contrast</option><option value="FIXED_DELAY_INJECTION_START">Fixed delay after start</option><option value="FIXED_DELAY_INJECTION_END">Fixed delay after completion</option><option value="BOLUS_TRACKING">Bolus tracking</option><option value="MANUAL">Manual</option></select></Field>
@@ -2136,8 +2125,13 @@ function ProtocolAssignmentModal({
   const withdrawRecallMutation = useMutation({ mutationFn: () => withdrawComplementaryRecallRequest(appointment.activeComplementaryRecall!.id), onSuccess: async () => { setWithdrawRecallDialogOpen(false); await queryClient.invalidateQueries({ queryKey: ["doctor", "protocoling"] }); await onUpdated?.(); pushToast({ type: "success", title: "Additional imaging withdrawn" }); } });
   const protocolOptionLabel = (protocol: ProtocolLibraryProtocol) => `${protocol.name} · ${protocol.modality} · v${protocol.activeVersionNumber}`;
   const selectedProtocolLabel = selectedProtocol ? protocolOptionLabel(selectedProtocol) : protocolSearch;
+  const versionChangeWarning = selectedProtocol && existing?.protocolId === selectedProtocol.id && existing.protocolVersionId && existing.protocolVersionId !== selectedProtocol.activeVersionId
+    ? `The current assignment uses v${existing.versionNumber ?? "?"}. Saving assigns the current active version v${selectedProtocol.activeVersionNumber ?? "?"}.`
+    : null;
   const selectedScannerName = matchingScanners.find((scanner) => String(scanner.id) === scannerId)?.name ?? null;
-  const selectedVersionId = selectedProtocol?.activeVersionId ?? null;
+  const selectedVersionId = selectedProtocol && (!modeTouched || protocolMode === "free-text") && existing?.protocolId === selectedProtocol.id
+    ? existing.protocolVersionId ?? selectedProtocol.activeVersionId
+    : selectedProtocol?.activeVersionId ?? null;
   const examTypesQueryResult = useV2ExamTypes(appointment.modalityId);
   const examTypesQuery = examTypesQueryResult;
   const examTypeOptions = useMemo(() => {
@@ -2245,17 +2239,22 @@ function ProtocolAssignmentModal({
   const historicalPacsIndexStatus = historicalCandidatesQuery.data?.historicalPacsIndexStatus ?? historyQuery.data?.historicalPacsIndexStatus;
   const historyModalities = useMemo(() => [...new Set(historyItems.flatMap((item) => item.modalities))].sort(), [historyItems]);
   const filteredHistory = selectedHistoryModalities.length ? historyItems.filter((item) => item.modalities.some((modality) => selectedHistoryModalities.includes(modality))) : historyItems;
+  const formDirty = modeTouched || protocolId !== String(existing?.protocolId ?? "") || scannerId !== String(existing?.scannerId ?? "") || protocolNotes !== (existing?.protocolNotes ?? "") || contrastNotes !== (existing?.contrastNotes ?? "") || freeTextProtocol !== (existing?.freeTextProtocol ?? "");
   const printableSheet = doctorAssignmentPrintSheet({
     appointment,
     detail,
     selectedProtocol,
     selectedVersionDetail: selectedVersionQuery.data ?? null,
     selectedScannerName,
+    scannerId,
     protocolNotes,
     contrastNotes,
     freeTextProtocol,
+    protocolId,
+    protocolMode,
+    activeAssignment,
+    formDirty,
   });
-  const formDirty = modeTouched || protocolId !== String(existing?.protocolId ?? "") || scannerId !== String(existing?.scannerId ?? "") || protocolNotes !== (existing?.protocolNotes ?? "") || contrastNotes !== (existing?.contrastNotes ?? "") || freeTextProtocol !== (existing?.freeTextProtocol ?? "");
   const hasUnsavedChanges = formDirty || annotationDirty;
   const canSaveAssignment = !saving && !dictation?.busy && !annotationDirty && (protocolMode === "saved" ? Boolean(protocolId) : Boolean(freeTextProtocol.trim()));
   const requestClose = useCallback(() => {
@@ -2316,7 +2315,7 @@ function ProtocolAssignmentModal({
     let text = `Protocol: ${selectedProtocol?.name ?? "Saved protocol"}`;
     if (versionDetail?.ctPhases && versionDetail.ctPhases.length > 0) {
       text += "\n\nPhases:\n" + versionDetail.ctPhases.map((ph, idx) => 
-        `${idx + 1}. ${ph.customPhaseName ?? ph.ctPhasePresetName ?? "Phase"}${ph.delaySeconds != null ? ` · Delay: ${ph.delaySeconds}s` : ""}${ph.instructionsOverride ? ` · ${ph.instructionsOverride}` : ""}`
+        `${idx + 1}. ${ph.customPhaseName ?? ph.ctPhasePresetName ?? "Phase"} · ${formatCtPhaseTiming(ph)}${ph.instructionsOverride ? ` · ${ph.instructionsOverride}` : ""}`
       ).join("\n");
     } else if (versionDetail?.mriSequences && versionDetail.mriSequences.length > 0) {
       text += "\n\nSequences:\n" + versionDetail.mriSequences.map((seq, idx) => 
@@ -2609,6 +2608,7 @@ function ProtocolAssignmentModal({
                       ) : null}
                       <label className="block text-xs font-semibold">Saved protocol<Input aria-label="Saved protocol" list="saved-protocol-options" value={selectedProtocolLabel} onChange={(event) => { const value = event.target.value; setProtocolSearch(value); const match = activeProtocols.find((protocol) => protocolOptionLabel(protocol).toLowerCase() === value.trim().toLowerCase()); setProtocolId(match ? String(match.id) : ""); }} className={`${inputClass()} mt-1`} placeholder="Search by protocol name" style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }} disabled={protocolsLoading && activeProtocols.length === 0} /><datalist id="saved-protocol-options">{activeProtocols.map((protocol) => <option key={protocol.id} value={protocolOptionLabel(protocol)} />)}</datalist></label>
                       <div className="mt-3">
+                        {versionChangeWarning ? <p className="mb-2 text-xs font-semibold text-amber-800">{versionChangeWarning}</p> : null}
                         <ProtocolVersionPreview modality={appointment.modalityCode} selectedProtocol={selectedProtocol} detail={selectedVersionQuery.data ?? null} loading={selectedVersionQuery.isLoading} error={selectedVersionQuery.error} />
                         {selectedProtocol ? (
                           <div className="mt-2 flex justify-end">
@@ -2627,11 +2627,12 @@ function ProtocolAssignmentModal({
                       {activeProtocols.length === 0 ? <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{noActiveProtocolsMessage}</p> : null}
                     </> : (
                       <div className="space-y-2">
+                        {versionChangeWarning ? <p className="text-xs font-semibold text-amber-800">{versionChangeWarning}</p> : null}
                         {protocolId ? (
                           <div className="flex items-center justify-between rounded-md border border-teal-200 bg-teal-50/60 px-2.5 py-1.5 text-xs text-teal-950">
                             <span>
-                              <span className="font-semibold text-teal-800">Linked protocol:</span> {selectedProtocol?.name ?? existing?.protocolName ?? `Protocol #${protocolId}`}
-                              {selectedProtocol?.activeVersionNumber || existing?.versionNumber ? ` v${selectedProtocol?.activeVersionNumber ?? existing?.versionNumber}` : ""}
+                              <span className="font-semibold text-teal-800">Reference protocol:</span> {selectedProtocol?.name ?? (String(existing?.protocolId ?? "") === protocolId ? existing?.protocolName : null) ?? `Protocol #${protocolId}`}
+                              {selectedVersionQuery.data?.version.versionNumber || (String(existing?.protocolId ?? "") === protocolId ? existing?.versionNumber : selectedProtocol?.activeVersionNumber) ? ` v${selectedVersionQuery.data?.version.versionNumber ?? (String(existing?.protocolId ?? "") === protocolId ? existing?.versionNumber : selectedProtocol?.activeVersionNumber)}` : ""}
                             </span>
                             <button
                               type="button"
@@ -2761,22 +2762,37 @@ function doctorAssignmentPrintSheet({
   selectedProtocol,
   selectedVersionDetail,
   selectedScannerName,
+  scannerId,
   protocolNotes,
   contrastNotes,
   freeTextProtocol,
+  protocolId,
+  protocolMode,
+  activeAssignment,
+  formDirty,
 }: {
   appointment: DoctorProtocolingAppointment;
   detail: DoctorProtocolingAppointmentDetail | null;
   selectedProtocol: ProtocolLibraryProtocol | null;
   selectedVersionDetail: ProtocolLibraryVersionDetail | null;
   selectedScannerName: string | null;
+  scannerId: string;
   protocolNotes: string;
   contrastNotes: string;
   freeTextProtocol: string;
+  protocolId: string;
+  protocolMode: "saved" | "free-text";
+  activeAssignment: DoctorProtocolingAppointment["assignment"];
+  formDirty: boolean;
 }): ProtocolPrintSheet | null {
-  const assignmentDetail = detail?.assignmentDetail ?? null;
-  const assigned = assignmentDetail?.assignment ?? appointment.assignment ?? null;
-  if (!assigned && (!selectedProtocol || !selectedVersionDetail) && !freeTextProtocol.trim()) return null;
+  const assigned = activeAssignment;
+  const sameProtocol = assigned?.protocolId != null && String(assigned.protocolId) === protocolId;
+  const assignmentDetail = sameProtocol && !formDirty ? detail?.assignmentDetail ?? null : null;
+  const activeFreeText = protocolMode === "free-text" ? nullableText(freeTextProtocol) : null;
+  if (protocolMode === "free-text" && !activeFreeText) return null;
+  if (protocolMode === "saved" && (!protocolId || (!assignmentDetail && (!selectedProtocol || !selectedVersionDetail)))) return null;
+  const linkedName = selectedProtocol?.name ?? (sameProtocol ? assigned?.protocolName : null);
+  const linkedVersion = selectedVersionDetail?.version.versionNumber ?? (sameProtocol ? assigned?.versionNumber : null) ?? selectedProtocol?.activeVersionNumber ?? null;
 
   const appointmentDateTime = [appointment.appointmentDate, appointment.appointmentTime].filter(Boolean).join(" ") || null;
   const base = {
@@ -2788,14 +2804,19 @@ function doctorAssignmentPrintSheet({
     exam: appointment.examTypeName,
     category: appointment.caseCategory,
     clinicalNotes: appointment.clinicalNotes,
-    protocolName: assigned?.protocolName ?? selectedProtocol?.name ?? (freeTextProtocol.trim() ? "Free-text protocol" : ""),
-    versionNumber: assigned?.versionNumber ?? selectedVersionDetail?.version.versionNumber ?? selectedProtocol?.activeVersionNumber ?? "",
-    scanner: assigned?.scannerName ?? selectedScannerName,
-    assignedBy: assigned?.assignedBy != null ? String(assigned.assignedBy) : null,
-    assignedAt: assigned?.assignedAt ?? null,
-    protocolInstructions: assigned?.freeTextProtocol ?? assigned?.protocolNotes ?? nullableText(freeTextProtocol) ?? nullableText(protocolNotes),
-    contrastInstructions: assigned?.contrastNotes ?? nullableText(contrastNotes),
+    protocolName: linkedName ?? (protocolId ? `Protocol #${protocolId}` : "Free-text protocol"),
+    versionNumber: protocolId ? linkedVersion : null,
+    scanner: selectedScannerName ?? (String(assigned?.scannerId ?? "") === scannerId ? assigned?.scannerName ?? null : null),
+    assignedBy: !formDirty && assigned?.assignedBy != null ? String(assigned.assignedBy) : null,
+    assignedAt: !formDirty ? assigned?.assignedAt ?? null : null,
+    prescriptionType: activeFreeText ? (protocolId ? "customized" as const : "free-text" as const) : "saved" as const,
+    protocolInstructions: activeFreeText ?? nullableText(protocolNotes),
+    patientInstructions: activeFreeText ? nullableText(protocolNotes) : null,
+    contrastInstructions: nullableText(contrastNotes),
+    unsavedDraft: formDirty,
   };
+
+  if (activeFreeText) return base;
 
   if (appointment.modalityCode === "CT") {
     return {
@@ -2805,7 +2826,7 @@ function doctorAssignmentPrintSheet({
         ? assignmentDetail.ctPhases.map((phase) => ({
           orderIndex: phase.orderIndex,
           phase: phase.customPhaseName ?? phase.ctPhasePresetName,
-          timing: phase.timingOverride,
+          timing: formatCtPhaseTiming(phase),
           coverage: effectiveCtPhaseCoverage(phase),
           reconstruction: effectiveCtPhaseReconstruction(phase),
           instructions: effectiveCtPhaseInstructions(phase),
@@ -2815,9 +2836,9 @@ function doctorAssignmentPrintSheet({
           orderIndex: phase.orderIndex,
           phase: phase.customPhaseName ?? phase.ctPhasePresetName,
           timing: formatCtPhaseTiming(phase),
-          coverage: phase.coverageOverride,
-          reconstruction: phase.reconstructionOverride,
-          instructions: phase.instructionsOverride,
+          coverage: effectiveCtPhaseCoverage(phase),
+          reconstruction: effectiveCtPhaseReconstruction(phase),
+          instructions: effectiveCtPhaseInstructions(phase),
           isRequired: phase.isRequired,
         })),
     };
@@ -2943,13 +2964,15 @@ function ProtocolAssignmentSummary({ detail }: { detail: DoctorProtocolingAppoin
   const assignment = assignmentDetail.assignment;
   const assignedByName = assignment.assignedByName?.trim() || null;
   const assignedAt = assignment.assignedAt ? formatDateTimeLy(assignment.assignedAt) : null;
-  const hasCtPhases = detail.appointment.modalityCode === "CT" && assignmentDetail.ctPhases.length > 0;
-  const hasMriSequences = detail.appointment.modalityCode !== "CT" && assignmentDetail.mriSequences.length > 0;
+  const hasFreeText = Boolean(assignment.freeTextProtocol?.trim());
+  const hasCtPhases = !hasFreeText && detail.appointment.modalityCode === "CT" && assignmentDetail.ctPhases.length > 0;
+  const hasMriSequences = !hasFreeText && detail.appointment.modalityCode !== "CT" && assignmentDetail.mriSequences.length > 0;
 
   return (
     <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
       <h4 className="font-semibold">Assigned protocol summary</h4>
-      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{assignment.freeTextProtocol ? "Free-text protocol" : `${assignment.protocolName ?? "Saved protocol"} v${assignment.versionNumber ?? "-"}`}{assignment.scannerName ? ` · ${assignment.scannerName}` : ""}</p>
+      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{hasFreeText ? (assignment.protocolId != null ? "Customized protocol — active instructions" : "Free-text protocol") : `${assignment.protocolName ?? "Saved protocol"} v${assignment.versionNumber ?? "-"}`}{assignment.scannerName ? ` · ${assignment.scannerName}` : ""}</p>
+      {hasFreeText && assignment.protocolId != null ? <p className="mt-1 text-xs">Reference protocol: {assignment.protocolName ?? `Protocol #${assignment.protocolId}`}{assignment.versionNumber ? ` v${assignment.versionNumber}` : ""}</p> : null}
       {assignedByName || assignedAt ? <div className="mt-1 space-y-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{assignedByName ? <p>Protocol by: {assignedByName}</p> : null}{assignedAt ? <p>Protocolled: {assignedAt}</p> : null}</div> : null}
       {assignment.freeTextProtocol && <p className="mt-2 whitespace-pre-wrap text-sm">{assignment.freeTextProtocol}</p>}
       {assignment.protocolNotes && <p className="mt-2 text-sm">Protocol instructions: {assignment.protocolNotes}</p>}

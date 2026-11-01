@@ -2695,14 +2695,16 @@ function ClinicalMobileDetailField({
 function DetailField({
   label,
   value,
+  multiline = false,
 }: {
   label: string;
   value: string | number | null | undefined;
+  multiline?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
       <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-      <p className="mt-1 font-medium leading-6 text-foreground">{value ?? "—"}</p>
+      <p className={`mt-1 font-medium leading-6 text-foreground${multiline ? " whitespace-pre-wrap break-words" : ""}`}>{value ?? "—"}</p>
     </div>
   );
 }
@@ -2753,7 +2755,7 @@ function ProtocolAssignmentPanel({
   const [patientInstructionsOpen, setPatientInstructionsOpen] = useState(false);
   const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
   const appointmentNotes = appointment.notes?.trim() || null;
-  const patientInstructionItems = [assignment?.protocolNotes, specialInstructions]
+  const patientInstructionItems = [specialInstructions]
     .filter((value): value is string => hasMeaningfulValue(value));
   const scanner = assignment
     ? [assignment.scannerName?.trim(), assignment.scannerVendor?.trim()].filter(Boolean).join(" - ")
@@ -2791,9 +2793,10 @@ function ProtocolAssignmentPanel({
   const printSheet = buildModalityProtocolPrintSheet(appointment, assignment);
   const protocolTitle = protocolVersionLabel(protocolLanguage, assignment.protocolName, assignment.versionNumber, assignment.freeTextProtocol);
   const hasFreeTextProtocol = hasMeaningfulValue(assignment.freeTextProtocol);
+  const isCustomized = hasFreeTextProtocol && assignment.protocolId != null;
   const hasContrastNotes = hasMeaningfulValue(assignment.contrastNotes);
   const hasAppointmentNotes = hasMeaningfulValue(appointmentNotes);
-  const hasStructuredRows = assignment.modality === "CT" ? assignment.ctPhases.length > 0 : assignment.mriSequences.length > 0;
+  const hasStructuredRows = !hasFreeTextProtocol && (assignment.modality === "CT" ? assignment.ctPhases.length > 0 : assignment.mriSequences.length > 0);
 
   return (
     <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
@@ -2813,24 +2816,25 @@ function ProtocolAssignmentPanel({
       </div>
 
       <div data-testid="clinical-protocol-content" dir="ltr" className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{t(protocolLanguage, "modality.protocol")}</p>
+        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{isCustomized ? chooseLocalized(protocolLanguage, "بروتوكول مخصص — التعليمات المعتمدة", "Customized protocol — active instructions") : t(protocolLanguage, "modality.protocol")}</p>
         {hasFreeTextProtocol ? (
           <p className="mt-2 whitespace-pre-wrap text-lg font-semibold leading-7 text-slate-950">{assignment.freeTextProtocol}</p>
         ) : (
           <p className="mt-2 text-lg font-semibold leading-7 text-slate-950">{protocolTitle}</p>
         )}
-        {hasFreeTextProtocol ? <p className="mt-1 text-xs text-muted-foreground">{protocolTitle}</p> : null}
+        {hasFreeTextProtocol ? <p className="mt-1 text-xs text-muted-foreground">{isCustomized ? `${chooseLocalized(protocolLanguage, "البروتوكول المرجعي", "Reference protocol")}: ${protocolTitle}` : protocolTitle}</p> : null}
       </div>
 
-      {hasContrastNotes ? <div className="mt-3"><DetailField label={t(protocolLanguage, "modality.contrastPreparation")} value={assignment.contrastNotes} /></div> : null}
+      {hasMeaningfulValue(assignment.protocolNotes) ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "تعليمات خاصة بالمريض", "Patient-specific instructions")} value={assignment.protocolNotes} multiline /></div> : null}
+      {hasContrastNotes ? <div className="mt-3"><DetailField label={t(protocolLanguage, "modality.contrastPreparation")} value={assignment.contrastNotes} multiline /></div> : null}
 
       {[assignment.libraryContrastPolicy, assignment.libraryOralContrastPolicy, assignment.libraryBowelPreparation, assignment.libraryPreparationNotes].some(hasMeaningfulValue) ? (
-        <section className="mt-3 space-y-2" aria-label={chooseLocalized(protocolLanguage, "إرشادات المكتبة الحالية", "Current library guidance")}>
-          <h4 className="text-xs font-semibold">{chooseLocalized(protocolLanguage, "إرشادات المكتبة الحالية", "Current library guidance")}</h4>
+        <section className="mt-3 space-y-2" aria-label={chooseLocalized(protocolLanguage, "مرجع المكتبة الحالي — ليس نسخة وقت التعيين", "Current library reference — not an assignment-time snapshot")}>
+          <h4 className="text-xs font-semibold">{chooseLocalized(protocolLanguage, "مرجع المكتبة الحالي — ليس نسخة وقت التعيين", "Current library reference — not an assignment-time snapshot")}</h4>
           {hasMeaningfulValue(assignment.libraryContrastPolicy) ? <DetailField label={chooseLocalized(protocolLanguage, "سياسة التباين الوريدي", "IV contrast policy")} value={assignment.libraryContrastPolicy} /> : null}
           {hasMeaningfulValue(assignment.libraryOralContrastPolicy) ? <DetailField label={chooseLocalized(protocolLanguage, "سياسة التباين الفموي", "Oral contrast policy")} value={assignment.libraryOralContrastPolicy} /> : null}
           {hasMeaningfulValue(assignment.libraryBowelPreparation) ? <DetailField label={chooseLocalized(protocolLanguage, "تحضير الأمعاء", "Bowel preparation")} value={assignment.libraryBowelPreparation} /> : null}
-          {hasMeaningfulValue(assignment.libraryPreparationNotes) ? <DetailField label={chooseLocalized(protocolLanguage, "ملاحظات التحضير", "Preparation notes")} value={assignment.libraryPreparationNotes} /> : null}
+          {hasMeaningfulValue(assignment.libraryPreparationNotes) ? <DetailField label={chooseLocalized(protocolLanguage, "ملاحظات التحضير", "Preparation notes")} value={assignment.libraryPreparationNotes} multiline /> : null}
         </section>
       ) : null}
 

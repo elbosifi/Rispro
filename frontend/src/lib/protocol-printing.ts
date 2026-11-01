@@ -1,5 +1,5 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { ModalityCtProtocolPhase, ModalityProtocolAssignment } from "@/types/api";
+import type { ModalityProtocolAssignment } from "@/types/api";
 import { pushToast } from "@/lib/toast";
 
 export type ProtocolPrintModality = "CT" | "MRI";
@@ -43,6 +43,9 @@ export interface ProtocolPrintSheet {
   protocolInstructions: string | null;
   contrastInstructions: string | null;
   libraryGuidance?: string | null;
+  prescriptionType?: "saved" | "free-text" | "customized";
+  patientInstructions?: string | null;
+  unsavedDraft?: boolean;
   ctPhases?: ProtocolPrintCtPhase[];
   mriSequences?: ProtocolPrintMriSequence[];
 }
@@ -188,6 +191,7 @@ function html(sheet: ProtocolPrintSheet): string {
   <header>
     <h1>NCCB / RISpro Protocol Sheet</h1>
     <p class="muted">Printed ${text(printedAt)}</p>
+    ${sheet.unsavedDraft ? '<p><strong>Unsaved draft — not the current assigned protocol</strong></p>' : ""}
   </header>
   <section>
     <dl>
@@ -204,21 +208,22 @@ function html(sheet: ProtocolPrintSheet): string {
   <section>
     <h2>Protocol</h2>
     <dl>
-      ${row("Name", sheet.versionNumber?.trim() ? `${sheet.protocolName} v${sheet.versionNumber}` : sheet.protocolName)}
+      ${row(sheet.prescriptionType === "customized" ? "Reference protocol" : "Name", sheet.versionNumber?.trim() ? `${sheet.protocolName} v${sheet.versionNumber}` : sheet.protocolName)}
       ${row("Scanner", sheet.scanner)}
       ${row("Assigned by", sheet.assignedBy)}
       ${row("Assigned at", sheet.assignedAt)}
     </dl>
     <div class="two">
-      <div class="box"><strong>Protocol instructions</strong><br>${longText(sheet.protocolInstructions)}</div>
+      <div class="box"><strong>${sheet.prescriptionType === "customized" ? "Customized protocol — active instructions" : "Protocol instructions"}</strong><br>${longText(sheet.protocolInstructions)}</div>
       <div class="box"><strong>Contrast/preparation instructions</strong><br>${longText(sheet.contrastInstructions)}</div>
     </div>
-    ${sheet.libraryGuidance ? `<div class="box"><strong>Current library guidance</strong><br>${longText(sheet.libraryGuidance)}</div>` : ""}
+    ${sheet.patientInstructions ? `<div class="box"><strong>Patient-specific instructions</strong><br>${longText(sheet.patientInstructions)}</div>` : ""}
+    ${sheet.libraryGuidance ? `<div class="box"><strong>Current library reference — not an assignment-time snapshot</strong><br>${longText(sheet.libraryGuidance)}</div>` : ""}
   </section>
-  <section>
+  ${sheet.prescriptionType !== "customized" && sheet.prescriptionType !== "free-text" ? `<section>
     <h2>${sheet.modality === "CT" ? "CT phases" : "MRI sequences"}</h2>
     ${detailTable}
-  </section>
+  </section>` : ""}
 </body>
 </html>`;
 }
@@ -261,20 +266,23 @@ function effectiveValue(override: string | null | undefined, fallback: string | 
   return override?.trim() || (fallback == null ? null : String(fallback));
 }
 
-export function formatModalityCtPhaseTiming(phase: ModalityCtProtocolPhase): string | null {
+type CtTimingFields = { timingType: string | null; timingOverride: string | null; delaySeconds: number | null; bolusTrackingSite?: string | null; triggerHu?: number | null; postTriggerDelaySeconds?: number | null; presetContrastStatus?: string | null; presetTimingType?: string | null; presetDelaySeconds?: number | null; presetBolusTrackingSite?: string | null; presetTriggerHu?: number | null };
+
+export function formatModalityCtPhaseTiming(phase: CtTimingFields): string {
   if (phase.timingType === "NON_CONTRAST") return "Non-contrast";
   if (phase.timingType === "FIXED_DELAY_INJECTION_START") return `${phase.delaySeconds == null ? "Delay" : `${phase.delaySeconds} sec`} after start of IV contrast`;
   if (phase.timingType === "FIXED_DELAY_INJECTION_END") return `${phase.delaySeconds == null ? "Delay" : `${phase.delaySeconds} sec`} after completion of IV contrast`;
   if (phase.timingType === "BOLUS_TRACKING") return ["Bolus tracking", phase.bolusTrackingSite, phase.triggerHu == null ? null : `${phase.triggerHu} HU`, phase.postTriggerDelaySeconds == null ? null : `+${phase.postTriggerDelaySeconds} sec`].filter(Boolean).join(" · ");
   if (phase.timingOverride?.trim()) return phase.timingOverride;
   if (phase.presetContrastStatus === "NON_CONTRAST") return "Non-contrast";
-  if (phase.presetTimingType === "FIXED_DELAY") return `Fixed delay${phase.presetDelaySeconds == null ? "" : ` · ${phase.presetDelaySeconds} sec`} (legacy preset)`;
+  if (phase.presetTimingType === "FIXED_DELAY") return `Legacy fixed delay${phase.presetDelaySeconds == null ? "" : `, ${phase.presetDelaySeconds} sec`}`;
   if (phase.presetTimingType === "BOLUS_TRACKING") return ["Bolus tracking (legacy preset)", phase.presetBolusTrackingSite, phase.presetTriggerHu == null ? null : `${phase.presetTriggerHu} HU`].filter(Boolean).join(" · ");
-  return (phase.timingType && phase.delaySeconds != null ? `${phase.timingType} ${phase.delaySeconds}s` : phase.timingType) || phase.presetInstructions || null;
+  return "Timing not specified";
 }
 
 export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDetails, assignment: ModalityProtocolAssignment): ProtocolPrintSheet {
   const scanner = [assignment.scannerName, assignment.scannerVendor].filter(Boolean).join(" - ") || null;
+  const hasFreeText = Boolean(assignment.freeTextProtocol?.trim());
   const base = {
     patientName: appointment.englishFullName || appointment.arabicFullName || `Patient ${appointment.patientId}`,
     mrn: appointment.mrn,
@@ -289,7 +297,9 @@ export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDeta
     scanner,
     assignedBy: assignment.assignedBy,
     assignedAt: assignment.assignedAt,
-    protocolInstructions: [assignment.freeTextProtocol, assignment.protocolNotes].filter(Boolean).join("\n\n") || null,
+    prescriptionType: hasFreeText ? (assignment.protocolId != null ? "customized" as const : "free-text" as const) : "saved" as const,
+    protocolInstructions: hasFreeText ? assignment.freeTextProtocol : assignment.protocolNotes,
+    patientInstructions: hasFreeText ? assignment.protocolNotes : null,
     contrastInstructions: assignment.contrastNotes,
     libraryGuidance: [
       assignment.libraryContrastPolicy && `IV contrast policy: ${assignment.libraryContrastPolicy}`,
@@ -298,6 +308,7 @@ export function buildModalityProtocolPrintSheet(appointment: AppointmentWithDeta
       assignment.libraryPreparationNotes && `Preparation notes: ${assignment.libraryPreparationNotes}`,
     ].filter(Boolean).join("\n") || null,
   };
+  if (hasFreeText) return base;
   if (assignment.modality === "CT") return {
     ...base, modality: "CT",
     ctPhases: assignment.ctPhases.map((phase) => ({ orderIndex: phase.orderIndex, phase: effectiveValue(phase.customPhaseName, phase.phasePresetName), timing: formatModalityCtPhaseTiming(phase), coverage: effectiveValue(phase.coverageOverride, phase.coverage), reconstruction: effectiveValue(phase.reconstructionOverride, phase.reconstructionNotes), instructions: effectiveValue(phase.instructionsOverride, phase.instructions), isRequired: phase.isRequired })),
