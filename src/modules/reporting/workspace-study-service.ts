@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool.js';
 import { HttpError } from '../../utils/http-error.js';
 import { authoritativeOrthancArchiveKey,readAuthoritativeOrthancSettings,createAuthoritativeOrthancClient } from '../../services/authoritative-orthanc-service.js';
-import { HISTORICAL_PACS_INDEX_FRESHNESS_MS } from '../../services/historical-pacs-index-service.js';
+import { HISTORICAL_PACS_INDEX_FRESHNESS_MS,prepareHistoricalPacsNameStudySearch } from '../../services/historical-pacs-index-service.js';
 import { readSonicDicomReportSettings } from '../../services/sonicdicom-report-settings.js';
 import { checkSonicDicomReportStatus,checkSonicDicomStudyStatusesBatch } from '../../services/sonicdicom-report-service.js';
 import {enqueueWorkspaceSonicStudies,workspaceSonicSourceKey,workspaceSonicMetadata} from '../../services/workspace-sonicdicom-cache-service.js';
@@ -33,7 +33,7 @@ export async function archiveStatus(db:Db=pool) {
   return {archiveKey,available:Boolean(same),fresh:Boolean(fresh),lastSuccessAt:state?.last_success_at??null,
     status:!same?'unavailable':fresh?'ready':'stale',error:!same?'The catalogue has not been synchronized against the configured archive.':state.last_error??null};
 }
-export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false) {
+export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false,access:'report'|'view'='report') {
   const me=await reportingDoctor(actor),policy=await readReportingPolicy(db),freshness=await archiveStatus(db);
   if(write&&!policy.enabled) throw new HttpError(409,'Doctor Workspace V2 is disabled. Existing reports remain readable.');
   if(!freshness.available) throw new HttpError(503,freshness.error || 'Archive catalogue unavailable.');
@@ -56,9 +56,21 @@ export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false
     where b.study_instance_uid=$1 or exists(select 1 from study_source_resolutions s where s.appointment_id=b.id and s.study_instance_uid=$1 and s.source_kind='authoritative_orthanc')`,[study.study_instance_uid])).rows;
   if(matches.length>1 || matches.some(b=>b.patient_dicom_id!==study.patient_id || study.accession_number&&study.accession_number!==b.accession)) throw new HttpError(409,'Study/appointment identity is conflicting or ambiguous. Reconciliation is required.');
   const appointment=(matches[0] as typeof matches[number] | undefined)??null;
-  if(!appointment&&study.accession_number&&(await db.query("select 1 from appointments_v2.bookings where ('V2-' || lpad(id::text,6,'0'))=$1 limit 1",[study.accession_number])).rowCount)throw new HttpError(409,'Accession refers to an examination without a verified matching study. Reconcile the Study Instance UID first.');
+  let associationIssue:string|null=null;
+  if(!appointment&&study.accession_number) {
+    const unresolved=(await db.query(`select b.study_instance_uid,
+      coalesce((select value from patient_identifiers where patient_id=p.id and is_primary order by id limit 1),nullif(p.identifier_value,''),p.national_id) patient_dicom_id,
+      exists(select 1 from study_source_resolutions r where r.appointment_id=b.id and r.source_kind='authoritative_orthanc' and r.study_instance_uid<>$2) conflicting_resolution
+      from appointments_v2.bookings b join patients p on p.id=b.patient_id where ('V2-' || lpad(b.id::text,6,'0'))=$1`,[study.accession_number,study.study_instance_uid])).rows[0];
+    if(unresolved) {
+      if(unresolved.patient_dicom_id!==study.patient_id || unresolved.study_instance_uid&&unresolved.study_instance_uid!==study.study_instance_uid || unresolved.conflicting_resolution)
+        throw new HttpError(409,'Study/appointment identity is conflicting or ambiguous. Reconciliation is required.');
+      associationIssue='Appointment association unresolved. Reports are read-only until the Study Instance UID association is verified.';
+      if(write||access!=='view')throw new HttpError(409,'Accession refers to an examination without a verified matching study. Reconcile the Study Instance UID first.');
+    }
+  }
   if(write&&appointment&&(appointment.held||appointment.status!=='completed'||!appointment.requires_report)) throw new HttpError(409,'The linked examination is held, incomplete, or does not require a report.');
-  return {me,policy,freshness,study,appointment,identity:studyIdentity(study)};
+  return {me,policy,freshness,study,appointment,associationIssue,identity:studyIdentity(study)};
 }
 export function studyIdentity(s:WorkspaceStudy):Identity {
   return {patientName:s.patient_name_raw||'',patientIdentifier:s.patient_id,accession:s.accession_number||'',examination:s.study_description||s.modalities_in_study.join('/'),studyDate:s.study_date||''};
@@ -101,11 +113,22 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
   const values:unknown[]=[codes,freshness.archiveKey,actor.userId,me.profile!.id,sonicKey,sonic.sonicDicomReportsEnabled,sonic.sonicDicomReadinessMode==='sql_server'&&sonic.sonicDicomSqlEnabled];
   const where=[`$4::bigint > 0`,`s.modalities_in_study && $1::text[]`,`not exists(select 1 from unnest(s.modalities_in_study) m where m not in ('SR','PR','SEG','KO','DOC') and (case when m='MRI' then 'MR' else m end)<>all($1::text[]))`];
   const param=(v:unknown)=>{values.push(v);return '$'+values.length;};
-  if(input.q) where.push(`(coalesce(s.patient_name_raw,'') || ' ' || coalesce(s.patient_id,'') || ' ' || coalesce(s.accession_number,'') || ' ' || coalesce(s.study_description,'') || ' ' || coalesce(s.study_instance_uid,'')) ilike ${param('%'+String(input.q).slice(0,200)+'%')}`);
   if(input.modality) where.push(`${param(modality(String(input.modality)))}=any(s.modalities_in_study)`);
   for(const [key,operator] of [['from','>='],['to','<=']] as const) if(input[key]) {
     const date=String(input[key]).replaceAll('-','');if(!/^\d{8}$/.test(date)) throw new HttpError(400,'Invalid study date.');
     where.push(`replace(s.study_date,'-','') ${operator} ${param(date)}`);
+  }
+  let searchCte='';
+  if(input.patientId)where.push(`s.patient_id=${param(String(input.patientId).slice(0,200))}`);
+  else if(input.q) {
+    const conventional=`(coalesce(s.patient_name_raw,'') || ' ' || coalesce(s.patient_id,'') || ' ' || coalesce(s.accession_number,'') || ' ' || coalesce(s.study_description,'') || ' ' || coalesce(s.study_instance_uid,'')) ilike ${param('%'+String(input.q).slice(0,200)+'%')}`;
+    if(input.similarNames==='true') {
+      const search=await prepareHistoricalPacsNameStudySearch(String(input.q).slice(0,200),values.length);
+      // Restrict name scoring to authorized modalities and the selected dates.
+      // The matcher still runs before count/page selection, never on page rows.
+      values.push(...search.values);searchCte=`workspace_name_scope as not materialized (select s.* from historical_pacs_studies s where ${where.join(' and ')}),name_matches as materialized (${search.sql}),`;
+      where.push(`(${conventional} or s.orthanc_study_id in (select orthanc_study_id from name_matches))`);
+    } else where.push(conventional);
   }
   // Count/filter only the data needed by the selected filter. Attribution JSON
   // and appointment display data are hydrated after the materialized page limit.
@@ -164,10 +187,10 @@ export async function listWorkspaceStudies(actor:Actor,input:Record<string,unkno
   const direction=input.direction==='asc'?'asc':'desc';
   // Keep $2/$3 typed even when no reporting joins are required by the count.
   const filtered=`from historical_pacs_studies s ${filterJoins} where $2::text is not null and $3::bigint>0 and $5::text is not null and $6::boolean is not null and $7::boolean is not null and ${where.join(' and ')}`;
-  const count=(await pool.query(`select count(*)::int total ${filtered}`,values)).rows[0].total;
+  const count=(await pool.query(`${searchCte?'with '+searchCte.slice(0,-1):''} select count(*)::int total ${filtered}`,values)).rows[0].total;
   const sortExpression=order==='study_date'?'workspace_study_date(s.study_date)':`s.${order}`;
   const page=`select s.* ${filtered} order by ${sortExpression} ${direction} nulls last,s.orthanc_study_id limit ${param(limit)} offset ${param(offset)}`;
-  const rows=(await pool.query(`with page as materialized (${page})
+  const rows=(await pool.query(`with ${searchCte} page as materialized (${page})
     select s.orthanc_study_id,s.study_instance_uid,s.patient_id,s.patient_name_raw,s.accession_number,s.study_description,s.modalities_in_study,s.study_date,s.series_count,
       st.id registry_id,a.appointment_id,a.assigned_doctor_id,a.assigned_at,a.assigned_doctor,a.priority,
       coalesce(r.report_count,0) report_count,coalesce(r.reports,'[]'::jsonb) reports,r.mine,r.my_draft,

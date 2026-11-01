@@ -401,7 +401,7 @@ export async function authorizeViewerDicomWebRequest(input: {
     if (!appRole) throw new HttpError(403, "Viewer access was revoked.");
     if(session.reportingStudyKey) {
       const {authorizeWorkspaceViewer}=await import('../reporting/workspace-viewer-service.js');
-      await authorizeWorkspaceViewer({userId:input.userId,appRole},session);
+      await authorizeWorkspaceViewer({userId:input.userId,appRole},session,requestedStudyUids(input.relativePathWithQuery));
     } else await getAuthorizedReportingBoardAppointmentRead({ userId: input.userId, appRole }, session.appointmentId);
   }
   const requested = requestedStudyUids(input.relativePathWithQuery);

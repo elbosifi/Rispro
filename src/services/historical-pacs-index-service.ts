@@ -309,14 +309,14 @@ const historicalPatientNameSearch = buildPatientNameSearchSql({
   english: "case when $6 <> '' then n.english_name else null end",
 });
 
-const HISTORICAL_NAME_SEARCH_SQL = String.raw`
+const historicalNameMatchCtes = (source:'historical_pacs_studies'|'workspace_name_scope'='historical_pacs_studies') => String.raw`
   with patient_search_trgm_config as materialized (
     select set_config('pg_trgm.strict_word_similarity_threshold', $22::text, true),
       $1::text original_term, $2::text raw_pattern, $4::text normalized_identifier_pattern
   ), candidate_studies as materialized (
     select s.*
     from patient_search_trgm_config
-    cross join historical_pacs_studies s
+    cross join ${source} s
     where nullif(trim(s.patient_id), '') is not null
       and not (s.patient_id = any($23::text[]))
       and (
@@ -367,7 +367,20 @@ const HISTORICAL_NAME_SEARCH_SQL = String.raw`
     from name_rows n
     ${historicalPatientNameSearch.phoneticLaterals}
     where ${historicalPatientNameSearch.matchSql}
-  ), structurally_scored as (
+  )`;
+
+// Study discovery reuses the indexed candidate predicates and canonical name
+// matcher. Reconciliation's demographic/component ownership gates stay below.
+export async function prepareHistoricalPacsNameStudySearch(term:string,parameterOffset=0) {
+  const prepared=await preparePatientSearch(term);
+  return {
+    sql:(historicalNameMatchCtes('workspace_name_scope')+' select distinct orthanc_study_id from scored').replace(/\$(\d+)/g,(_,n:string)=>'$'+(Number(n)+parameterOffset)),
+    values:[...prepared.queryParameters,[]],
+  };
+}
+
+const HISTORICAL_NAME_SEARCH_SQL = historicalNameMatchCtes() + String.raw`
+  , structurally_scored as (
     select scored.*, coalesce(structural.query_component_count, 0)::int query_component_count,
       coalesce(structural.candidate_component_count, 0)::int candidate_component_count,
       coalesce(structural.ordered_match_count, 0)::int ordered_match_count,

@@ -1,12 +1,13 @@
 import {act,cleanup,fireEvent,render,renderHook,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import {MemoryRouter,Route,Routes,useLocation} from 'react-router-dom';
+import {MemoryRouter,Route,Routes,useLocation,useNavigate} from 'react-router-dom';
 import {api,ApiError} from '@/lib/api-client';
-import {formatStudyDate,refreshReportingQueries,type WorkspaceReport} from '@/lib/reporting-workspace-api';
+import {formatStudyDate,studyCalendarDate,refreshReportingQueries,type WorkspaceReport} from '@/lib/reporting-workspace-api';
 import {useWorkspaceImages} from '@/lib/use-workspace-images';
 import {ReportingWorkspacePage} from './reporting-workspace-page';
 import {StandaloneReportPage} from './standalone-report-editor';
+import {ReportingStudyPage} from './reporting-study-page';
 
 vi.mock('@/lib/api-client',async original=>({...await original<typeof import('@/lib/api-client')>(),api:vi.fn()}));
 vi.mock('@/providers/auth-provider',()=>({useAuth:()=>({user:{id:7,fullName:'Synthetic Doctor'}})}));
@@ -15,12 +16,12 @@ vi.mock('@/lib/api-hooks',()=>({fetchOhifViewerAvailability:async()=>({enabled:t
 vi.mock('@/components/doctor/protocoling-appointment-details-drawer',()=>({DoctorReadOnlyDetailsDrawer:()=>null}));
 const clients:QueryClient[]=[];
 function client(){const c=new QueryClient({defaultOptions:{queries:{retry:false}}});clients.push(c);return c;}
-function Location(){const l=useLocation();return <output data-testid="location">{l.pathname+l.search}</output>;}
+function Location(){const l=useLocation(),navigate=useNavigate();return <><output data-testid="location">{l.pathname+l.search}</output><button onClick={()=>navigate(-1)}>Browser Back</button></>;}
 const report=():WorkspaceReport=>({id:42,appointmentId:null,studyKey:'synthetic',revision:1,status:'draft',sections:{clinicalHistory:'',comparison:'',technique:'',findings:'Original',impression:'Synthetic'},identity:{patientName:'Synthetic Patient',patientIdentifier:'SYN-42',accession:'SYN-A',examination:'CT',studyDate:'20261030'},author:'Doctor',creatorId:7,contributors:[],lastEditor:'Doctor',finalizer:null,finalizedAt:null,reportType:'primary',mode:'independent',isPrimary:false,createdAt:'',updatedAt:'',deletedAt:null,canEdit:true,canFinalize:true,canReview:true,canDelete:true,canRecover:false,canRestoreRevision:true,reviewRequestedBy:null,reviewRequestedAt:null,preferredReviewerId:null,keyImages:[],addenda:[]});
 const catalogue={studies:[{orthanc_study_id:'synthetic',patient_name_raw:'Synthetic Patient',patient_id:'SYN-42',accession_number:'A',study_description:'CT',modalities_in_study:['CT'],study_date:'20261030',series_count:2,reporting_status:'no_report',external_reporting_status:'unknown',report_count:0,reports:[],assigned_doctor:null}],total:1,limit:25,offset:0,freshness:{status:'ready',lastSuccessAt:null,error:null},modalities:['CT']};
 function mount(path='/doctor/reporting/reports/42?returnTo='+encodeURIComponent('/doctor/reporting?view=appointments&q=SYN&offset=50&sort=patient&direction=asc')){
   const c=client();
-  render(<QueryClientProvider client={c}><MemoryRouter initialEntries={[path]}><Location/><Routes><Route path="/doctor/reporting/reports/:reportId" element={<StandaloneReportPage/>}/><Route path="/doctor/reporting" element={<ReportingWorkspacePage/>}/></Routes></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={c}><MemoryRouter initialEntries={[path]}><Location/><Routes><Route path="/doctor/reporting/reports/:reportId" element={<StandaloneReportPage/>}/><Route path="/doctor/reporting/studies/:studyKey" element={<ReportingStudyPage/>}/><Route path="/doctor/reporting" element={<ReportingWorkspacePage/>}/></Routes></MemoryRouter></QueryClientProvider>);
   return c;
 }
 function deferred<T>() {let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
@@ -91,4 +92,51 @@ it('opens the placeholder before async authorization, prevents duplicate launche
 it('reports popup blocking before requesting a token',async()=>{
   vi.spyOn(window,'open').mockReturnValue(null);const c=client(),request=vi.fn();const {result}=renderHook(useWorkspaceImages,{wrapper:({children})=><QueryClientProvider client={c}>{children}</QueryClientProvider>});await waitFor(()=>expect(result.current.ready).toBe(true));
   await act(async()=>result.current.launch(request));expect(request).not.toHaveBeenCalled();expect(result.current.blocked).toBe(true);expect(result.current.error).toContain('Allow popups');
+});
+
+it('persists exact ID/day links, clears saved filters, and restores state through browser Back and remount',async()=>{
+  localStorage.setItem('rispro.reporting.preferences.7',JSON.stringify({filtersVersion:2,status:'draft',modality:'MR'}));
+  vi.mocked(api).mockResolvedValue(catalogue as never);
+  mount('/doctor/reporting?q=other&offset=50&similarNames=true');await screen.findByText('Synthetic Patient');
+  const idLink=screen.getByRole('link',{name:'SYN-42'});const href=idLink.getAttribute('href')!;
+  expect(href).toContain('patientId=SYN-42');expect(href).toContain('status=all');expect(href).toContain('modality=');
+  fireEvent.click(idLink);await screen.findByText('Exact Patient ID:');
+  let state=new URLSearchParams(screen.getByTestId('location').textContent!.split('?')[1]);
+  expect(state.get('patientId')).toBe('SYN-42');expect(state.get('q')).toBeNull();expect(state.get('offset')).toBeNull();expect(state.get('similarNames')).toBeNull();
+  expect((screen.getByLabelText('Modality') as HTMLSelectElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button',{name:'Browser Back'}));await waitFor(()=>expect(screen.getByTestId('location').textContent).toContain('offset=50'));
+  fireEvent.click(screen.getByRole('link',{name:'30 Oct 2026'}));await waitFor(()=>expect(screen.getByTestId('location').textContent).toContain('from=2026-10-30'));
+  state=new URLSearchParams(screen.getByTestId('location').textContent!.split('?')[1]);expect(state.get('from')).toBe(state.get('to'));expect(state.get('patientId')).toBeNull();expect(state.get('q')).toBeNull();
+  cleanup();mount(href);await screen.findByText('Exact Patient ID:');expect((screen.getByLabelText('Reporting status') as HTMLSelectElement).value).toBe('all');
+  expect(studyCalendarDate('20261030')).toBe('2026-10-30');expect(studyCalendarDate('20260230')).toBeNull();
+});
+
+it('keeps fuzzy search in the same catalogue and Clear Filters resets URL, pagination and controls',async()=>{
+  vi.mocked(api).mockResolvedValue(catalogue as never);
+  mount('/doctor/reporting?patientId=SYN-42&from=2026-10-01&to=2026-10-30&status=draft&modality=CT&sort=patient&direction=asc&offset=50');
+  await screen.findByText('Synthetic Patient');expect((screen.getByLabelText('Include similar patient names') as HTMLInputElement).checked).toBe(false);
+  fireEvent.change(screen.getByLabelText('Search patient, ID, accession, examination or UID'),{target:{value:'Stephen'}});
+  fireEvent.click(screen.getByLabelText('Include similar patient names'));fireEvent.click(screen.getByRole('button',{name:'Search'}));
+  await waitFor(()=>expect(vi.mocked(api).mock.calls.some(([p])=>p.includes('q=Stephen')&&p.includes('similarNames=true')&&!p.includes('patientId=')&&!p.includes('offset='))).toBe(true));
+  fireEvent.click(screen.getByRole('button',{name:'Clear Filters'}));
+  await waitFor(()=>{const p=new URLSearchParams(screen.getByTestId('location').textContent!.split('?')[1]);expect(Object.fromEntries(p)).toEqual({view:'pacs',status:'all',modality:'',sort:'date',direction:'desc'});});
+  expect((screen.getByLabelText('Include similar patient names') as HTMLInputElement).checked).toBe(false);expect((screen.getByLabelText('Search patient, ID, accession, examination or UID') as HTMLInputElement).value).toBe('');
+});
+
+it.each([['images',503,'Live archive verification is unavailable.','Archive verification is unavailable',true],['reports',409,'Study/appointment identity is conflicting or ambiguous.','requires reconciliation',false],['reports',403,'Reporting permission required.','Permission unavailable',false],['reports',409,'Accession refers to an examination without a verified matching study.','Appointment association unresolved',false]] as const)('keeps the table and identifies %s failure safely',async(action,status,message,expected,retry)=>{
+  const tab={opener:window,closed:false,close:vi.fn(),location:{replace:vi.fn()}};vi.spyOn(window,'open').mockReturnValue(tab as unknown as Window);
+  vi.mocked(api).mockImplementation(async p=>{if(p.includes('/studies/synthetic'))throw new ApiError(message+' /api/ohif/launch/SECRET',status);return catalogue as never;});
+  mount('/doctor/reporting');await screen.findByText('Synthetic Patient');
+  fireEvent.click(screen.getByRole(action==='images'?'button':'link',{name:action==='images'?'View Images':'Open Reports'}));
+  await screen.findByText(new RegExp(expected));expect(screen.getByRole('table')).toBeTruthy();expect(screen.getByRole('region',{name:'Examination opening error'}).textContent).toContain('A · CT · 30 Oct 2026');
+  expect(screen.getByTestId('location').textContent).not.toContain('/studies/');expect(screen.queryByText(/SECRET/)).toBeNull();expect(Boolean(screen.queryByRole('button',{name:'Retry'}))).toBe(retry);
+  if(retry){const before=vi.mocked(api).mock.calls.length;fireEvent.click(screen.getByRole('button',{name:'Retry'}));await waitFor(()=>expect(vi.mocked(api).mock.calls.length).toBeGreaterThan(before));}
+});
+
+it('opens verified reports and returns to the exact bookmarked worklist',async()=>{
+  const data={studyKey:'synthetic',identity:report().identity,studyUid:'1.2.3',reports:[],policy:{enabled:true,allowedTypes:['primary'],additional:'typed',collaboration:'both'},freshness:catalogue.freshness,canCreate:false,blockedReason:'Appointment association unresolved.',primaryReportId:null};
+  vi.mocked(api).mockImplementation(async p=>(p.includes('/studies/synthetic')?data:catalogue) as never);
+  mount('/doctor/reporting?patientId=SYN-42&status=all&modality=&sort=date&direction=desc');await screen.findByText('Synthetic Patient');
+  fireEvent.click(screen.getByRole('link',{name:'Open Reports'}));await screen.findByRole('heading',{name:'Study reports'});expect((screen.getByRole('button',{name:'Create Report'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('link',{name:'Back to Reporting Worklist'}));await screen.findByText('Exact Patient ID:');expect(screen.getByTestId('location').textContent).toContain('patientId=SYN-42');
 });

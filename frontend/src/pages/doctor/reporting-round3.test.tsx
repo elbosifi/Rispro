@@ -51,7 +51,7 @@ it('shows compact explained badges and keeps the full archive and stable 50-row 
   vi.mocked(api).mockResolvedValue({studies:[{orthanc_study_id:'synthetic',study_instance_uid:'1.2.3',patient_name_raw:'Synthetic Patient',patient_id:'SYN-1',accession_number:'A',study_description:'Synthetic CT',modalities_in_study:['CT'],study_date:'19900101',series_count:2,reporting_status:'no_report',external_reporting_status:'external_final',external_checked_at:'2026-10-30T00:00:00Z',report_count:0,reports:[],assigned_doctor:null}],total:101,limit:50,offset:0,freshness:{status:'ready',lastSuccessAt:null,error:null},modalities:['CT']});
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});clients.push(client);
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/doctor/reporting']}><ReportingWorkspacePage/></MemoryRouter></QueryClientProvider>);
-  await screen.findByText('No RISpro');expect(screen.getByText('Sonic: Final').getAttribute('title')).toContain('Last verified');
+  expect((await screen.findByTitle(/Last verified/)).textContent).toBe('External Final');expect(screen.queryByText('No RISpro')).toBeNull();
   expect(screen.getByRole('cell',{name:/1 Jan 1990/})).toBeTruthy();expect(screen.getByText('1–50 of 101')).toBeTruthy();
   expect(screen.getByRole('link',{name:'Open Reports'})).toBeTruthy();expect(screen.getByRole('button',{name:'View Images'})).toBeTruthy();
   const url=String(vi.mocked(api).mock.calls.find(([p])=>p.includes('/studies?'))?.[0]);expect(url).not.toContain('from=');expect(url).not.toContain('to=');expect(url).toContain('status=all');

@@ -53,8 +53,8 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   const pixels:string[]=[];page.on('request',r=>{if(!r.url().endsWith('/api/ohif/availability')&&/\/frames\/|\/wado|\/ohif\/|\/ohif-dicomweb\//i.test(r.url()))pixels.push(r.url());});
   await page.goto('/doctor/reporting?q='+prefix+'&offset=200');
   await expect(page.getByRole('heading',{name:'Reporting',exact:true})).toBeVisible();await expect(page.getByText('201–215 of 215')).toBeVisible();
-  await expect(page.getByRole('cell').filter({hasText:'No RISpro'})).toHaveCount(15);
-  await expect(page.getByRole('cell').filter({hasText:'Sonic: Off'})).toHaveCount(15);
+  await expect(page.getByRole('cell').filter({hasText:'No RISpro'})).toHaveCount(0);
+  await expect(page.getByRole('cell').filter({hasText:'Sonic: Off'})).toHaveCount(0);
   for(const label of ['RISpro Draft','In Review','RISpro Final','External Draft','External Final','Additional Reports'])await expect(page.getByLabel('Reporting status').getByRole('option',{name:label,exact:true})).toHaveCount(1);
   const rowHeight=await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height);expect(rowHeight).toBeLessThanOrEqual(72);
   writeFileSync(info.outputPath('catalogue-density.json'),JSON.stringify({rowHeight,visibleRows:await page.locator('tbody tr').evaluateAll(rows=>rows.filter(r=>r.getBoundingClientRect().top>=0&&r.getBoundingClientRect().bottom<=innerHeight).length)}));
@@ -99,7 +99,7 @@ test('real reporting catalogue/editor: pagination, unbooked reports, cursor dict
   await other.getByRole('link',{name:'All study reports'}).click();await expect(other.getByRole('button',{name:'Create Report',exact:true})).toBeDisabled();await expect(other.getByText('Current policy allows signed addenda only.',{exact:false})).toBeVisible();
   await db.query(`update system_settings set setting_value=setting_value || '{"additional":"typed","allowedTypes":["primary","second_opinion","additional_interpretation","peer_review"]}'::jsonb where category='doctor_workspace' and setting_key='reporting_policy'`);
   await page.setViewportSize({width:390,height:844});await page.goto('/doctor/reporting?q='+prefix+'&offset=200');await expect(page.getByRole('link',{name:'Open Reports'}).first()).toBeVisible();await page.screenshot({path:info.outputPath('mobile-catalogue.png'),fullPage:true});
-  await page.getByRole('cell').filter({hasText:'No RISpro'}).first().scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('mobile-reporting-status.png')});
+  await page.locator('tbody tr').first().locator('td').nth(4).scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('mobile-reporting-status.png')});
   await page.goto('/doctor/home');await expect(page.getByText('My active drafts',{exact:true})).toBeVisible();await page.screenshot({path:info.outputPath('mobile-home.png'),fullPage:true});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy();
   expect(pixels).toEqual([]);await second.close();
@@ -138,7 +138,7 @@ test('Round 2: report-free viewer launch, appointments, cached return, save fail
   await expect(popup.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();await popup.close();
   expect(Number((await db.query('select count(*) n from native_reports')).rows[0].n)).toBe(before);
   // A blocked popup must not issue a launch request or retain a token in the UI.
-  await page.evaluate(()=>{window.open=()=>null;});await page.getByRole('button',{name:'View Images',exact:true}).first().click();await expect(page.getByText('The browser blocked the OHIF tab.',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'Open images in this tab'})).toBeVisible();
+  await page.evaluate(()=>{window.open=()=>null;});await page.getByRole('button',{name:'View Images',exact:true}).first().click();await expect(page.getByText('The browser blocked the viewer tab.',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'Open images in this tab'})).toBeVisible();
   await page.getByRole('button',{name:'Open images in this tab'}).click();await expect(page.getByRole('heading',{name:'Synthetic diagnostic viewer'})).toBeVisible();
   await page.goto(url);await expect(page.getByText('201–215 of 215')).toBeVisible();
   const sample=studies[214],patient=(await db.query("insert into patients(arabic_full_name,english_full_name,normalized_arabic_name,identifier_type,identifier_value,age_years,sex) values($1,$1,$1,'other',$2,40,'O') returning id",[prefix+' appointment',sample.patient])).rows[0].id;
@@ -224,6 +224,41 @@ test('Round 3: personal review labels, recovery conflicts and read/print during 
   }finally{archiveUnavailable=false;await db.query('update historical_pacs_sync_state set last_success_at=now(),last_error=null');await syncGuard.query('select pg_advisory_unlock(712364092)');syncGuard.release();await second.close();}
 });
 
+test('focused reporting: exact ID/day bookmarks, Back, clear filters, compact desktop/mobile and examination errors',async({page},info)=>{
+  test.setTimeout(60_000);
+  await db.query(`update system_settings set setting_value=setting_value || '{"enabled":true}'::jsonb where category='doctor_workspace' and setting_key='reporting_policy'`);
+  await signInWithSession(page,'e2e_doctor_non_supervisor');
+  await page.goto('/doctor/reporting?q='+prefix+'&offset=200');await expect(page.locator('tbody tr').first()).toBeVisible();
+  expect(await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height)).toBe(45);
+  await expect(page.getByLabel('Include similar patient names')).not.toBeChecked();
+  await page.getByRole('combobox',{name:/^Modality/}).selectOption('CT');await page.getByRole('button',{name:'Remember filters'}).click();
+  await expect(page.getByLabel('PACS studies table')).toHaveAttribute('aria-busy','false');
+  const id=page.locator('tbody tr').first().locator('td').first().getByRole('link'),patient=await id.innerText();await id.click();
+  await expect(page).toHaveURL(new RegExp('patientId='+encodeURIComponent(patient)));await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.getByRole('combobox',{name:/^Modality/})).toHaveValue('');await expect(page.getByLabel('Reporting status')).toHaveValue('all');
+  const bookmark=page.url();await page.reload();await expect(page.locator('tbody tr')).toHaveCount(1);
+  await page.getByRole('link',{name:'Open Reports',exact:true}).click();await expect(page.getByRole('heading',{name:'Study reports'})).toBeVisible();
+  await page.getByRole('link',{name:'Back to Reporting Worklist'}).click();await expect(page).toHaveURL(bookmark);
+  const day=page.locator('tbody tr').first().locator('td').nth(2).getByRole('link');await day.click();
+  await expect(page).toHaveURL(/from=\d{4}-\d{2}-\d{2}/);await expect(page.getByText('1–50 of 215')).toBeVisible();
+  const dateUrl=page.url();await page.reload();await expect(page).toHaveURL(dateUrl);await expect(page.getByText('1–50 of 215')).toBeVisible();
+  await page.goBack();await expect(page).toHaveURL(bookmark);await expect(page.locator('tbody tr')).toHaveCount(1);
+  await page.goto(dateUrl);await expect(page.locator('tbody tr').first()).toBeVisible();
+  await page.getByLabel('Include similar patient names').click();await expect(page.getByLabel('Include similar patient names')).toBeChecked();
+  await page.getByRole('button',{name:'Clear Filters'}).click();await expect(page.getByLabel('Include similar patient names')).not.toBeChecked();
+  await expect(page.getByLabel('Search patient, ID, accession, examination or UID')).toHaveValue('');await expect(page).not.toHaveURL(/patientId=|from=|similarNames=|offset=/);
+  await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'More Filters'})).toHaveAttribute('aria-expanded','true');
+  await page.screenshot({path:info.outputPath('focused-reporting-desktop.png'),fullPage:true});
+  await page.route('**/workspace/studies/*',async route=>{if(route.request().method()==='GET'&&!route.request().url().includes('?'))await route.fulfill({status:503,json:{error:{message:'Live archive verification is unavailable. /api/ohif/launch/SECRET'}}});else await route.continue();});
+  await page.getByRole('link',{name:'Open Reports',exact:true}).first().click();await expect(page.getByRole('region',{name:'Examination opening error'})).toContainText('Synthetic CT');
+  await expect(page.locator('tbody tr')).toHaveCount(50);await expect(page.getByRole('button',{name:'Retry'})).toBeVisible();await expect(page.getByText(/SECRET/)).toHaveCount(0);
+  await page.screenshot({path:info.outputPath('focused-reporting-error.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});await expect(page.getByRole('button',{name:'Search',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  expect(await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height)).toBe(45);
+  await page.screenshot({path:info.outputPath('focused-reporting-mobile.png'),fullPage:true});
+});
+
 test('Round 3 PACS: 50 studies, historical search, compact SonicDICOM states and preserved filters',async({page},info)=>{
   await signInWithSession(page,'e2e_doctor_non_supervisor');
   const original=(await db.query("select setting_value from system_settings where category='sonicdicom_reports' and setting_key='config'")).rows[0].setting_value;
@@ -236,8 +271,9 @@ test('Round 3 PACS: 50 studies, historical search, compact SonicDICOM states and
     for(const [i,status] of ['final','draft','no_report','final'].entries())await db.query(`update doctor_portal.workspace_sonicdicom_cache set report_status=$2,last_success_at=now(),last_attempt_at=now(),next_check_at=now()+interval '1 day',last_error=$3 where orthanc_study_id=$1`,[first.studies[i].orthanc_study_id,status,i===3?'Synthetic unavailable; last final retained':null]);
     const userId=(await db.query("select id from users where username='e2e_doctor_non_supervisor'")).rows[0].id;await page.addInitScript(id=>localStorage.setItem('rispro.reporting.preferences.'+id,JSON.stringify({status:'unknown'})),userId);
     await page.goto('/doctor/reporting');
-    await expect(page.getByText('1–50 of 215')).toBeVisible();await expect(page.getByRole('cell',{name:'Sonic: Final',exact:false}).first()).toBeVisible();
-    for(const text of ['Sonic: Draft','Sonic: None','Sonic: Unavailable','No RISpro'])await expect(page.getByText(text,{exact:true}).first()).toBeVisible();
+    await expect(page.getByText('1–50 of 215')).toBeVisible();await expect(page.getByRole('cell',{name:'External Final',exact:false}).first()).toBeVisible();
+    for(const text of ['External Draft','Unavailable'])await expect(page.locator('tbody').getByText(text,{exact:true}).first()).toBeVisible();
+    for(const text of ['Sonic: None','No RISpro'])await expect(page.getByText(text,{exact:true})).toHaveCount(0);
     const height=await page.locator('tbody tr').first().evaluate(e=>e.getBoundingClientRect().height);expect(height).toBeLessThanOrEqual(48);
     await page.screenshot({path:info.outputPath('round3-pacs-50-desktop.png'),fullPage:true});
     await page.getByRole('button',{name:'Next',exact:true}).click();await expect(page.getByText('51–100 of 215')).toBeVisible();

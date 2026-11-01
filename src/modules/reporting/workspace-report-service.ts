@@ -43,7 +43,7 @@ function canReview(a:Access,report:ReportRow) {
   return a.policy.reviewEligibility!=='designated' || supervisor(a.me) || Number(report.preferred_reviewer_id)===a.me.profile!.id;
 }
 export function canEditWorkspaceReport(a:Access,report:ReportRow) {
-  if(report.status==='final'||report.deleted_at||!a.policy.enabled||!a.freshness.fresh) return false;
+  if(report.status==='final'||report.deleted_at||!a.policy.enabled||!a.freshness.fresh||a.associationIssue) return false;
   const shared=report.collaboration_mode==='shared'&&a.policy.collaboration!=='independent';
   if(Number(report.author_user_id)!==Number(a.me.profile!.userId)&&!shared) return false;
   return !report.review_requested_at || canReview(a,report);
@@ -51,7 +51,7 @@ export function canEditWorkspaceReport(a:Access,report:ReportRow) {
 const canEdit=canEditWorkspaceReport;
 function canSign(a:Access,report:ReportRow) {
   const qualified=a.policy.signing==='qualified'||a.me.canFinalizeReports;
-  if(!qualified||!a.policy.enabled||report.deleted_at||!a.freshness.fresh) return false;
+  if(!qualified||!a.policy.enabled||report.deleted_at||!a.freshness.fresh||a.associationIssue) return false;
   // A signed addendum corrects an immutable final; draft review transitions cannot
   // be applied retroactively to that already completed signature.
   if(report.status==='final')return true;
@@ -60,7 +60,7 @@ function canSign(a:Access,report:ReportRow) {
   return !report.review_requested_at||canReview(a,report);
 }
 function canDelete(a:Access,report:ReportRow,contributors:number) {
-  if(!a.policy.enabled||report.status!=='draft'||report.review_requested_at||report.deleted_at||a.policy.deletion==='disabled') return false;
+  if(!a.policy.enabled||report.status!=='draft'||report.review_requested_at||report.deleted_at||a.policy.deletion==='disabled'||a.associationIssue) return false;
   return supervisor(a.me)||a.policy.deletion==='creator'&&Number(report.author_user_id)===Number(a.me.profile!.userId)&&contributors<=1;
 }
 interface ViewCache extends ReportResponseCache {role?:string;contributors:{userId:string;name:string;firstContributedAt:Date}[]}
@@ -71,12 +71,15 @@ async function view(db:Pick<PoolClient,'query'>,report:ReportRow,a:Access,studyK
     creatorId:Number(report.author_user_id),reportType:report.report_type,mode:report.collaboration_mode,isPrimary:report.status==='final'&&report.is_primary&&report.report_type==='primary',
     contributors,lastEditor:report.last_editor_name||report.author_name,createdAt:report.created_at,deletedAt:report.deleted_at,
     reviewRequestedBy:report.review_requested_by,reviewRequestedAt:report.review_requested_at,preferredReviewerId:report.preferred_reviewer_id,
-    reviewEnabled:a.policy.enabled&&(a.policy.review!=='none'||Boolean(report.review_requested_at)),blockedReason:a.freshness.fresh?null:'Archive verification is unavailable or stale. The preserved report is read-only.',
-    canEdit:canEdit(a,report),canFinalize:canSign(a,report),canReview:canReview(a,report),canDelete:canDelete(a,report,contributors.length)&&a.freshness.fresh,canRecover:supervisor(a.me)&&Boolean(report.deleted_at)&&a.policy.enabled&&a.freshness.fresh,canRestoreRevision:a.policy.restoreRevisions&&canEdit(a,report)&&!report.review_requested_at};
+    reviewEnabled:a.policy.enabled&&!a.associationIssue&&(a.policy.review!=='none'||Boolean(report.review_requested_at)),blockedReason:a.associationIssue||(a.freshness.fresh?null:'Archive verification is unavailable or stale. The preserved report is read-only.'),
+    canEdit:canEdit(a,report),canFinalize:canSign(a,report),canReview:canReview(a,report),canDelete:canDelete(a,report,contributors.length)&&a.freshness.fresh,canRecover:supervisor(a.me)&&Boolean(report.deleted_at)&&a.policy.enabled&&a.freshness.fresh&&!a.associationIssue,canRestoreRevision:a.policy.restoreRevisions&&canEdit(a,report)&&!report.review_requested_at};
 }
 export const workspaceReportResponse=view;
 export async function getWorkspaceStudy(actor:Actor,key:string) {
-  const a=await requireStudy(actor,key);
+  const a=await requireStudy(actor,key,pool,false,'view');
+  await verifyLiveStudy(a.study);
+  const source=await archiveStatus();
+  if(!source.available||source.archiveKey!==a.freshness.archiveKey)throw new HttpError(409,'Archive source changed. Reconcile reporting identity.');
   return transaction(async db=>{
     const record=await registry(db,a);
     const rows=(await db.query<ReportRow>(`select n.* from native_reports n join native_report_study_links l on l.report_id=n.id where l.study_id=$1 and (n.deleted_at is null or $2::boolean) order by n.created_at,n.id`,[record.id,supervisor(a.me)])).rows;
@@ -91,12 +94,13 @@ export async function getWorkspaceStudy(actor:Actor,key:string) {
       for(const addendum of (await db.query("select report_id,id,actor_name as author,created_at as \"signedAt\",snapshot->>'text' as text from native_report_versions where report_id=any($1::bigint[]) and kind='addendum' order by id",[ids])).rows)cache.get(String(addendum.report_id))!.addenda.push(addendum);
     }
     const reports=[];for(const row of rows) reports.push(await view(db,row,a,key,cache.get(String(row.id))));
-    let blockedReason:string|null=null;
+    let blockedReason:string|null=a.associationIssue;
     try{assertCreation(a);if(!a.freshness.fresh)blockedReason='Archive index is stale. Synchronize before changing reports.';}catch(e){blockedReason=(e as Error).message;}
     if(record.primary_report_id&&a.policy.additional==='addenda')blockedReason='A primary final exists. Current policy allows signed addenda only.';
     else if(record.primary_report_id&&a.policy.additional==='typed'&&!a.policy.allowedTypes.some(t=>t!=='primary'))blockedReason='No additional report types are enabled. Use a permitted signed addendum.';
+    blockedReason=a.associationIssue||blockedReason;
     await logAuditEntry({entityType:'reporting_study',entityId:null,actionType:'reporting_study_read',newValues:{studyId:record.id},changedByUserId:actor.userId},db);
-    return {studyKey:key,identity:a.identity,studyUid:a.study.study_instance_uid,reports,policy:a.policy,freshness:a.freshness,blockedReason,canCreate:a.policy.enabled&&!blockedReason,primaryReportId:record.primary_report_id==null?null:Number(record.primary_report_id)};
+    return {studyKey:key,identity:a.identity,studyUid:a.study.study_instance_uid,reports,policy:a.policy,freshness:a.freshness,associationIssue:a.associationIssue,blockedReason,canCreate:a.policy.enabled&&!blockedReason,primaryReportId:record.primary_report_id==null?null:Number(record.primary_report_id)};
   });
 }
 export async function createWorkspaceReport(actor:Actor,key:string,body:Record<string,unknown>) {
@@ -132,13 +136,13 @@ export async function getWorkspaceReport(actor:Actor,id:number) {
   const record=(await pool.query<StudyRecord>('select s.* from native_reporting_studies s join native_report_study_links l on l.study_id=s.id where l.report_id=$1',[id])).rows[0];
   if(!record) throw new HttpError(404,'Report study association not found. Open the verified study first.');
   let a:Access;
-  try{a=await requireStudy(actor,record.orthanc_study_id);}catch(e){
+  try{a=await requireStudy(actor,record.orthanc_study_id,pool,false,'view');}catch(e){
     if(!(e instanceof HttpError)||![404,503].includes(e.statusCode))throw e;
     const freshness=await archiveStatus(),policy=await readReportingPolicy();
     const allowed=new Set(me.allowedModalities.filter(p=>p.active&&p.canReport).map(p=>modality(p.modalityCode||'')));
     const diagnostic=record.modalities.map(modality).filter(m=>!['SR','PR','SEG','KO','DOC'].includes(m));
     if(!diagnostic.length||diagnostic.some(m=>!allowed.has(m)))throw new HttpError(403,'Modality access was revoked.');
-    a={me,policy,freshness:{...freshness,fresh:false},appointment:null,identity:record.identity,study:{orthanc_study_id:record.orthanc_study_id,study_instance_uid:record.study_instance_uid,patient_id:record.identity.patientIdentifier,patient_name_raw:record.identity.patientName,accession_number:record.identity.accession,study_description:record.identity.examination,study_date:record.identity.studyDate,modalities_in_study:record.modalities,series_count:0}};
+    a={me,policy,freshness:{...freshness,fresh:false},appointment:null,associationIssue:null,identity:record.identity,study:{orthanc_study_id:record.orthanc_study_id,study_instance_uid:record.study_instance_uid,patient_id:record.identity.patientIdentifier,patient_name_raw:record.identity.patientName,accession_number:record.identity.accession,study_description:record.identity.examination,study_date:record.identity.studyDate,modalities_in_study:record.modalities,series_count:0}};
   }
   if(a.freshness.archiveKey!==record.source_archive_key) throw new HttpError(409,'Report belongs to a different archive. Reconcile the source before opening.');
   if(a.study.study_instance_uid!==record.study_instance_uid) throw new HttpError(409,'Report Study Instance UID conflicts with the archive. Reconciliation is required.');

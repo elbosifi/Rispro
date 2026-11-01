@@ -20,7 +20,7 @@ export interface WorkspaceReport {
   addenda:{id:string;text:string;author:string;signedAt:string}[];
 }
 export interface Freshness {status:string;lastSuccessAt:string|null;error:string|null}
-export interface StudyReports {studyKey:string;identity:ReportIdentity;studyUid:string;reports:WorkspaceReport[];policy:ReportingPolicy;freshness:Freshness;canCreate:boolean;blockedReason:string|null;primaryReportId:number|null}
+export interface StudyReports {studyKey:string;identity:ReportIdentity;studyUid:string;reports:WorkspaceReport[];policy:ReportingPolicy;freshness:Freshness;canCreate:boolean;blockedReason:string|null;associationIssue?:string|null;primaryReportId:number|null}
 export interface StudyListRow {
   orthanc_study_id:string;study_instance_uid:string;patient_id:string;patient_name_raw:string;accession_number:string;study_description:string;
   modalities_in_study:string[];study_date:string;series_count:number;reporting_status:string;external_reporting_status:string;report_count:number;assigned_doctor:string|null;
@@ -35,6 +35,21 @@ export interface ReportingAppointment {
 export interface CataloguePage {studies:StudyListRow[];total:number;limit:number;offset:number;freshness:Freshness;modalities:string[]}
 export interface AppointmentPage {appointments:ReportingAppointment[];total:number;limit:number;offset:number;freshness:Freshness;modalities:string[]}
 export const reportingListCache={staleTime:60_000,gcTime:15*60_000,refetchOnWindowFocus:false};
+export function reportingPacsLink(filters:Record<string,string>={}) {
+  return '/doctor/reporting?'+new URLSearchParams({view:'pacs',status:'all',modality:'',sort:'date',direction:'desc',...filters});
+}
+export function studyCalendarDate(value:string|null|undefined) {
+  if(formatStudyDate(value)==='—')return null;
+  const date=value!.trim().replaceAll('-','');return `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`;
+}
+export function workspaceOpenFailure(message:string,status?:number) {
+  if(/without a verified matching study|appointment association/i.test(message))return {message:'Appointment association unresolved. Reconcile the study link before changing reports.',retry:false};
+  if(status===401||status===403||/permission|revoked/i.test(message))return {message:'Permission unavailable for this examination. Ask an administrator to review your modality access.',retry:false};
+  if(/identity|ambiguous|conflict|reconcil|UID/i.test(message))return {message:'Patient, study or archive identity requires reconciliation before access.',retry:false};
+  if(status===503||/connectivity|archive.*unavailable|synchronized/i.test(message))return {message:'Archive verification is unavailable. Retry when connectivity or synchronization recovers.',retry:true};
+  if(/blocked.*tab|popups/i.test(message))return {message:'The browser blocked the viewer tab. Allow popups or open images in this tab.',retry:true};
+  return {message:'The examination could not be opened. Retry, or ask an administrator to check the viewer configuration.',retry:true};
+}
 // DICOM DA is a calendar date, never a UTC timestamp. Validate before formatting
 // so partial/invalid metadata cannot roll into a different month or day.
 export function formatStudyDate(value:string|null|undefined) {

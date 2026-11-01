@@ -18,7 +18,8 @@ import {listWorkspaceStudies,archiveStatus} from './workspace-study-service.js';
 import {createWorkspaceReport,getWorkspaceStudy,saveWorkspaceDraft,finalizeWorkspaceReport,reviewWorkspaceReport,deleteWorkspaceDraft,workspaceHistory,restoreWorkspaceRevision,getWorkspaceReport,addWorkspaceAddendum} from './workspace-report-service.js';
 import {doctorDashboard,assignedWork} from './workspace-dashboard-service.js';
 import {getDoctorReportingAppointments} from '../doctor-portal/cases-service.js';
-import {launchWorkspaceStudyImages,authorizeWorkspaceViewer} from './workspace-viewer-service.js';
+import {launchWorkspaceStudyImages,authorizeWorkspaceViewer,workspaceViewerContext} from './workspace-viewer-service.js';
+import {authorizeViewerDicomWebRequest} from '../ohif-viewer/service.js';
 import {env} from '../../config/env.js';
 import {findViewerContext,consumeViewerLaunchToken} from '../ohif-viewer/repository.js';
 import {hashLaunchToken} from '../ohif-viewer/validation.js';
@@ -94,6 +95,38 @@ async function bookedStudy(i:number) {
   s.accessionNumber='V2-'+String(booking).padStart(6,'0');await upsertHistoricalPacsStudies([s]);
   return {s,ct,patient,booking};
 }
+
+test('unresolved same-patient V2 association permits verified viewing and context but never links or mutates reports',async()=>{
+  const {s,booking,patient}=await bookedStudy(96),oldEnabled=env.ohifEnabled;
+  const config=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
+  let draft=await create(doctor,96);draft=await saveWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,sections:content});
+  await pool.query('update appointments_v2.bookings set study_instance_uid=null where id=$1',[booking]);
+  const before=(await pool.query('select * from appointments_v2.bookings where id=$1',[booking])).rows[0];
+  try {
+    env.ohifEnabled=true;
+    await pool.query("update ohif_viewer_settings set enabled=true,access_strategy='authoritative_orthanc',allow_prior_studies=false where singleton_key=true");
+    const read=await getWorkspaceStudy(doctor,s.orthancStudyId);assert.ok(read.associationIssue);assert.equal(read.canCreate,false);assert.equal(read.reports[0].canEdit,false);assert.equal(read.reports[0].canFinalize,false);
+    assert.equal((await getWorkspaceReport(doctor,draft.id)).canEdit,false);
+    const launch=await launchWorkspaceStudyImages(doctor,s.orthancStudyId);
+    const row=(await pool.query('select * from viewer_launch_sessions where study_instance_uid=$1 order by id desc limit 1',[s.studyInstanceUid])).rows[0];assert.equal(row.appointment_id,null);
+    await consumeViewerLaunchToken(hashLaunchToken(decodeURIComponent(launch.launchUrl.split('/').pop()!)),doctor.userId,hashLaunchToken('unresolved-session'),new Date(Date.now()+600_000));
+    const session=await findViewerContext(row.report_context_id,doctor.userId);assert.ok(session);
+    await authorizeWorkspaceViewer(doctor,session);
+    await authorizeViewerDicomWebRequest({userId:doctor.userId,appRole:doctor.appRole,contextId:row.report_context_id,launchToken:'',relativePathWithQuery:'/studies/'+s.studyInstanceUid});
+    const context=await workspaceViewerContext(doctor,session);assert.equal(context.canEdit,false);assert.ok(context.blockedReason);assert.equal(context.reports.length,1);
+    await assert.rejects(()=>create(doctor,96),/without a verified matching study/);
+    await assert.rejects(()=>saveWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,sections:content}),/without a verified matching study/);
+    await assert.rejects(()=>finalizeWorkspaceReport(doctor,draft.id,{expectedRevision:draft.revision,confirmed:true,signerUserId:doctor.userId,requestId:randomUUID()}),/without a verified matching study/);
+    assert.deepEqual((await pool.query('select * from appointments_v2.bookings where id=$1',[booking])).rows[0],before);
+    assert.equal((await pool.query('select 1 from study_source_resolutions where appointment_id=$1',[booking])).rowCount,0);
+    await pool.query("update patients set identifier_value='CONFLICTING-PATIENT' where id=$1",[patient]);
+    await assert.rejects(()=>launchWorkspaceStudyImages(doctor,s.orthancStudyId),/conflicting/);await assert.rejects(()=>authorizeWorkspaceViewer(doctor,session),/conflicting/);
+  } finally {
+    env.ohifEnabled=oldEnabled;
+    await pool.query('update patients set identifier_value=$2 where id=$1',[patient,s.patientId]);
+    await pool.query('update ohif_viewer_settings set enabled=$1,access_strategy=$2,allow_prior_studies=$3 where singleton_key=true',[config.enabled,config.access_strategy,config.allow_prior_studies]);
+  }
+});
 test('catalogue pages 215+ studies, searches, filters, and includes unbooked studies without pixel retrieval',async()=>{
   const a=await listWorkspaceStudies(doctor,{q:prefix,limit:25});assert.equal(a.total,215);assert.equal(a.studies.length,25);assert.equal(a.freshness.status,'ready');
   const b=await listWorkspaceStudies(doctor,{q:studies[214].accessionNumber});assert.equal(b.total,1);assert.equal(b.studies[0].reporting_status,'no_report');assert.equal(b.studies[0].appointment_id,null);
@@ -241,7 +274,7 @@ test('verified assigned examinations use authoritative study finality and credit
   const after=await doctorDashboard(doctor,30);assert.equal(after.workload.pending,0);assert.equal(after.totalFinalized,before.totalFinalized);assert.equal(after.departmentCompleted,before.departmentCompleted+1);assert.equal((await assignedWork(doctor,{status:'final'})).total,1);
   let additional=await create(doctor,13,'independent','second_opinion');additional=await saveWorkspaceDraft(doctor,additional.id,{expectedRevision:additional.revision,sections:content});await finalizeWorkspaceReport(doctor,additional.id,{expectedRevision:additional.revision,requestId:randomUUID(),confirmed:true,signerUserId:doctor.userId});
   assert.equal((await doctorDashboard(doctor,30)).departmentCompleted,after.departmentCompleted);
-  const duplicateAccession=studies[14];duplicateAccession.accessionNumber=s.accessionNumber;await upsertHistoricalPacsStudies([duplicateAccession]);await assert.rejects(()=>create(doctor,14),/without a verified matching study/);
+  const duplicateAccession=studies[14];duplicateAccession.accessionNumber=s.accessionNumber;await upsertHistoricalPacsStudies([duplicateAccession]);await assert.rejects(()=>create(doctor,14),/conflicting or ambiguous/);
 });
 
 test('adopting an existing legacy final preserves its exact signed row, snapshot and history',async()=>{
@@ -304,14 +337,28 @@ test('study-only image launch reuses authorized OHIF sessions without reports or
     // Reuse the existing patient/issuer selection and restrict priors to this
     // doctor's modalities, without another catalogue or any report creation.
     await pool.query('update ohif_viewer_settings set allow_prior_studies=true where singleton_key=true');
+    const priorPatient=studies[23].patientId;studies[23].patientId=studies[22].patientId;await upsertHistoricalPacsStudies([studies[23]]);
     globalThis.fetch=async()=>new Response(JSON.stringify([
       {StudyInstanceUID:studies[22].studyInstanceUid,PatientID:studies[22].patientId,ModalitiesInStudy:['CT'],StudyDate:'20261029'},
       {StudyInstanceUID:studies[23].studyInstanceUid,PatientID:studies[22].patientId,ModalitiesInStudy:['CT'],StudyDate:'20261028'},
       {StudyInstanceUID:studies[24].studyInstanceUid,PatientID:studies[22].patientId,ModalitiesInStudy:['MR'],StudyDate:'20261028'},
       {StudyInstanceUID:studies[25].studyInstanceUid,PatientID:'OTHER-PATIENT',ModalitiesInStudy:['CT'],StudyDate:'20261028'},
     ]));
-    await launchWorkspaceStudyImages(doctor,key);
+    const historyLaunch=await launchWorkspaceStudyImages(doctor,key);
     assert.deepEqual((await pool.query('select permitted_study_uids from viewer_launch_sessions where user_id=$1 and study_instance_uid=$2 order by id desc limit 1',[doctor.userId,studies[22].studyInstanceUid])).rows[0].permitted_study_uids,[studies[22].studyInstanceUid,studies[23].studyInstanceUid]);
+    const historyRow=(await pool.query('select report_context_id from viewer_launch_sessions where user_id=$1 and study_instance_uid=$2 order by id desc limit 1',[doctor.userId,studies[22].studyInstanceUid])).rows[0];
+    await consumeViewerLaunchToken(hashLaunchToken(decodeURIComponent(historyLaunch.launchUrl.split('/').pop()!)),doctor.userId,hashLaunchToken('history-session'),new Date(Date.now()+600_000));
+    const historySession=await findViewerContext(historyRow.report_context_id,doctor.userId);assert.ok(historySession);
+    await authorizeWorkspaceViewer(doctor,historySession,[studies[23].studyInstanceUid]);
+    studies[23].patientId=priorPatient;await upsertHistoricalPacsStudies([studies[23]]);
+    await assert.rejects(()=>authorizeWorkspaceViewer(doctor,historySession,[studies[23].studyInstanceUid]),/prior patient/);
+    for(const history of [async()=>{throw new Error('Synthetic QIDO outage');},async()=>new Response('[]')]) {
+      globalThis.fetch=history;
+      await launchWorkspaceStudyImages(doctor,key);
+      assert.deepEqual((await pool.query('select permitted_study_uids from viewer_launch_sessions where user_id=$1 and study_instance_uid=$2 order by id desc limit 1',[doctor.userId,studies[22].studyInstanceUid])).rows[0].permitted_study_uids,[studies[22].studyInstanceUid]);
+    }
+    globalThis.fetch=async()=>new Response(JSON.stringify(Array.from({length:2},()=>({StudyInstanceUID:studies[22].studyInstanceUid,PatientID:studies[22].patientId,ModalitiesInStudy:['CT']}))));
+    await assert.rejects(()=>launchWorkspaceStudyImages(doctor,key),/ambiguous/);
     await pool.query("update historical_pacs_sync_state set source_archive_key='other-archive'");await assert.rejects(()=>launchWorkspaceStudyImages(doctor,key),/synchronized/);await assert.rejects(()=>authorizeWorkspaceViewer(doctor,session),/synchronized/);
     assert.equal(await count(),before);
   } finally {
@@ -329,6 +376,8 @@ test('changed patient identity, ambiguous UID, stale catalogue and archive switc
   studies[12].patientId=original;await upsertHistoricalPacsStudies([studies[12]]);
   const s=studies[6],old=s.patientId;s.patientId='DIFFERENT';await assert.rejects(()=>create(doctor,6),/identity changed/);s.patientId=old;
   await upsertHistoricalPacsStudies([{...studies[7],orthancStudyId:prefix+'_duplicate'}]);await assert.rejects(()=>create(doctor,7),/Ambiguous/);
+  await assert.rejects(()=>getWorkspaceStudy(doctor,studies[7].orthancStudyId),/Ambiguous/);
+  await assert.rejects(()=>launchWorkspaceStudyImages(doctor,studies[7].orthancStudyId),/Ambiguous/);
   await pool.query("update historical_pacs_sync_state set last_success_at=now()-interval '1 hour'");await assert.rejects(()=>create(doctor,8),/stale/);
   await pool.query('update historical_pacs_sync_state set last_success_at=now(),source_archive_key=$1',['other-archive']);const list=await listWorkspaceStudies(doctor,{q:prefix});assert.equal(list.freshness.status,'unavailable');assert.equal(list.studies.length,0);
   await pool.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=now(),last_error=null',[authoritativeOrthancArchiveKey(settings)]);
@@ -564,6 +613,38 @@ test('PACS dates and 50-row defaults cover the complete archive with invalid dat
   assert.equal(new Set(all.map(r=>r.orthanc_study_id)).size,first.total);assert.equal(all.at(-4)!.study_date,'19900101');
   assert.deepEqual(new Set(all.slice(-3).map(r=>r.study_date)),new Set(['not-a-date','20260230','']));
   assert.equal((await listWorkspaceStudies(doctor,{q:studies[60].patientId})).total,1);
+});
+
+test('fuzzy catalogue combines conventional and canonical similar names before chronological pagination; ID and day filters stay exact',async t=>{
+  const originals=studies.slice(90,95).map(s=>({...s}));
+  const extra=Array.from({length:1800},(_,i)=>({...study(i+1000),orthancStudyId:prefix+'_bench_'+i}));
+  try {
+    Object.assign(studies[90],{patientName:'Steven Anderson',patientId:prefix+'_exact',studyDate:'20300101'});
+    Object.assign(studies[91],{patientName:'Stephen Anderson',patientId:prefix+'_exact-other',studyDate:'20300103'});
+    Object.assign(studies[92],{patientName:'Unrelated Name',accessionNumber:prefix+'Steven',studyDate:'20300102'});
+    Object.assign(studies[93],{patientName:'Steven Anderson',modalitiesInStudy:['MR'],studyDate:'20300103'});
+    Object.assign(studies[94],{patientName:'Unrelated Name',studyDate:'2030-01-03'});
+    await upsertHistoricalPacsStudies([...studies.slice(90,95),...extra]);
+    const filters={q:'Steven',from:'2030-01-01',to:'2030-01-03'};
+    assert.equal((await listWorkspaceStudies(doctor,filters)).total,2);
+    const all=await listWorkspaceStudies(doctor,{...filters,similarNames:'true'});
+    assert.deepEqual(all.studies.map(s=>s.orthanc_study_id),[91,92,90].map(i=>studies[i].orthancStudyId));assert.equal(all.total,3);
+    const pages=[];for(let offset=0;offset<3;offset++)pages.push(...(await listWorkspaceStudies(doctor,{...filters,similarNames:'true',limit:1,offset})).studies);
+    assert.deepEqual(pages.map(s=>s.orthanc_study_id),all.studies.map(s=>s.orthanc_study_id));assert.equal(new Set(pages.map(s=>s.orthanc_study_id)).size,3);
+    assert.equal((await listWorkspaceStudies(doctor,{...filters,similarNames:'true',status:'draft'})).total,0);
+    assert.equal((await listWorkspaceStudies(doctor,{...filters,similarNames:'true',modality:'MR'})).total,0);
+    const exact=await listWorkspaceStudies(doctor,{patientId:studies[90].patientId,q:'Stephen',similarNames:'true'});assert.equal(exact.total,1);assert.equal(exact.studies[0].patient_id,studies[90].patientId);
+    const day=await listWorkspaceStudies(doctor,{from:'2030-01-03',to:'2030-01-03'});assert.deepEqual(new Set(day.studies.map(s=>s.orthanc_study_id)),new Set([91,94].map(i=>studies[i].orthancStudyId)));
+    const durations:Record<string,number>={};
+    for(const [name,input] of Object.entries({page:{q:prefix},conventional:filters,fuzzy:{...filters,similarNames:'true'}})) {
+      const samples=[];for(let i=0;i<4;i++){const start=performance.now();await listWorkspaceStudies(doctor,input);samples.push(performance.now()-start);}
+      durations[name]=Number(samples.slice(1).sort((a,b)=>a-b)[1].toFixed(2));
+    }
+    t.diagnostic('Synthetic indexed catalogue (~2,015 rows), median warm request ms: '+JSON.stringify(durations));
+  } finally {
+    originals.forEach((s,i)=>Object.assign(studies[90+i],s));await upsertHistoricalPacsStudies(originals);
+    await pool.query('delete from historical_pacs_studies where orthanc_study_id=any($1::text[])',[extra.map(s=>s.orthancStudyId)]);
+  }
 });
 
 test('PACS-only external status is source-bound, batched, retained on failure and refreshed incrementally',async()=>{
