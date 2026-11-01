@@ -138,9 +138,6 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
         nextErrors[String(key)] = `${label} must be a valid number.`;
       }
     }
-    if (draft.hospitalNameAr.includes("المركز الوطني للأورام بنغازي")) {
-      nextErrors.hospitalNameAr = "Use المركز الوطني للأورام بنغازي.";
-    }
     return { ok: Object.keys(nextErrors).length === 0, nextErrors };
   }, [draft]);
 
@@ -265,12 +262,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
           </div>
         </FieldCard>
 
-        <FieldCard title={chooseLocalized(language, "هوية المستشفى", "Hospital Identity")}>
-          <InputField label="Hospital name (Ar)" value={draft.hospitalNameAr} onChange={(value) => setDraft((current) => ({ ...current, hospitalNameAr: value }))} error={errors.hospitalNameAr} dir="rtl" />
-          <InputField label="Hospital name (En)" value={draft.hospitalNameEn} onChange={(value) => setDraft((current) => ({ ...current, hospitalNameEn: value }))} dir="ltr" />
-          <InputField label="Department name (Ar)" value={draft.departmentNameAr} onChange={(value) => setDraft((current) => ({ ...current, departmentNameAr: value }))} dir="rtl" />
-          <InputField label="Department name (En)" value={draft.departmentNameEn} onChange={(value) => setDraft((current) => ({ ...current, departmentNameEn: value }))} dir="ltr" />
-        </FieldCard>
+        <p className="text-sm text-muted-foreground">Institution names and logos are managed in Settings → Institution &amp; Application Identity.</p>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

@@ -3,6 +3,7 @@ import { pool } from '../../db/pool.js';
 import { HttpError } from '../../utils/http-error.js';
 import { logAuditEntry } from '../../services/audit-service.js';
 import { readReportImage } from './report-image-storage-service.js';
+import { snapshotInstitutionIdentity } from '../../services/institution-identity-service.js';
 import type { Actor } from '../doctor-portal/reporting-board-service.js';
 import { EMPTY_SECTIONS,sections,revision,uuid } from './reporting-validation.js';
 import { transaction,response,history,audit,images,type ReportRow,type ReportResponseCache } from './reporting-service.js';
@@ -199,13 +200,13 @@ export async function finalizeWorkspaceReport(actor:Actor,id:number,body:Record<
     if(!report.sections.findings.trim()||!report.sections.impression.trim()) throw new HttpError(400,'Findings and Impression are required.');
     if(Object.values(report.sections).some(text=>/\{\{(?:technique|findings|impression)\}\}/.test(text)))throw new HttpError(400,'Replace all template prompts before signing.');
     if(!a.policy.allowedTypes.includes(report.report_type))throw new HttpError(403,'This report type is no longer permitted by current policy.');
-    await verifyLiveStudy(a.study);await verifyExternalOwnership(a.study,a.appointment?Number(a.appointment.id):null,db);
+    const liveStudy=await verifyLiveStudy(a.study);await verifyExternalOwnership(a.study,a.appointment?Number(a.appointment.id):null,db);
     const primary=!study.primary_report_id&&report.report_type==='primary';
     if(study.primary_report_id&&report.report_type==='primary'&&a.policy.additional!=='unrestricted') throw new HttpError(409,'An authoritative primary final already exists. Retain this draft and use a permitted additional interpretation.');
     if(!primary&&a.policy.additional==='addenda') throw new HttpError(403,'Only signed addenda are allowed by current policy.');
     const selected=await images(db,report.id);for(const image of selected) await readReportImage(image);
     const publicReport=await response(db,report),signedAt=new Date().toISOString();
-    const snapshot={identity:report.identity,sections:report.sections,keyImages:publicReport.keyImages,author:report.author_name,finalizer:a.me.profile!.displayName,signedAt,policyVersion:a.policy.version,signerUserId:actor.userId,reportType:report.report_type};
+    const snapshot={identity:{...report.identity,studyTime:liveStudy.studyTime},institution:await snapshotInstitutionIdentity(db),sections:report.sections,keyImages:publicReport.keyImages,author:report.author_name,finalizer:a.me.profile!.displayName,signedAt,policyVersion:a.policy.version,signerUserId:actor.userId,reportType:report.report_type};
     const saved=(await db.query<ReportRow>(`update native_reports set status='final',revision=revision+1,is_primary=$2,finalized_by_user_id=$3,finalized_by_doctor_id=$4,
       finalizer_name=$5,finalized_at=$6,signed_snapshot=$7,finalize_request_id=$8,policy_version=$9,reviewed_by=case when review_requested_at is not null then $3 else reviewed_by end,updated_at=now() where id=$1 returning *`,
     [id,primary,actor.userId,a.me.profile!.id,a.me.profile!.displayName,signedAt,JSON.stringify(snapshot),requestId,a.policy.version])).rows[0];

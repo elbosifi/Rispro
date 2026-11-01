@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { env } from "./config/env.js";
 import { pingDatabase } from "./db/pool.js";
+import { readInstitutionIdentity } from "./services/institution-identity-service.js";
 import { authRouter } from "./routes/auth.js";
 import { actionPinRouter } from "./routes/action-pin.js";
 import { usersRouter } from "./routes/users.js";
@@ -172,6 +173,11 @@ export function createApp(): Application {
   });
 
   app.use("/api/auth", authRouter);
+  // Public branding contains only institution fields, never deployment secrets.
+  app.get("/api/public/institution-identity", async (_req, res, next) => {
+    try { res.setHeader("Cache-Control", "no-store"); res.json(await readInstitutionIdentity()); }
+    catch (error) { next(error); }
+  });
   app.use("/api/public/printing-bootstrap", publicPrintingBootstrapRouter);
   // Token-scoped data for the in-container appointment-slip renderer. It must remain
   // outside the user-session middleware because Chromium never receives that session.

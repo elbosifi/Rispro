@@ -133,7 +133,7 @@ describe("printProtocolSheet", () => {
     expect(printWindow.document.write).toHaveBeenCalledOnce();
     expect(printWindow.document.close).toHaveBeenCalledOnce();
     const html = String(printWindow.document.write.mock.calls[0]?.[0] ?? "");
-    expect(html).toContain("NCCB / RISpro Protocol Sheet");
+    expect(html).toContain("RISpro / Protocol Sheet");
     expect(html).toContain('<body dir="ltr" lang="en">');
     expect(html).toContain("html, body { direction: ltr; text-align: left; }");
     expect(html).toContain("window.print()");

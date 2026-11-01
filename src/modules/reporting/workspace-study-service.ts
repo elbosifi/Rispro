@@ -17,6 +17,7 @@ export interface WorkspaceStudy {
   orthanc_study_id:string; study_instance_uid:string; patient_id:string; patient_name_raw:string;
   accession_number:string|null; study_description:string|null; study_date:string|null;
   modalities_in_study:string[]; series_count:number;
+  patient_birth_date?:string|null; patient_sex?:string|null;
 }
 export const modality = (value:string) => value.toUpperCase()==='MRI'?'MR':value.toUpperCase();
 export const supervisor = (me: Awaited<ReturnType<typeof requireRosterDoctor>>) => me.moduleCapabilities.includes('doctor_supervisor') || me.moduleCapabilities.includes('doctor_admin');
@@ -73,7 +74,7 @@ export async function requireStudy(actor:Actor,key:string,db:Db=pool,write=false
   return {me,policy,freshness,study,appointment,associationIssue,identity:studyIdentity(study)};
 }
 export function studyIdentity(s:WorkspaceStudy):Identity {
-  return {patientName:s.patient_name_raw||'',patientIdentifier:s.patient_id,accession:s.accession_number||'',examination:s.study_description||s.modalities_in_study.join('/'),studyDate:s.study_date||''};
+  return {patientName:s.patient_name_raw||'',patientIdentifier:s.patient_id,accession:s.accession_number||'',examination:s.study_description||s.modalities_in_study.join('/'),studyDate:s.study_date||'',birthDate:s.patient_birth_date,sex:s.patient_sex,modality:s.modalities_in_study.filter(c=>!['SR','PR','SEG','KO','DOC'].includes(c)).join('/')};
 }
 export async function verifyLiveStudy(s:WorkspaceStudy) {
   let remote;

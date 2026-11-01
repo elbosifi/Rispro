@@ -143,9 +143,9 @@ describe("PatientQrSettingsSection", () => {
     expect((await screen.findAllByRole("heading", { name: /QR/i })).length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR")).toBeTruthy();
     expect(screen.queryByLabelText(/Public RISpro Base URL/i)).toBeNull();
+    expect(screen.queryByLabelText("رقم الهاتف الرئيسي")).toBeNull();
     expect(screen.getByDisplayValue("ÙˆØ±Ù‚Ø© Ø§Ù„Ø¥Ø­Ø§Ù„Ø©")).toBeTruthy();
     expect(screen.getByDisplayValue("Ø§Ù„Ø·Ø§Ø¨Ù‚ Ø§Ù„Ø£ÙˆÙ„ / ØºØ±ÙØ© 3")).toBeTruthy();
-    expect(screen.getByDisplayValue("Ø´Ø§Ø±Ø¹ Ø§Ù„Ù…Ø³ØªØ´ÙÙ‰")).toBeTruthy();
   });
 
   it("saves toggles and content changes", async () => {
@@ -198,11 +198,11 @@ describe("PatientQrSettingsSection", () => {
     renderComponent();
 
     await screen.findAllByRole("heading", { name: /QR/i });
-    fireEvent.change(screen.getByLabelText("رقم الهاتف الرئيسي"), { target: { value: "abc" } });
+    fireEvent.change(screen.getByLabelText("رقم الواتساب"), { target: { value: "abc" } });
     fireEvent.change(screen.getByLabelText("رابط خرائط Google"), { target: { value: "bad-url" } });
     fireEvent.click(screen.getByRole("button", { name: "حفظ" }));
 
-    expect(await screen.findByText("رقم الهاتف غير صالح.")).toBeTruthy();
+    expect(await screen.findByText("رقم الواتساب غير صالح.")).toBeTruthy();
     expect(screen.getByText("رابط خرائط Google غير صالح.")).toBeTruthy();
   });
 

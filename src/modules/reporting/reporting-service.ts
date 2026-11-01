@@ -12,8 +12,10 @@ import { findViewerContext, readOhifViewerConfiguration, type ViewerLaunchSessio
 import { createImagingSourceAdapter } from "../ohif-viewer/adapters.js";
 import { EMPTY_SECTIONS, sections, revision, uuid, provenance, validatePng, type ReportSections } from "./reporting-validation.js";
 import { imageDigest, readReportImage, storeReportImage } from "./report-image-storage-service.js";
+import { snapshotInstitutionIdentity, type InstitutionIdentity } from "../../services/institution-identity-service.js";
 
-export interface Identity { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string }
+export interface Identity { patientName: string; patientIdentifier: string; accession: string; examination: string; studyDate: string;
+  birthDate?: string | null; sex?: string | null; studyTime?: string | null; modality?: string }
 interface ImageRow {
   id: string; report_id: string; stored_path: string; sha256: string; byte_size: number;
   width: number; height: number; provenance: Record<string, unknown>; caption: string; position: number;
@@ -31,8 +33,12 @@ export interface ReportRow {
   preferred_reviewer_id: number|null; reviewed_by: string|null; deleted_at: Date|null;
   author_doctor_role?:string;
 }
-interface Snapshot { identity: Identity; sections: ReportSections; keyImages: ReturnType<typeof publicImage>[]; author: string; finalizer: string; signedAt: string }
+interface Snapshot { identity: Identity; institution?: InstitutionIdentity; sections: ReportSections; keyImages: ReturnType<typeof publicImage>[]; author: string; finalizer: string; signedAt: string }
 const conflict = () => new HttpError(409, "The report changed in another editor. Your unsaved text is retained. Reload the saved report before retrying.");
+async function patientReportDemographics(db: Pick<PoolClient,"query">, patientId: number): Promise<Pick<Identity,"birthDate"|"sex">> {
+  const row = (await db.query("select case when not demographics_estimated then estimated_date_of_birth::text end birth_date, sex from patients where id=$1", [patientId])).rows[0];
+  return { birthDate: row?.birth_date ?? null, sex: row?.sex ?? null };
+}
 function publicImage({ stored_path: _path, report_id: _report, ...safe }: ImageRow) { return safe; }
 export async function images(db: Pick<PoolClient,"query">, reportId: string) {
   return (await db.query<ImageRow>("select * from native_report_key_images where report_id=$1 and removed=false order by position,id", [reportId])).rows;
@@ -100,7 +106,7 @@ export async function resolveReportContext(actor: Actor, contextId: string) {
   try { assertSource(session,a.configuration); await assertMapping(pool, session); } catch (e) { blockedReason = (e as Error).message; }
   return { contextId, appointmentId: session.appointmentId, primaryStudyUid: session.studyInstanceUid,
     enabled: a.enabled, canEdit: a.canEdit && !blockedReason, canFinalize: a.canFinalize && !blockedReason, blockedReason,
-    identity: { ...identity(a.row), studyDate: session.studyDate || a.row.bookingDate }, report: await getReport(actor, session.appointmentId) };
+    identity: { ...identity(a.row), studyDate: session.studyDate || "" }, report: await getReport(actor, session.appointmentId) };
 }
 function identity(row: Awaited<ReturnType<typeof access>>["row"]): Identity {
   return { patientName: row.patientEnglishName || row.patientArabicName || "", patientIdentifier: row.patientMrn || row.patientDicomId || "",
@@ -110,7 +116,7 @@ export interface ReportResponseCache {images:Awaited<ReturnType<typeof images>>;
 export async function response(db: Pick<PoolClient,"query">, report: ReportRow,loaded?:ReportResponseCache) {
   const snapshot = report.signed_snapshot;
   return { id: Number(report.id), appointmentId: report.appointment_id == null ? null : Number(report.appointment_id), revision: report.revision, status: report.status,
-    identity: snapshot?.identity ?? report.identity, sections: snapshot?.sections ?? report.sections,
+    identity: snapshot?.identity ?? report.identity, institution: snapshot?.institution ?? null, sections: snapshot?.sections ?? report.sections,
     author: report.author_name, finalizer: report.finalizer_name, finalizedAt: report.finalized_at,
     keyImages: snapshot?.keyImages ?? (loaded?.images ?? await images(db, report.id)).map(publicImage), updatedAt: report.updated_at,
     addenda: loaded?.addenda ?? (await db.query("select id,actor_name as author,created_at as \"signedAt\",snapshot->>'text' as text from native_report_versions where report_id=$1 and kind='addendum' order by id", [report.id])).rows };
@@ -163,7 +169,7 @@ export async function createReport(actor: Actor, contextId: string, appointmentI
     const r = (await db.query<ReportRow>(`insert into native_reports(appointment_id,patient_id,primary_study_uid,imaging_source,identity,sections,author_user_id,author_name)
       values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(appointment_id) where legacy_primary and deleted_at is null do nothing returning *`,
     [appointmentId, a.row.patientId, session.studyInstanceUid, JSON.stringify({ accessStrategy: session.accessStrategy, sourcePacsNodeId: session.sourcePacsNodeId }),
-      JSON.stringify({ ...identity(a.row), studyDate: session.studyDate || a.row.bookingDate }), JSON.stringify(EMPTY_SECTIONS), actor.userId, a.me.profile!.displayName])).rows[0];
+      JSON.stringify({ ...identity(a.row), ...await patientReportDemographics(db, a.row.patientId), modality: a.row.modalityCode, studyDate: session.studyDate || "" }), JSON.stringify(EMPTY_SECTIONS), actor.userId, a.me.profile!.displayName])).rows[0];
     const report = r ?? (await db.query<ReportRow>("select * from native_reports where appointment_id=$1 and legacy_primary and deleted_at is null", [appointmentId])).rows[0];
     await assertMapping(db, session, report);
     if (r) { await history(db, report, actor, a.me.profile!.displayName, "draft"); await audit(db, actor, report.id, "native_report_created", report.revision); }
@@ -236,7 +242,7 @@ export async function finalizeReport(actor: Actor, contextId: string, appointmen
     const selected = await images(db, report.id);
     for (const image of selected) await readReportImage(image);
     const signedAt = new Date().toISOString();
-    const snapshot: Snapshot = { identity: report.identity, sections: report.sections, keyImages: selected.map(publicImage), author: report.author_name, finalizer: a.me.profile!.displayName, signedAt };
+    const snapshot: Snapshot = { identity: report.identity, institution: await snapshotInstitutionIdentity(db), sections: report.sections, keyImages: selected.map(publicImage), author: report.author_name, finalizer: a.me.profile!.displayName, signedAt };
     const saved = (await db.query<ReportRow>(`update native_reports set status='final',revision=revision+1,
       finalized_by_user_id=$2,finalized_by_doctor_id=$3,finalizer_name=$4,finalized_at=$5,signed_snapshot=$6,finalize_request_id=$7,updated_at=now() where id=$1 returning *`,
     [report.id, actor.userId, a.me.profile!.id, snapshot.finalizer, signedAt, JSON.stringify(snapshot), requestId])).rows[0];

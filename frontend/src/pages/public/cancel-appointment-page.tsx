@@ -1,3 +1,4 @@
+import { useInstitutionIdentity } from "@/lib/institution-identity";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -44,8 +45,8 @@ import { prepareAppointmentSlipHtml, printAppointmentSlip } from "@/lib/print-ut
 type LinkErrorState = "invalid" | "expired" | "unavailable" | "disabled";
 type FlowState = "landing" | "confirm" | "success" | "already_cancelled";
 
-const INST_AR = "المركز الوطني للأورام بنغازي";
-const DEPT_AR = "قسم الأشعة التشخيصية";
+const INST_AR = "RISpro";
+const DEPT_AR = "";
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
   printQrOnAppointmentSlip: true,
@@ -180,7 +181,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   },
   location: {
     centerNameAr: INST_AR,
-    centerNameEn: "National Cancer Center Benghazi",
+    centerNameEn: "",
     departmentLocationAr: "",
     departmentLocationEn: "",
     roomUnitFloorAr: "",
@@ -306,19 +307,19 @@ function PageShell(props: { children: ReactNode }) {
 }
 
 function Header(props: { centerName: string }) {
+  const institution = useInstitutionIdentity();
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-slate-100 bg-white px-4 py-4 sm:px-5">
         <div className="flex items-start gap-3">
           <img
-            src="/assets/nccb-logo.png"
-            alt="شعار المركز الوطني للأورام بنغازي"
+            src={institution.hospitalLogo}
+            alt="Hospital logo"
             className="h-14 w-14 shrink-0 rounded-2xl object-contain ring-1 ring-slate-100"
           />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold leading-6 text-rose-700">{INST_AR}</p>
-            <p className="text-base font-bold leading-6 text-slate-900">{props.centerName || DEPT_AR}</p>
-            <p className="mt-1 text-xs text-slate-500">{DEPT_AR}</p>
+            <p className="text-sm font-semibold leading-6 text-rose-700">{institution.hospitalNameAr || institution.hospitalNameEn || props.centerName}</p>
+            <p className="text-base font-bold leading-6 text-slate-900">{institution.departmentNameAr || institution.departmentNameEn}</p>
           </div>
         </div>
       </div>

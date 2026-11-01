@@ -700,7 +700,7 @@ export async function prepareAppointmentSlipHtml(
           <div class="safe-area" data-safe-top-mm="${slipSettings.safeTopMm}" data-safe-bottom-mm="${slipSettings.safeBottomMm}" data-safe-left-mm="${slipSettings.safeLeftMm}" data-safe-right-mm="${slipSettings.safeRightMm}" data-content-padding-mm="${slipSettings.contentPaddingMm}" data-font-scale="${slipSettings.fontScale}">
             <div class="content">
               <header class="header" data-header-visible="${slipSettings.paperMode === "blank"}">
-                <img class="header-logo" src="${window.location.origin}/assets/nccb-logo.png" alt="" />
+                <img class="header-logo" src="${escapeHtml(slipSettings.hospitalLogo || "/assets/nccb-logo.png")}" alt="" />
                 <div class="header-copy">
                   <div class="header-title">${escapeHtml(localizeText(slipSettings.hospitalNameAr, slipSettings.hospitalNameEn, languageMode))}</div>
                   <div class="header-subtitle">${escapeHtml(localizeText(slipSettings.departmentNameAr, slipSettings.departmentNameEn, languageMode))}</div>

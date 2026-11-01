@@ -1,10 +1,12 @@
 import express, { type Request } from "express";
+import path from "node:path";
 import { requireAuth,requireSupervisor,requireRecentSupervisorReauth } from "../../middleware/auth.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { asyncRoute } from "../../utils/async-route.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { buildNativeReportHtml } from "../../services/generated-print-html-service.js";
+import { readInstitutionIdentity } from "../../services/institution-identity-service.js";
 import { resolveReportContext, getReport, createReport, saveDraft, finalizeReport, addAddendum, getReportHistory, uploadKeyImage, updateKeyImages, getKeyImage } from "./reporting-service.js";
 import { readReportingPolicy,updateReportingPolicy,REPORTING_PRESETS } from './reporting-policy.js';
 import { listWorkspaceStudies,archiveStatus,backfillWorkspaceExternalStatus } from './workspace-study-service.js';
@@ -65,7 +67,14 @@ nativeReportingRouter.get('/reports/:reportId/history',asyncRoute(async(req,res)
 nativeReportingRouter.get('/reports/:reportId/reviewers',asyncRoute(async(req,res)=>res.json({reviewers:await workspaceReviewers(actor(req),reportId(req))})));
 nativeReportingRouter.post('/reports/:reportId/restore-revision',asyncRoute(async(req,res)=>res.json(await restoreWorkspaceRevision(actor(req),reportId(req),asUnknownRecord(req.body)))));
 nativeReportingRouter.post('/reports/:reportId/addenda',asyncRoute(async(req,res)=>res.json(await addWorkspaceAddendum(actor(req),reportId(req),asUnknownRecord(req.body)))));
-nativeReportingRouter.get('/reports/:reportId/print',asyncRoute(async(req,res)=>res.type('html').send(buildNativeReportHtml(await getWorkspaceReport(actor(req),reportId(req))))));
+nativeReportingRouter.get('/print-font/:weight',asyncRoute(async(req,res)=>{
+  if (!['regular','bold'].includes(String(req.params.weight))) throw new HttpError(404,'Font not found.');
+  res.sendFile(path.resolve('frontend/src/assets/fonts',req.params.weight==='bold'?'NotoNaskhArabic-Bold.ttf':'NotoNaskhArabic-Regular.ttf'));
+}));
+nativeReportingRouter.get('/reports/:reportId/print',asyncRoute(async(req,res)=>{
+  const report=await getWorkspaceReport(actor(req),reportId(req));
+  res.type('html').send(buildNativeReportHtml({...report,institution:report.status==='final'?report.institution:await readInstitutionIdentity()}));
+}));
 nativeReportingRouter.post('/reports/:reportId/images-launch',asyncRoute(async(req,res)=>res.json(await launchWorkspaceImages(actor(req),reportId(req)))));
 nativeReportingRouter.get('/reports/:reportId/images/:imageId',asyncRoute(async(req,res)=>{
   const report=await getWorkspaceReport(actor(req),reportId(req));
@@ -102,5 +111,5 @@ nativeReportingRouter.get("/appointments/:appointmentId/images/:imageId",asyncRo
 nativeReportingRouter.get("/appointments/:appointmentId/print",asyncRoute(async(req,res)=> {
   const report = await getReport(actor(req),id(req));
   if (!report) throw new HttpError(404,"Native report not found.");
-  res.type("html").send(buildNativeReportHtml(report));
+  res.type("html").send(buildNativeReportHtml({...report,institution:report.status==='final'?report.institution:await readInstitutionIdentity()}));
 }));

@@ -1,3 +1,4 @@
+import { useInstitutionIdentity } from "@/lib/institution-identity";
 import { useState, type FormEvent } from "react";
 import { GraduationCap, KeyRound, Lock, Power, User as UserIcon } from "lucide-react";
 import { Button, Input } from "@/components/shared";
@@ -24,6 +25,7 @@ export function LoginForm({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const institution = useInstitutionIdentity();
   const [logoFailed, setLogoFailed] = useState(false);
 
   const handleSubmit = async (event: FormEvent) => {
@@ -70,8 +72,8 @@ export function LoginForm({
                 </div>
               ) : !logoFailed ? (
                 <img
-                  src="/assets/nccb-logo.png"
-                  alt="National Cancer Center Benghazi logo"
+                  src={institution.hospitalLogo}
+                  alt="Hospital logo"
                   className="h-full w-full object-contain p-2"
                   onError={() => setLogoFailed(true)}
                 />
@@ -80,7 +82,7 @@ export function LoginForm({
                   className="flex h-full w-full items-center justify-center text-white relative"
                   style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))" }}
                 >
-                  <span className="text-sm font-bold tracking-[0.24em]">NCCB</span>
+                  <span className="text-sm font-bold tracking-[0.24em]">RISpro</span>
                 </div>
               )}
             </div>
@@ -89,7 +91,7 @@ export function LoginForm({
                 {product === "teaching" ? "RISpro Teaching" : t(language, "login.heading")}
               </h1>
               <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
-                {product === "teaching" ? "Question Bank and Residency Education" : t(language, "login.description")}
+                {product === "teaching" ? "Question Bank and Residency Education" : institution.hospitalNameEn || institution.hospitalNameAr || t(language, "login.description")}
               </p>
             </div>
           </div>

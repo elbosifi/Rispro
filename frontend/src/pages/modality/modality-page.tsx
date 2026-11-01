@@ -1000,7 +1000,7 @@ export default function ModalityPage() {
           <div className={`hidden flex-col gap-2 lg:flex lg:gap-3 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
             <div className={`flex shrink-0 items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
               <div className="hidden h-11 w-11 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white shadow-sm lg:flex">
-                <span className="text-xs font-bold tracking-[0.18em]">NCCB</span>
+                <span className="text-xs font-bold tracking-[0.18em]">RISpro</span>
               </div>
 
               <div className="min-w-0">

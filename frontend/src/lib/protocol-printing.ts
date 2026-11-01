@@ -1,3 +1,4 @@
+import { getInstitutionIdentity } from "@/lib/institution-identity";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { ModalityProtocolAssignment } from "@/types/api";
 import { pushToast } from "@/lib/toast";
@@ -189,7 +190,7 @@ function html(sheet: ProtocolPrintSheet): string {
     <button type="button" onclick="window.close()">Close</button>
   </div>
   <header>
-    <h1>NCCB / RISpro Protocol Sheet</h1>
+    <h1>${escapeHtml(getInstitutionIdentity().hospitalNameEn || getInstitutionIdentity().hospitalNameAr || "RISpro")} / Protocol Sheet</h1>
     <p class="muted">Printed ${text(printedAt)}</p>
     ${sheet.unsavedDraft ? '<p><strong>Unsaved draft — not the current assigned protocol</strong></p>' : ""}
   </header>

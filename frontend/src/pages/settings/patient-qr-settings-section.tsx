@@ -151,8 +151,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     noteEn: "",
   },
   location: {
-    centerNameAr: "المركز الوطني للأورام بنغازي",
-    centerNameEn: "National Cancer Center Benghazi",
+    centerNameAr: "",
+    centerNameEn: "",
     departmentLocationAr: "",
     departmentLocationEn: "",
     roomUnitFloorAr: "",
@@ -281,8 +281,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
     if (!Number.isInteger(Number(draft.publicLinkValidityDays)) || Number(draft.publicLinkValidityDays) < 0 || Number(draft.publicLinkValidityDays) > 3650) {
       nextErrors.publicLinkValidityDays = "QR link validity must be between 0 and 3650 days.";
     }
-    if (!isValidPhone(draft.contact.primaryPhone)) nextErrors.contactPrimaryPhone = "رقم الهاتف غير صالح.";
-    if (!isValidPhone(draft.contact.secondaryPhone)) nextErrors.contactSecondaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.whatsapp)) nextErrors.contactWhatsapp = "رقم الواتساب غير صالح.";
     if (!isValidUrl(draft.location.googleMapsUrl)) nextErrors.googleMapsUrl = "رابط خرائط Google غير صالح.";
     if (draft.documentsChecklistAr.some((item) => !item.trim())) nextErrors.checklistAr = "جميع عناصر القائمة يجب أن تكون غير فارغة.";
@@ -454,7 +452,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
         <p className="mt-1 text-sm leading-7 text-slate-600">
           {chooseLocalized(language, "تحكم في ظهور الصفحة، قسم الإلغاء، التقويم، التعليمات، قائمة المستندات، ومعلومات التواصل والموقع.", "Control page visibility, cancellation section, calendar, instructions, documents checklist, and contact/location information.")}
         </p>
-        <p className="mt-1 text-sm leading-7 text-slate-600">{chooseLocalized(language, "يتم إعداد عنوان RISpro العام ضمن النشر وهوية التطبيق.", "The public RISpro URL is configured under Deployment & Application Identity.")}</p>
+        <p className="mt-1 text-sm leading-7 text-slate-600">{chooseLocalized(language, "يتم إعداد أسماء المؤسسة والعنوان وأرقام الهاتف والشعارات وعنوان RISpro العام ضمن هوية المؤسسة والتطبيق.", "Institution names, address, phone numbers, logos, and public RISpro URL are configured under Institution & Application Identity.")}</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -805,8 +803,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
       <div className="grid gap-4 lg:grid-cols-2">
         <FieldCard title={chooseLocalized(language, "التواصل مع القسم", "Contact Department")}>
           <ToggleRow label={chooseLocalized(language, "إظهار بطاقة التواصل", "Show Contact Card")} checked={draft.showDepartmentContact} onChange={(checked) => setDraft((current) => ({ ...current, showDepartmentContact: checked }))} />
-          <Input label={chooseLocalized(language, "رقم الهاتف الرئيسي", "Primary Phone")} value={draft.contact.primaryPhone} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, primaryPhone: value } }))} error={errors.contactPrimaryPhone} />
-          <Input label={chooseLocalized(language, "رقم الهاتف الثاني", "Secondary Phone")} value={draft.contact.secondaryPhone} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, secondaryPhone: value } }))} error={errors.contactSecondaryPhone} />
           <ToggleRow label={chooseLocalized(language, "تفعيل الواتساب", "Enable WhatsApp")} checked={draft.contact.whatsappEnabled} onChange={(checked) => setDraft((current) => ({ ...current, contact: { ...current.contact, whatsappEnabled: checked } }))} />
           <Input label={chooseLocalized(language, "رقم الواتساب", "WhatsApp Number")} value={draft.contact.whatsapp} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, whatsapp: value } }))} error={errors.contactWhatsapp} />
           <div className="grid grid-cols-2 gap-2">
@@ -848,8 +844,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
         <FieldCard title={chooseLocalized(language, "الموقع والدخول", "Location & Access")}>
           <ToggleRow label={chooseLocalized(language, "إظهار بطاقة الموقع", "Show Location Card")} checked={draft.showLocationDirections} onChange={(checked) => setDraft((current) => ({ ...current, showLocationDirections: checked }))} />
           <div className="grid grid-cols-2 gap-2">
-            <Input dir="ltr" label={chooseLocalized(language, "اسم المركز (En)", "Center Name (En)")} value={draft.location.centerNameEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameEn: value } }))} />
-            <Input dir="rtl" label={chooseLocalized(language, "اسم المركز", "Center Name (Ar)")} value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "اسم القسم / الموقع (En)", "Department/Location (En)")} value={draft.location.departmentLocationEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationEn: value } }))} />
@@ -860,8 +854,6 @@ export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersi
             <Input dir="rtl" label={chooseLocalized(language, "الطابق / الوحدة / الغرفة", "Floor/Unit/Room (Ar)")} value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <Textarea dir="ltr" label={chooseLocalized(language, "العنوان (En)", "Address (En)")} value={draft.location.addressEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressEn: value } }))} />
-            <Textarea dir="rtl" label={chooseLocalized(language, "العنوان", "Address (Ar)")} value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "إرشادات الوصول (En)", "Arrival Instructions (En)")} value={draft.location.arrivalInstructionsEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsEn: value } }))} />

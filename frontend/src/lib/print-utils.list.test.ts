@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { getInstitutionIdentity, setInstitutionIdentity } from "./institution-identity";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { filterVisibleAppointments } from "./print-utils";
 import { prepareAppointmentListHtml, printAppointmentListV2 } from "./registration-list-printing";
+beforeEach(()=>setInstitutionIdentity({...getInstitutionIdentity(),hospitalNameEn:"National Cancer Center Benghazi",hospitalNameAr:"المركز الوطني للأورام بنغازي",hospitalLogo:"/assets/nccb-logo.png"}));
 
 function makeAppointment(status: AppointmentWithDetails["status"]): AppointmentWithDetails {
   return {

@@ -17,6 +17,7 @@ import { HttpError } from "../utils/http-error.js";
 import { asBooleanFlag, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
+import { readInstitutionIdentity, validateInstitutionIdentity } from "../services/institution-identity-service.js";
 import {
   createExamType,
   createModality,
@@ -364,6 +365,18 @@ settingsRouter.put(
     res.json({ publicAppBaseUrl, updatedAt: saved.updated_at });
   })
 );
+
+settingsRouter.get("/institution-identity", asyncRoute(async (req, res) => {
+  if ((req as unknown as SettingsRequest).user.role !== "super_admin") throw new HttpError(403, "Only super_admin can view Institution & Application Identity.");
+  res.json(await readInstitutionIdentity());
+}));
+settingsRouter.put("/institution-identity", asyncRoute(async (req, res) => {
+  const request = req as unknown as SettingsRequest;
+  if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Institution & Application Identity.");
+  const identity = await validateInstitutionIdentity(request.body);
+  await upsertSettings(PUBLIC_APP_URL_CATEGORY, [{ key: "institution", value: identity }], request.user.sub as UserId);
+  res.json(identity);
+}));
 
 settingsRouter.put("/request-scan-automation", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can update Request Scan Automation settings."); res.json({ settings: await saveRequestScanSettings(asUnknownRecord(request.body ?? {}), request.user.sub as UserId) }); }));
 settingsRouter.post("/request-scan-automation/test", asyncRoute(async (req: Request, res: Response) => { const request = req as SettingsRequest; if (request.user.role !== "super_admin") throw new HttpError(403, "Only super_admin can test Request Scan Automation settings."); await testRequestScanSmb(await resolveRequestScanSettingsForTest(asUnknownRecord(request.body ?? {}))); res.json({ ok: true, archiveWorkflowVerified: true, checkedAt: new Date().toISOString() }); }));

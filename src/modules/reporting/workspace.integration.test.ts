@@ -27,6 +27,11 @@ import type {Actor} from '../doctor-portal/reporting-board-service.js';
 import {listReportingBoardCasesByAppointmentIds,listReportingBoardCaseCandidates} from '../doctor-portal/reporting-board-repository.js';
 import {DEFAULT_SONICDICOM_REPORT_SETTINGS} from '../../services/sonicdicom-report-settings.js';
 import {refreshWorkspaceSonicStudies,workspaceSonicSourceKey,enqueueWorkspaceSonicStudies} from '../../services/workspace-sonicdicom-cache-service.js';
+import { readInstitutionIdentity } from '../../services/institution-identity-service.js';
+import { upsertSettings } from '../../services/settings-service.js';
+import { readAppointmentSlipSettings } from '../appointments-v2/public/utils/appointment-slip-settings.js';
+import { readPatientQrSettings } from '../appointments-v2/public/utils/patient-qr-settings.js';
+import { buildNativeReportHtml } from '../../services/generated-print-html-service.js';
 const prefix='wv2_'+Date.now(),settings:AuthoritativeOrthancSettings={enabled:true,baseUrl:'http://127.0.0.1:19481',username:'synthetic',password:'synthetic',timeoutSeconds:2,verifyTls:true,displayName:'Synthetic',autoExportClinicalDocuments:false,autoRouteEnabled:false,autoRouteDestinationKey:'',autoRouteDestinationKeys:[]};
 let doctor:Actor,other:Actor,manager:Actor,noSign:Actor,upstreamUnavailable=false;
 let originalPolicy:unknown,originalSonic:unknown,originalSonicConfig:unknown,originalSync:Record<string,unknown>;
@@ -285,6 +290,7 @@ test('adopting an existing legacy final preserves its exact signed row, snapshot
     values($1,$2,$3,$4,$5,'final',$6,$7,$8,$9,$10,$11,$12,$13) returning *`,[booking,patient,s.studyInstanceUid,JSON.stringify({accessStrategy:'authoritative_orthanc',sourcePacsNodeId:null}),JSON.stringify(identity),JSON.stringify(content),doctor.userId,prefix+'doctor',other.userId,prefix+'other',snapshot.signedAt,JSON.stringify(snapshot),randomUUID()])).rows[0];
   await pool.query("insert into native_report_versions(report_id,revision,kind,snapshot,actor_user_id,actor_name) values($1,1,'final',$2,$3,$4)",[legacy.id,JSON.stringify(snapshot),other.userId,prefix+'other']);
   const selected=await getWorkspaceStudy(doctor,s.orthancStudyId);assert.equal(selected.primaryReportId,Number(legacy.id));assert.equal(selected.reports.length,1);
+  assert.equal((await getWorkspaceReport(doctor,Number(legacy.id))).institution,null);
   assert.deepEqual((await pool.query('select * from native_reports where id=$1',[legacy.id])).rows[0],legacy);
   assert.deepEqual((await workspaceHistory(doctor,Number(legacy.id))).versions[0].snapshot,snapshot);
   assert.equal((await create(doctor,16,'independent','second_opinion')).isPrimary,false);
@@ -684,4 +690,28 @@ test('PACS-only external status is source-bound, batched, retained on failure an
     // The display cache cannot authorize creation, even when it retained no-report.
     await assert.rejects(()=>create(doctor,72),/External reporting owns/);
   }finally{await setConfig(DEFAULT_SONICDICOM_REPORT_SETTINGS);}
+});
+
+
+test('final signing freezes institutional text and logo while new documents use updated identity',async()=>{
+  const original=await readInstitutionIdentity();
+  try {
+    const initial={...original,hospitalNameEn:'Synthetic Hospital A',hospitalNameAr:'مستشفى تجريبي أ',departmentNameEn:'Synthetic Radiology A'};
+    await upsertSettings('deployment_identity',[{key:'institution',value:initial}],manager.userId);
+    let r=await create(doctor,210);r=await saveWorkspaceDraft(doctor,r.id,{expectedRevision:r.revision,sections:content});
+    const signed=await finalizeWorkspaceReport(doctor,r.id,{expectedRevision:r.revision,requestId:randomUUID(),confirmed:true,signerUserId:doctor.userId});
+    assert.equal(signed.institution?.hospitalNameEn,initial.hospitalNameEn);
+    assert.ok(signed.institution?.hospitalLogo.startsWith('data:image/png;base64,'));
+    const before=buildNativeReportHtml(signed),historyBefore=await workspaceHistory(doctor,signed.id);
+    const updated={...initial,hospitalNameEn:'Synthetic Hospital B',departmentNameEn:'Synthetic Radiology B',hospitalLogo:''};
+    await upsertSettings('deployment_identity',[{key:'institution',value:updated}],manager.userId);
+    const retained=await getWorkspaceReport(doctor,signed.id);
+    assert.equal(buildNativeReportHtml(retained),before);assert.deepEqual(await workspaceHistory(doctor,signed.id),historyBefore);
+    assert.equal((await readAppointmentSlipSettings()).hospitalNameEn,updated.hospitalNameEn);
+    assert.equal((await readPatientQrSettings()).location.centerNameEn,updated.hospitalNameEn);
+    const draft=await create(doctor,211);
+    const preview=buildNativeReportHtml({...draft,institution:await readInstitutionIdentity()});
+    assert.match(preview,/Synthetic Hospital B/);assert.match(preview,/DRAFT \/ UNSIGNED/);
+    assert.equal(retained.revision,signed.revision);assert.deepEqual(retained.sections,content);
+  } finally {await upsertSettings('deployment_identity',[{key:'institution',value:original}],manager.userId);}
 });

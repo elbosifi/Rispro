@@ -23,6 +23,7 @@ export interface AppointmentSlipSettings {
   hospitalNameEn: string;
   departmentNameAr: string;
   departmentNameEn: string;
+  hospitalLogo?: string;
   slipTitleAr: string;
   slipTitleEn: string;
   patientDetailsHeadingAr: string;
@@ -87,10 +88,10 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   qrSizeMm: 24,
   barcodeHeightMm: 12,
   barcodeWidthMm: 100,
-  hospitalNameAr: "المركز الوطني للأورام بنغازي",
-  hospitalNameEn: "National Cancer Center Benghazi",
-  departmentNameAr: "قسم الأشعة التشخيصية",
-  departmentNameEn: "Diagnostic Radiology Department",
+  hospitalNameAr: "",
+  hospitalNameEn: "",
+  departmentNameAr: "",
+  departmentNameEn: "",
   slipTitleAr: "وصل الموعد",
   slipTitleEn: "Appointment Slip",
   patientDetailsHeadingAr: "بيانات المريض",
@@ -203,6 +204,7 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
     hospitalNameEn: asString(record.hospitalNameEn, DEFAULT_SETTINGS.hospitalNameEn),
     departmentNameAr: asString(record.departmentNameAr, DEFAULT_SETTINGS.departmentNameAr),
     departmentNameEn: asString(record.departmentNameEn, DEFAULT_SETTINGS.departmentNameEn),
+    hospitalLogo: asString(record.hospitalLogo, "/assets/nccb-logo.png"),
     slipTitleAr: asString(record.slipTitleAr, DEFAULT_SETTINGS.slipTitleAr),
     slipTitleEn: asString(record.slipTitleEn, DEFAULT_SETTINGS.slipTitleEn),
     patientDetailsHeadingAr: asString(record.patientDetailsHeadingAr, DEFAULT_SETTINGS.patientDetailsHeadingAr),

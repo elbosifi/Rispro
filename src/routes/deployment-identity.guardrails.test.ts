@@ -10,4 +10,8 @@ test("deployment identity has a dedicated super-admin re-auth route and cannot u
   assert.match(source, /Only super_admin can update Deployment & Application Identity/);
   assert.match(source, /category === PUBLIC_APP_URL_CATEGORY\) throw new HttpError\(404/);
   assert.match(source, /normalizePublicAppBaseUrl\(body\.publicAppBaseUrl\)/);
+  assert.match(source, /Only super_admin can view Institution & Application Identity/);
+  assert.match(source, /Only super_admin can update Institution & Application Identity/);
+  assert.ok(source.indexOf('settingsRouter.put("/institution-identity"') > source.indexOf('settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth)'));
+  assert.match(source, /validateInstitutionIdentity\(request\.body\)/);
 });

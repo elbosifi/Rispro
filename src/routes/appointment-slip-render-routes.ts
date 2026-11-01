@@ -8,6 +8,7 @@ import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/p
 import { issuePublicCancelToken } from "../modules/appointments-v2/public/utils/public-cancel-token.js";
 import { buildPublicAppointmentUrl } from "../modules/appointments-v2/public/utils/public-appointment-url.js";
 import { assertCompleteRegistrationListRows, contextFromRegistrationListRenderToken } from "../services/registration-list-render-context-service.js";
+import { readInstitutionIdentity } from "../services/institution-identity-service.js";
 
 export const appointmentSlipRenderRouter = express.Router();
 
@@ -88,5 +89,5 @@ appointmentSlipRenderRouter.get("/registration-list/data", asyncRoute(async (req
      order by requested.position`, [context.appointmentIds]);
   const appointments = assertCompleteRegistrationListRows(context, result.rows);
   res.setHeader("Cache-Control", "no-store, private");
-  res.json({ appointments, label: context.label });
+  res.json({ appointments, label: context.label, institution: await readInstitutionIdentity() });
 }));

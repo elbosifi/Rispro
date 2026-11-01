@@ -10,6 +10,7 @@
  */
 
 import { pool } from "../db/pool.js";
+import { applyInstitutionIdentity, readInstitutionIdentity } from "./institution-identity-service.js";
 import { HttpError } from "../utils/http-error.js";
 import { invalidateAllCache } from "../utils/cache.js";
 import { parseNaps2WebscanAllowedOrigins } from "../config/env.js";
@@ -144,6 +145,16 @@ export async function getSettingsByCategory(category: string): Promise<SettingsR
     [category]
   );
 
+  if (category === "appointment_slip" || category === "patient_qr_self_service") {
+    const identity = await readInstitutionIdentity();
+    const result = rows as SettingsRow[];
+    const config = result.find(row => row.setting_key === "config");
+    const raw = config?.setting_value as Record<string, unknown> | undefined;
+    const value = applyInstitutionIdentity(category, raw && "value" in raw ? raw.value : raw, identity);
+    if (config) config.setting_value = { value };
+    else result.push({ id: 0, category, setting_key: "config", setting_value: { value }, updated_at: new Date().toISOString() });
+    return result;
+  }
   return rows as SettingsRow[];
 }
 

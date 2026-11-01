@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { t as translate, type Language } from "@/lib/i18n";
 import { LanguageContext, type LanguageContextValue } from "./language-provider";
+import { refreshInstitutionIdentity, useInstitutionIdentity } from "@/lib/institution-identity";
 
 const englishLanguageValue: LanguageContextValue = {
   language: "en",
@@ -16,6 +17,13 @@ function getStoredLanguage(): Language {
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
+  const institution = useInstitutionIdentity();
+  useEffect(() => {
+    const refresh = () => { void refreshInstitutionIdentity().catch(() => undefined); };
+    refresh();
+    window.addEventListener("focus",refresh);
+    return () => window.removeEventListener("focus",refresh);
+  }, []);
   const [language, setLanguage] = useState<Language>(getStoredLanguage);
 
   useEffect(() => {
@@ -23,6 +31,12 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("dir", language === "ar" ? "rtl" : "ltr");
     localStorage.setItem("rispro-language", language);
   }, [language]);
+
+  useEffect(() => {
+    const hospital = language === "ar" ? institution.hospitalNameAr || institution.hospitalNameEn : institution.hospitalNameEn || institution.hospitalNameAr;
+    document.title = hospital ? `${hospital} | RISpro` : "RISpro";
+    document.querySelectorAll<HTMLLinkElement>('link[rel="icon"],link[rel="apple-touch-icon"]').forEach(link => { link.href = institution.hospitalLogo; });
+  }, [institution,language]);
 
   const value = useMemo<LanguageContextValue>(
     () => ({
@@ -32,7 +46,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       toggleLanguage: () => setLanguage((prev) => (prev === "ar" ? "en" : "ar")),
       t: (key, params) => translate(language, key, params)
     }),
-    [language]
+    [language, institution]
   );
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;

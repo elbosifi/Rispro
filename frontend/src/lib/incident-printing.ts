@@ -1,3 +1,4 @@
+import { getInstitutionIdentity } from "@/lib/institution-identity";
 import { t, type Language } from "@/lib/i18n";
 import type { Incident, IncidentDocument } from "@/lib/api/incidents";
 import { getUserDisplayName } from "@/lib/user-display-name";
@@ -24,7 +25,6 @@ const incidentActorName = (incident: Incident, role: "reporter" | "reviewer", la
 
 const printCopy = {
   en: {
-    department: "Diagnostic & Interventional Radiology Department",
     currentStatus: "Current status",
     administrativeReview: "Administrative Review / Review Notes",
     reviewedBy: "Reviewed by",
@@ -35,7 +35,6 @@ const printCopy = {
     generated: "Generated",
   },
   ar: {
-    department: "قسم الأشعة التشخيصية والتداخلية",
     currentStatus: "الحالة الحالية",
     administrativeReview: "المراجعة الإدارية / ملاحظات المراجعة",
     reviewedBy: "تمت المراجعة بواسطة",
@@ -78,7 +77,7 @@ export function printIncidentReport(incident: Incident, attachments: IncidentDoc
     ? incident.patient_arabic_name || incident.patient_english_name
     : incident.patient_english_name || incident.patient_arabic_name;
   const typeKey = incident.incident_type === "equipment" ? "equipmentTypeShort" : "clinicalTypeShort";
-  const logoUrl = `${window.location.origin}/assets/nccb-logo.png`;
+  const logoUrl = getInstitutionIdentity().hospitalLogo;
   const generatedAt = formatDateTime(new Date().toISOString(), language);
   const status = incidentText(language, incident.status);
   const title = incidentLabel(language, "printTitle");
@@ -229,7 +228,7 @@ body[dir="rtl"] .attachment-register { padding: 2mm 10mm 2mm 8mm; }
 .isolate { direction: ltr; text-align: left; unicode-bidi: isolate; }
 @media screen and (max-width: 720px) { .identity-table, .identity-table tbody, .identity-table tr, .identity-cell { display: block; width: 100%; } .identity-cell { border-inline-start: 0; border-top: 0.2mm solid #aeb6bd; } .identity-cell:first-child { border-top: 0; } .signature-grid { grid-template-columns: 1fr; } .stamp-box { min-height: 22mm; } }
 @media print { .toolbar, .report-footer { display: none; } .report { max-width: none; } .print-document-header { display: table-header-group; } .print-document-header tr, .print-document-header th, .institutional-header { break-inside: avoid; page-break-inside: avoid; } .section-heading { break-after: avoid-page; page-break-after: avoid; } .print-group { break-inside: avoid-page; page-break-inside: avoid; } .report-intro-group { break-inside: avoid-page; page-break-inside: avoid; } .data-table tr { break-inside: avoid; page-break-inside: avoid; } .attachment-register li { break-inside: avoid; page-break-inside: avoid; } a { color: inherit; text-decoration: none; } }
-</style><script>function printReportWhenReady(){const logo=document.querySelector(".institutional-logo");if(!logo||logo.complete){window.print();return;}const print=()=>window.print();logo.addEventListener("load",print,{once:true});logo.addEventListener("error",print,{once:true});}</script></head><body><div class="toolbar"><button type="button" onclick="printReportWhenReady()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report"><table class="print-document"><thead class="print-document-header"><tr><th><header class="institutional-header"><div class="institutional-english" dir="ltr"><p class="hospital-en">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-en">${escapeHtml(printCopy.en.department)}</p></div><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo"></div><div class="institutional-arabic" dir="rtl"><p class="hospital-ar">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="department-ar">${escapeHtml(printCopy.ar.department)}</p></div></header></th></tr></thead><tbody>
+</style><script>function printReportWhenReady(){const logo=document.querySelector(".institutional-logo");if(!logo||logo.complete){window.print();return;}const print=()=>window.print();logo.addEventListener("load",print,{once:true});logo.addEventListener("error",print,{once:true});}</script></head><body><div class="toolbar"><button type="button" onclick="printReportWhenReady()">${incidentLabel(language, "print")}</button><button type="button" onclick="window.close()">${incidentLabel(language, "close")}</button></div><main class="report"><table class="print-document"><thead class="print-document-header"><tr><th><header class="institutional-header"><div class="institutional-english" dir="ltr"><p class="hospital-en">${escapeHtml(t("en", "brand.hospitalName"))}</p><p class="department-en">${escapeHtml(getInstitutionIdentity().departmentNameEn)}</p></div><div class="logo-cell"><img class="institutional-logo" src="${escapeHtml(logoUrl)}" alt="Hospital logo"></div><div class="institutional-arabic" dir="rtl"><p class="hospital-ar">${escapeHtml(t("ar", "brand.hospitalName"))}</p><p class="department-ar">${escapeHtml(getInstitutionIdentity().departmentNameAr)}</p></div></header></th></tr></thead><tbody>
   <tr class="print-body-row"><td><div class="report-intro-group"><div class="title-block"><p class="title-ar" dir="rtl">تقرير حادث</p><p class="title-en" dir="ltr">Incident Report</p></div>
   ${identityStrip}</div></td></tr>
   <tr class="print-body-row"><td>${incidentDetails}</td></tr>

@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api-client";
 import { fetchDeploymentIdentitySettings, saveDeploymentIdentitySettings } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
 import AutomaticHttpsSection from "./automatic-https-section";
+import InstitutionIdentitySection from "./institution-identity-section";
 
 function browserOrigin(): string {
   if (typeof window === "undefined") return "";
@@ -52,12 +53,13 @@ export default function DeploymentIdentitySection({ onReAuthRequired, reauthVers
   return (
     <div className="max-w-2xl space-y-4">
       {!temporaryBootstrap ? <>
+      <InstitutionIdentitySection onReAuthRequired={onReAuthRequired} reauthVersion={reauthVersion} />
       <p className="text-sm leading-6 text-muted-foreground">{text.help}</p>
       {query.isLoading ? <p className="text-sm text-muted-foreground">{text.loading}</p> : null}
       {query.error && !(query.error instanceof ApiError && (query.error.status === 401 || query.error.status === 403)) ? <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{query.error instanceof Error ? query.error.message : "Could not load the setting."}</p> : null}
       <div>
         <label htmlFor="public-rispro-url" className="block text-sm font-semibold text-foreground">{text.label}</label>
-        <input id="public-rispro-url" type="url" dir="ltr" value={draft} onChange={(event) => setDraftOverride(event.target.value)} placeholder="https://rispro.nccb.com.ly" className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
+        <input id="public-rispro-url" type="url" dir="ltr" value={draft} onChange={(event) => setDraftOverride(event.target.value)} placeholder="https://rispro.example.org" className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm" />
       </div>
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm">
         <p className="font-semibold text-foreground">{text.current}</p>

@@ -41,8 +41,8 @@ describe("appointment slip settings api hooks", () => {
     expect(settings.languageMode).toBe("bilingual");
     expect(settings.safeTopMm).toBe(58);
     expect(settings.safeBottomMm).toBe(56);
-    expect(settings.hospitalNameAr).toBe("المركز الوطني للأورام بنغازي");
-    expect(settings.departmentNameEn).toBe("Diagnostic Radiology Department");
+    expect(settings.hospitalNameAr).toBe("");
+    expect(settings.departmentNameEn).toBe("");
     expect(settings.showQrCode).toBe(true);
     expect(settings.qrModalityMode).toBe("all");
     expect(settings.qrModalityIds).toEqual([]);

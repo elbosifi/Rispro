@@ -307,6 +307,9 @@ export interface PatientQrLocationSettings {
 }
 
 export interface PatientQrSettings {
+  hospitalLogo?: string;
+  departmentNameEn?: string;
+  departmentNameAr?: string;
   enabled: boolean;
   printQrOnAppointmentSlip: boolean;
   qrSlipPaperMode: AppointmentSlipPaperMode;
@@ -555,8 +558,8 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
     noteEn: "",
   },
   location: {
-    centerNameAr: "المركز الوطني للأورام بنغازي",
-    centerNameEn: "National Cancer Center Benghazi",
+    centerNameAr: "",
+    centerNameEn: "",
     departmentLocationAr: "",
     departmentLocationEn: "",
     roomUnitFloorAr: "",
@@ -578,6 +581,7 @@ export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNu
 export type AppointmentSlipQrModalityMode = "all" | "include" | "exclude";
 
 export interface AppointmentSlipSettings {
+  hospitalLogo?: string;
   paperMode: AppointmentSlipPaperMode;
   paperSize: AppointmentSlipPaperSize;
   languageMode: AppointmentSlipLanguageMode;
@@ -658,10 +662,10 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   qrSizeMm: 24,
   barcodeHeightMm: 12,
   barcodeWidthMm: 100,
-  hospitalNameAr: "المركز الوطني للأورام بنغازي",
-  hospitalNameEn: "National Cancer Center Benghazi",
-  departmentNameAr: "قسم الأشعة التشخيصية",
-  departmentNameEn: "Diagnostic Radiology Department",
+  hospitalNameAr: "",
+  hospitalNameEn: "",
+  departmentNameAr: "",
+  departmentNameEn: "",
   slipTitleAr: "وصل الموعد",
   slipTitleEn: "Appointment Slip",
   patientDetailsHeadingAr: "بيانات المريض",
@@ -755,6 +759,9 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
       : [];
 
   return {
+    hospitalLogo: str(record.hospitalLogo, "/assets/nccb-logo.png"),
+    departmentNameEn: str(record.departmentNameEn, ""),
+    departmentNameAr: str(record.departmentNameAr, ""),
     enabled: bool(record.enabled, true),
     printQrOnAppointmentSlip: bool(record.printQrOnAppointmentSlip, true),
     qrSlipPaperMode: paperMode(record.qrSlipPaperMode),
@@ -960,6 +967,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     /* legacy literal fallback removed; use centralized defaults */
     hospitalNameAr: str(record.hospitalNameAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameAr),
     hospitalNameEn: str(record.hospitalNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameEn),
+    hospitalLogo: str(record.hospitalLogo, "/assets/nccb-logo.png"),
     departmentNameAr: str(record.departmentNameAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.departmentNameAr),
     departmentNameEn: str(record.departmentNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.departmentNameEn),
     slipTitleAr: str(record.slipTitleAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr),

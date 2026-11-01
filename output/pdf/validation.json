@@ -1,0 +1,26 @@
+[
+  {
+    "name": "report-no-images",
+    "pages": 1
+  },
+  {
+    "name": "report-one-image",
+    "pages": 1
+  },
+  {
+    "name": "report-five-images",
+    "pages": 2
+  },
+  {
+    "name": "report-long",
+    "pages": 5
+  },
+  {
+    "name": "report-draft",
+    "pages": 1
+  },
+  {
+    "name": "report-missing-demographics",
+    "pages": 1
+  }
+]

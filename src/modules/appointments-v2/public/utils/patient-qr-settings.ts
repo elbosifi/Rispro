@@ -28,6 +28,9 @@ export interface PatientQrLocationSettings {
 }
 
 export interface PatientQrSettings {
+  hospitalLogo?: string;
+  departmentNameEn?: string;
+  departmentNameAr?: string;
   enabled: boolean;
   printQrOnAppointmentSlip: boolean;
   qrSlipPaperMode: "blank" | "preprinted";
@@ -276,8 +279,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     noteEn: "",
   },
   location: {
-    centerNameAr: "المركز الوطني للأورام بنغازي",
-    centerNameEn: "National Cancer Center Benghazi",
+    centerNameAr: "",
+    centerNameEn: "",
     departmentLocationAr: "",
     departmentLocationEn: "",
     roomUnitFloorAr: "",
@@ -376,6 +379,9 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
 
   return {
     enabled: asBoolean(record.enabled, DEFAULT_SETTINGS.enabled),
+    hospitalLogo: asString(record.hospitalLogo, "/assets/nccb-logo.png"),
+    departmentNameEn: asString(record.departmentNameEn),
+    departmentNameAr: asString(record.departmentNameAr),
     printQrOnAppointmentSlip: asBoolean(record.printQrOnAppointmentSlip, DEFAULT_SETTINGS.printQrOnAppointmentSlip),
     qrSlipPaperMode: asPaperMode(record.qrSlipPaperMode, DEFAULT_SETTINGS.qrSlipPaperMode),
     qrSlipPaperSize: asPaperSize(record.qrSlipPaperSize, DEFAULT_SETTINGS.qrSlipPaperSize),

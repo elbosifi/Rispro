@@ -1,3 +1,4 @@
+import { useInstitutionIdentity } from "@/lib/institution-identity";
 import { DictationControl } from "@/components/layout/dictation-control";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -306,6 +307,7 @@ export default function QueueCheckInPage() {
   );
 
   const currentClock = timeFormatter.format(currentTime);
+  const institution = useInstitutionIdentity();
   const hospitalName = t("brand.hospitalName");
   const pageTitle = t("queue.checkInTitle");
   const subtitle = t("queue.checkInInstruction");
@@ -345,14 +347,14 @@ export default function QueueCheckInPage() {
               <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
                 {!logoFailed ? (
                   <img
-                    src="/nccb-logo.png"
+                    src={institution.hospitalLogo}
                     alt={hospitalName}
                     className="h-full w-full object-contain p-2"
                     onError={() => setLogoFailed(true)}
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white">
-                    <span className="text-lg font-bold tracking-[0.2em]">NCCB</span>
+                    <span className="text-lg font-bold tracking-[0.2em]">RISpro</span>
                   </div>
                 )}
               </div>

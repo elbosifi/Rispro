@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { printIncidentReport } from "./incident-printing";
+import { getInstitutionIdentity, setInstitutionIdentity } from "./institution-identity";
 
 const equipmentIncident = (overrides = {}) => ({
   id: 1,
@@ -32,6 +33,7 @@ describe("printIncidentReport", () => {
   const write = vi.fn();
 
   beforeEach(() => {
+    setInstitutionIdentity({...getInstitutionIdentity(),hospitalNameEn:"National Cancer Center Benghazi",hospitalNameAr:"المركز الوطني للأورام بنغازي",departmentNameEn:"Diagnostic & Interventional Radiology Department",departmentNameAr:"قسم الأشعة التشخيصية والتداخلية",hospitalLogo:"/assets/nccb-logo.png"});
     write.mockReset();
     vi.stubGlobal("window", {
       location: { origin: "https://rispro.test" },
@@ -56,7 +58,7 @@ describe("printIncidentReport", () => {
     expect(html).toContain("counter(pages)");
 
     expect(html).toContain('<table class="print-document"><thead class="print-document-header"><tr><th><header class="institutional-header">');
-    expect(html).toMatch(/<thead class="print-document-header"><tr><th><header class="institutional-header"><div class="institutional-english" dir="ltr">[\s\S]*?<div class="logo-cell"><img class="institutional-logo" src="https:\/\/rispro\.test\/assets\/nccb-logo\.png" alt="NCCB logo"><\/div><div class="institutional-arabic" dir="rtl">/);
+    expect(html).toMatch(/<thead class="print-document-header"><tr><th><header class="institutional-header"><div class="institutional-english" dir="ltr">[\s\S]*?<div class="logo-cell"><img class="institutional-logo" src="\/assets\/nccb-logo\.png" alt="Hospital logo"><\/div><div class="institutional-arabic" dir="rtl">/);
     expect(html).toContain('.institutional-header { display: grid; direction: ltr; grid-template-columns: minmax(0, 1fr) 24mm minmax(0, 1fr);');
     expect(html).toContain('.institutional-english { grid-column: 1; min-width: 0; text-align: center; direction: ltr; }');
     expect(html).toContain('.logo-cell { grid-column: 2;');
@@ -119,7 +121,7 @@ describe("printIncidentReport", () => {
     expect(html).toContain('<thead class="print-document-header">');
     expect(html).toContain('<div class="institutional-english" dir="ltr">');
     expect(html).toContain('<div class="institutional-arabic" dir="rtl">');
-    expect(html).toContain('<img class="institutional-logo" src="https://rispro.test/assets/nccb-logo.png" alt="NCCB logo">');
+    expect(html).toContain('<img class="institutional-logo" src="/assets/nccb-logo.png" alt="Hospital logo">');
     expect(html).toContain('@top-center { content: "استكمال تقرير الحادث\\A Incident Report - Continued";');
     expect(html).toContain('@page :first {\n  @top-center { content: ""; }');
     expect(html).not.toContain('@top-left { content:');
