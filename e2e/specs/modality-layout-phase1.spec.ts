@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import pg from "pg";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { assertSafeE2eEnvironment } from "../../scripts/e2e-db-safety.mjs";
 import { signInWithSession } from "../helpers/auth";
 import { e2eTodayInTripoli } from "../helpers/fixtures";
@@ -9,7 +9,8 @@ import { e2eTodayInTripoli } from "../helpers/fixtures";
 process.loadEnvFile("e2e/.env");
 const target = assertSafeE2eEnvironment();
 const baseline = process.env.MODALITY_LAYOUT_BASELINE === "1";
-const output = resolve("artifacts/modality-phase1", baseline ? "before" : "after");
+const artifactRoot = resolve(process.env.RISPRO_MODALITY_REVIEW_DIR || "artifacts/modality-phase1");
+const output = resolve(artifactRoot, baseline ? "before" : "after");
 
 test("synthetic CT identity and workspace remain visible at workstation and mobile sizes", async ({ page }) => {
   test.setTimeout(90000);
@@ -90,7 +91,7 @@ test("synthetic CT identity and workspace remain visible at workstation and mobi
 
 test("synthetic multi-page documents retain selection across panel changes", async ({ page, browser }) => {
   test.setTimeout(90000);
-  const fixtureDirectory = resolve("artifacts/modality-phase1/fixtures");
+  const fixtureDirectory = resolve(artifactRoot, "fixtures");
   mkdirSync(fixtureDirectory, { recursive: true });
   const pdfPage = await browser.newPage();
   for (const [name, count] of [["synthetic-imaging-request.pdf", 10], ["synthetic-second-ten-page.pdf", 10], ["synthetic-clinical-history-with-a-deliberately-long-filename-to-assess-identification.pdf", 4]] as const) {
@@ -106,7 +107,7 @@ test("synthetic multi-page documents retain selection across panel changes", asy
     await db.query("update appointments_v2.bookings set modality_id=$1 where id=$2", [ctId, booking.id]);
     const names = ["synthetic-imaging-request.pdf", "synthetic-second-ten-page.pdf", "synthetic-clinical-history-with-a-deliberately-long-filename-to-assess-identification.pdf"];
     await db.query("delete from documents where v2_booking_id=$1 and original_filename=any($2::text[])", [booking.id, names]);
-    for (const name of names) await db.query("insert into documents(patient_id,v2_booking_id,document_type,original_filename,stored_path,mime_type,file_size,source) values($1,$2,'appointment_request',$3,$4,'application/pdf',$5,'manual_upload')", [booking.patient_id, booking.id, name, `artifacts/modality-phase1/fixtures/${name}`, statSync(resolve(fixtureDirectory, name)).size]);
+    for (const name of names) await db.query("insert into documents(patient_id,v2_booking_id,document_type,original_filename,stored_path,mime_type,file_size,source) values($1,$2,'appointment_request',$3,$4,'application/pdf',$5,'manual_upload')", [booking.patient_id, booking.id, name, relative(process.cwd(), resolve(fixtureDirectory, name)).replaceAll("\\", "/"), statSync(resolve(fixtureDirectory, name)).size]);
   } finally { await db.end(); }
   mkdirSync(output, { recursive: true });
   await signInWithSession(page, "e2e_supervisor");
@@ -117,9 +118,16 @@ test("synthetic multi-page documents retain selection across panel changes", asy
     const drawer = page.getByTestId("selected-appointment-drawer");
     if (width < 1024) await drawer.getByRole("group", { name: "Clinical workspace" }).getByRole("button", { name: "Documents" }).click();
     const documents = drawer.getByTestId("clinical-request-documents");
-    const selected = documents.getByRole("button", { name: /synthetic-imaging-request\.pdf/ });
+    const selected = documents.getByRole("button", { name: /^synthetic-imaging-request\.pdf$/ });
     await selected.click();
     await expect(selected).toHaveAttribute("aria-pressed", "true");
+    const documentRow = selected.locator("xpath=../..");
+    expect((await documentRow.boundingBox())!.height).toBeLessThan(110);
+    const actions = documents.getByRole("button", { name: "More actions: synthetic-imaging-request.pdf" });
+    await actions.click();
+    await expect(documentRow.getByRole("button", { name: "Print A4" })).toBeVisible();
+    await expect(documentRow.getByRole("link", { name: "Open in new tab" })).toBeVisible();
+    await actions.click();
     await expect(documents.locator("canvas").first()).toBeVisible();
     await expect(documents.locator(".react-pdf__Page")).toHaveCount(10);
     await expect(documents.locator("canvas").first()).toBeVisible();
@@ -133,7 +141,7 @@ test("synthetic multi-page documents retain selection across panel changes", asy
       const scroller = element.parentElement?.parentElement?.parentElement;
       return element.getBoundingClientRect().width - (scroller?.clientWidth ?? 0);
     })).toBeLessThanOrEqual(2);
-    await documents.getByRole("button", { name: /synthetic-second-ten-page\.pdf/ }).click();
+    await documents.getByRole("button", { name: /^synthetic-second-ten-page\.pdf$/ }).click();
     await expect(documents.locator(".react-pdf__Page")).toHaveCount(10);
     await expect.poll(() => documents.locator(".react-pdf__Page").first().evaluate(element => {
       const scroller = element.parentElement?.parentElement?.parentElement;
@@ -174,6 +182,12 @@ test("empty appointment and Arabic identity remain accessible", async ({ page })
     await page.getByTestId(width < 1024 ? /modality-mobile-card-/ : /modality-board-row-/).filter({ hasText: "E2E Queue Patient" }).first().click();
     const drawer = page.getByTestId("selected-appointment-drawer");
     await expect(drawer.getByTestId("modality-protocol-section")).toContainText("No protocol assigned");
+    await expect(drawer.getByRole("button", { name: "Expand protocol" })).toHaveCount(0);
+    if (width >= 1024) {
+      const documentsBox = await drawer.getByTestId("clinical-request-documents").boundingBox();
+      const protocolBox = await drawer.getByTestId("clinical-protocol").boundingBox();
+      expect(documentsBox!.width / (documentsBox!.width + protocolBox!.width)).toBeGreaterThan(0.74);
+    }
     if (width < 1024) await drawer.getByRole("group", { name: "Clinical workspace" }).getByRole("button", { name: "Documents" }).click();
     await expect(drawer.getByTestId("clinical-request-documents")).toContainText("No request documents yet");
     await page.screenshot({ path: resolve(output, `ct-empty-${width}x${height}.png`) });
@@ -233,7 +247,7 @@ test("synthetic structured, free-text and customized prescriptions remain readab
       const drawer = page.getByTestId("selected-appointment-drawer");
       if (width < 1024) await drawer.getByRole("group", { name: "Clinical workspace" }).getByRole("button", { name: "Documents" }).click();
       const documents = drawer.getByTestId("clinical-request-documents");
-      await documents.getByRole("button", { name: /synthetic-imaging-request\.pdf/ }).click();
+      await documents.getByRole("button", { name: /^synthetic-imaging-request\.pdf$/ }).click();
       await expect(documents.locator(".react-pdf__Page")).toHaveCount(10);
       if (width < 1024) await drawer.getByRole("group", { name: "Clinical workspace" }).getByRole("button", { name: "Protocol" }).click();
       const protocol = page.getByTestId("modality-protocol-section");

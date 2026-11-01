@@ -1757,6 +1757,8 @@ describe("ModalityPage modality board", () => {
     expect(within(workspace).getByTestId("clinical-protocol")).toBeTruthy();
     expect(within(workspace).getByTestId("clinical-request-documents")).toBeTruthy();
     expect(await within(workspace).findByText("referral.png")).toBeTruthy();
+    expect(within(workspace).getByRole("button", { name: "referral.png" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(workspace).getByRole("button", { name: /^referral\.png$/ }).getAttribute("title")).toBe("referral.png");
     expect(within(workspace).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
     const fileInput = within(workspace).getByTestId("document-file-input") as HTMLInputElement;
     expect(within(workspace).getByText("Upload Clinical Document")).toBeTruthy();
@@ -1773,7 +1775,7 @@ describe("ModalityPage modality board", () => {
 
     expect(screen.getByTestId("clinical-workspace")).toBeTruthy();
     expect(within(workspace).queryByRole("button", { name: "Delete" })).toBeNull();
-    expect(workspace.className).toContain("lg:grid-cols-2");
+    await waitFor(() => expect(workspace.className).toContain("lg:grid-cols-[minmax(0,4fr)_minmax(220px,1fr)]"));
   });
 
   it("contains the clinical workspace while preserving protocol-first mobile order", async () => {
@@ -1953,7 +1955,7 @@ describe("ModalityPage modality board", () => {
     expect(within(panel).queryByText("Protocol notes")).toBeNull();
     expect(within(panel).queryByTestId("clinical-acquisition-table")).toBeNull();
 
-    const disclosure = within(panel).getByRole("button", { name: /Patient instructions/ });
+    const disclosure = within(panel).getByRole("button", { name: /General examination guidance/ });
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     const instruction = within(panel).getByText((text) => text.includes("الصيام 6 ساعات"));
     expect(instruction.getAttribute("dir")).toBe("auto");
@@ -2017,7 +2019,7 @@ describe("ModalityPage modality board", () => {
 
   it.each(["CT", "MRI"] as const)("shows customized %s text as active and suppresses linked library rows", async (modality) => {
     const base = modality === "CT" ? ctAssignment() : mriAssignment();
-    const user = await openBoard([appointment({ id: 8, modalityCode: modality, modalityNameEn: modality })]);
+    const user = await openBoard([appointment({ id: 8, modalityCode: modality, modalityNameEn: modality, modalityGeneralInstructionEn: "General exam guidance", specialReasonLabelEn: "Special appointment", specialReasonNote: "Appointment-specific reason" })]);
     fetchModalityProtocolAssignmentMock.mockResolvedValue({ ...base, appointmentId: 8, freeTextProtocol: "Custom active instructions", protocolNotes: "Patient-specific prep", contrastNotes: "Patient-specific contrast", libraryPreparationNotes: "Library prep" });
     await user.click(screen.getByTestId("modality-board-row-8"));
     const panel = within(await screen.findByTestId("selected-appointment-drawer")).getByTestId("modality-protocol-section");
@@ -2026,6 +2028,12 @@ describe("ModalityPage modality board", () => {
     expect(within(panel).getByText(/Reference protocol:/).textContent).toContain(base.protocolName);
     expect(within(panel).getByText(/Reference protocol:/).textContent).toContain(`v${base.versionNumber}`);
     expect(within(panel).getByText("Patient-specific prep")).toBeTruthy();
+    expect(within(panel).getByText("Doctor's patient-specific instructions")).toBeTruthy();
+    expect(within(panel).getByText("Doctor's contrast and preparation instructions")).toBeTruthy();
+    expect(within(panel).getByText("General examination guidance")).toBeTruthy();
+    expect(within(panel).getByText("General exam guidance")).toBeTruthy();
+    expect(within(panel).getByText("Appointment-specific notes")).toBeTruthy();
+    expect(within(panel).getByText("Special appointment: Appointment-specific reason")).toBeTruthy();
     expect(within(panel).getByText("Patient-specific prep").className).toContain("whitespace-pre-wrap");
     expect(within(panel).getByText("Patient-specific contrast")).toBeTruthy();
     expect(within(panel).getByText("Current library reference — not an assignment-time snapshot")).toBeTruthy();
@@ -2099,9 +2107,22 @@ describe("ModalityPage modality board", () => {
 
     const drawer = await screen.findByTestId("selected-appointment-drawer");
     expect(await within(drawer).findByText("No protocol assigned")).toBeTruthy();
+    await waitFor(() => expect(within(drawer).getByTestId("clinical-workspace").className).toContain("lg:grid-cols-[minmax(0,4fr)_minmax(220px,1fr)]"));
+    expect(within(drawer).queryByRole("button", { name: /expand protocol|expand instructions/i })).toBeNull();
     expect(within(drawer).queryByRole("button", { name: /assign protocol|change protocol/i })).toBeNull();
     expect(within(drawer).queryByText(/Change protocol/i)).toBeNull();
     expect(within(drawer).queryByText(/Assign protocol/i)).toBeNull();
+  });
+
+  it("keeps general guidance expandable without calling it an assigned protocol", async () => {
+    fetchModalityProtocolAssignmentMock.mockResolvedValue(null);
+    const user = await openBoard([appointment({ id: 99, modalityGeneralInstructionEn: "General preparation guidance" })]);
+    await user.click(screen.getByTestId("modality-board-row-99"));
+    const drawer = await screen.findByTestId("selected-appointment-drawer");
+    expect(await within(drawer).findByText("No protocol assigned")).toBeTruthy();
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "Expand instructions" })).toBeTruthy());
+    expect(within(drawer).queryByRole("button", { name: "Expand protocol" })).toBeNull();
+    expect(within(drawer).getByText("General preparation guidance")).toBeTruthy();
   });
 
   it("uses a neutral Arabic close action and no cancellation action in the selected drawer", async () => {

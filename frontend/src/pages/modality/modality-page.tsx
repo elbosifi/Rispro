@@ -958,6 +958,8 @@ export default function ModalityPage() {
   const selectedModality = selectedAppointment ? chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn) : "";
   const selectedExam = selectedAppointment ? chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || t(language, "common.na") : "";
   const selectedPriority = selectedAppointment ? priorityDisplay(language, selectedAppointment) : "";
+  const protocolIsUnassigned = Boolean(selectedAppointment && !selectedAppointment.protocolAssignmentSummary && !selectedProtocolQuery.data && !selectedProtocolQuery.isError && (selectedProtocolQuery.isSuccess || !isProtocolModality(selectedAppointment)));
+  const hasProtocolPanelContent = Boolean(selectedProtocolQuery.data || (protocolIsUnassigned && selectedAppointment && (selectedAppointment.notes?.trim() || modalitySpecialInstructions(language, selectedAppointment) || generalExaminationGuidance(language, selectedAppointment))));
   const moreMenuAppointment = openMoreMenu
     ? boardAppointments.find((appointment) => appointment.id === openMoreMenu.appointmentId) ?? null
     : null;
@@ -1928,8 +1930,12 @@ export default function ModalityPage() {
               </DialogHeader>
               <div data-testid="clinical-dialog-scroll-region" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/70 pb-[env(safe-area-inset-bottom)] lg:flex lg:flex-col lg:overflow-hidden">
               <Tabs value={selectedAppointmentTab} onValueChange={(value) => setSelectedAppointmentTab(value as "appointment" | "previousStudies")}>
-                <div className="shrink-0 px-3 pt-2 sm:px-6 sm:pt-3">
-                <DisclosureSection title={t(language, "modality.patientDetails")} defaultOpen={false}>
+                <div className="flex shrink-0 flex-wrap items-start gap-x-3 gap-y-1 px-3 pt-1 sm:px-5">
+                <TabsList className="!m-0 shrink-0">
+                  <TabsTrigger value="appointment">{chooseLocalized(language, "الموعد", "Appointment")}</TabsTrigger>
+                  <TabsTrigger value="previousStudies">{t(language, "modality.previousStudies.previous")}</TabsTrigger>
+                </TabsList>
+                <DisclosureSection title={t(language, "modality.patientDetails")} className="min-w-[200px] flex-1 !border-0 !pt-0" defaultOpen={false}>
                   <div data-testid="clinical-mobile-details" className="grid max-h-48 min-w-0 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
                     <ClinicalMobileDetailField label={t(language, "settings.fieldMRN")} value={selectedAppointment.mrn} dir="ltr" />
                     <ClinicalMobileDetailField label={chooseLocalized(language, "المعرف الأساسي", "Primary identifier")} value={selectedAppointment.patientPrimaryIdentifierValue || selectedAppointment.nationalId} dir="ltr" />
@@ -1947,10 +1953,6 @@ export default function ModalityPage() {
                     <ClinicalMobileDetailField label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes?.trim() || selectedAppointment.specialReasonNote?.trim()} />
                   </div>
                 </DisclosureSection>
-                <TabsList className="mx-0 mt-2 sm:mx-0">
-                  <TabsTrigger value="appointment">{chooseLocalized(language, "الموعد", "Appointment")}</TabsTrigger>
-                  <TabsTrigger value="previousStudies">{t(language, "modality.previousStudies.previous")}</TabsTrigger>
-                </TabsList>
                 </div>
                 {selectedAppointmentTab === "appointment" ? <>
               <main data-testid="clinical-workspace-region" className="min-h-0 flex-none overflow-visible bg-slate-50/70 px-3 py-3 sm:px-5 sm:py-4 lg:flex-1 lg:overflow-hidden">
@@ -1958,9 +1960,9 @@ export default function ModalityPage() {
                   <Button type="button" size="sm" className="!min-h-11" variant={mobileClinicalPane === "protocol" ? "primary" : "secondary"} aria-pressed={mobileClinicalPane === "protocol"} onClick={() => setMobileClinicalPane("protocol")}>{chooseLocalized(language, "البروتوكول", "Protocol")}</Button>
                   <Button type="button" size="sm" className="!min-h-11" variant={mobileClinicalPane === "documents" ? "primary" : "secondary"} aria-pressed={mobileClinicalPane === "documents"} onClick={() => setMobileClinicalPane("documents")}>{chooseLocalized(language, "المستندات", "Documents")}</Button>
                 </div>
-                <div data-testid="clinical-workspace" className={`grid min-w-0 grid-cols-1 gap-3 lg:h-full lg:min-h-0 lg:grid-rows-1 ${expandedClinicalPane ? "lg:grid-cols-1" : "lg:grid-cols-2"}`}>
+                <div data-testid="clinical-workspace" className={`grid min-w-0 grid-cols-1 gap-3 lg:h-full lg:min-h-0 lg:grid-rows-1 ${expandedClinicalPane ? "lg:grid-cols-1" : protocolIsUnassigned ? "lg:grid-cols-[minmax(0,4fr)_minmax(220px,1fr)]" : "lg:grid-cols-2"}`}>
                   <section data-testid="clinical-protocol" aria-label={chooseLocalized(language, "البروتوكول المعيّن", "Assigned protocol")} className={`order-1 min-w-0 lg:order-2 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain ${mobileClinicalPane === "protocol" ? "block" : "hidden"} ${expandedClinicalPane === "documents" ? "lg:hidden" : "lg:block"}`}>
-                    <div className="mb-2 hidden justify-end lg:flex"><Button type="button" size="sm" variant="secondary" aria-pressed={expandedClinicalPane === "protocol"} onClick={() => setExpandedClinicalPane(expandedClinicalPane === "protocol" ? null : "protocol")}>{expandedClinicalPane === "protocol" ? chooseLocalized(language, "استعادة العرض المقسم", "Restore split view") : chooseLocalized(language, "توسيع البروتوكول", "Expand protocol")}</Button></div>
+                    {hasProtocolPanelContent || expandedClinicalPane === "protocol" ? <div className="mb-2 hidden justify-end lg:flex"><Button type="button" size="sm" variant="secondary" aria-pressed={expandedClinicalPane === "protocol"} onClick={() => setExpandedClinicalPane(expandedClinicalPane === "protocol" ? null : "protocol")}>{expandedClinicalPane === "protocol" ? chooseLocalized(language, "استعادة العرض المقسم", "Restore split view") : protocolIsUnassigned ? chooseLocalized(language, "توسيع التعليمات", "Expand instructions") : chooseLocalized(language, "توسيع البروتوكول", "Expand protocol")}</Button></div> : null}
                     <ProtocolAssignmentPanel
                       key={selectedAppointment.id}
                       appointment={selectedAppointment}
@@ -1980,6 +1982,7 @@ export default function ModalityPage() {
                       previewMode="inline"
                       layout="workspace"
                       compactMobileWorkspace
+                      compactDocumentRows
                       pdfInitialSizingMode="fit-width"
                       expanded={expandedClinicalPane === "documents"}
                       onExpandedChange={(expanded) => setExpandedClinicalPane(expanded ? "documents" : null)}
@@ -2712,11 +2715,11 @@ function ValueWithPreset({
 }
 
 function modalitySpecialInstructions(language: Language, appointment: AppointmentWithDetails): string | null {
+  return [chooseLocalized(language, appointment.specialReasonLabelAr, appointment.specialReasonLabelEn), appointment.specialReasonNote?.trim()].filter(Boolean).join(": ") || null;
+}
+
+function generalExaminationGuidance(language: Language, appointment: AppointmentWithDetails): string | null {
   return [
-    [
-      chooseLocalized(language, appointment.specialReasonLabelAr, appointment.specialReasonLabelEn),
-      appointment.specialReasonNote?.trim(),
-    ].filter(Boolean).join(": "),
     chooseLocalized(language, appointment.modalityGeneralInstructionAr, appointment.modalityGeneralInstructionEn),
     chooseLocalized(language, appointment.examSpecificInstructionAr, appointment.examSpecificInstructionEn),
   ].filter(Boolean).join("\n") || null;
@@ -2742,7 +2745,7 @@ function ProtocolAssignmentPanel({
   const [patientInstructionsOpen, setPatientInstructionsOpen] = useState(true);
   const specialInstructions = modalitySpecialInstructions(protocolLanguage, appointment);
   const appointmentNotes = appointment.notes?.trim() || null;
-  const patientInstructionItems = [specialInstructions]
+  const generalInstructionItems = [generalExaminationGuidance(protocolLanguage, appointment)]
     .filter((value): value is string => hasMeaningfulValue(value));
   const scanner = assignment
     ? [assignment.scannerName?.trim(), assignment.scannerVendor?.trim()].filter(Boolean).join(" - ")
@@ -2764,11 +2767,12 @@ function ProtocolAssignmentPanel({
       <section data-testid="modality-protocol-section" dir="ltr" className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-muted-foreground">
         <p className="font-semibold text-foreground">{t(protocolLanguage, "modality.noProtocolAssigned")}</p>
         {appointmentNotes ? <div data-testid="clinical-appointment-notes" className="mt-3"><DetailField label={t(protocolLanguage, "modality.appointmentNotes")} value={appointmentNotes} /></div> : null}
-        {patientInstructionItems.length > 0 ? (
+        {specialInstructions ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "ملاحظات خاصة بالموعد", "Appointment-specific notes")} value={specialInstructions} multiline /></div> : null}
+        {generalInstructionItems.length > 0 ? (
           <PatientInstructionsDisclosure
             id={patientInstructionsId}
             language={protocolLanguage}
-            items={patientInstructionItems}
+            items={generalInstructionItems}
             open={patientInstructionsOpen}
             onToggle={() => setPatientInstructionsOpen((current) => !current)}
           />
@@ -2803,7 +2807,7 @@ function ProtocolAssignmentPanel({
       </div>
 
       <div data-testid="clinical-protocol-content" dir="ltr" className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{isCustomized ? chooseLocalized(protocolLanguage, "بروتوكول مخصص — التعليمات المعتمدة", "Customized protocol — active instructions") : t(protocolLanguage, "modality.protocol")}</p>
+        <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{isCustomized ? chooseLocalized(protocolLanguage, "بروتوكول مخصص — التعليمات المعتمدة", "Customized protocol — active instructions") : hasFreeTextProtocol ? chooseLocalized(protocolLanguage, "بروتوكول نصي — التعليمات المعتمدة", "Free-text protocol — active instructions") : chooseLocalized(protocolLanguage, "البروتوكول المنظم المعتمد", "Active structured protocol")}</p>
         {hasFreeTextProtocol ? (
           <p className="mt-2 whitespace-pre-wrap text-lg font-semibold leading-7 text-slate-950">{assignment.freeTextProtocol}</p>
         ) : (
@@ -2812,8 +2816,8 @@ function ProtocolAssignmentPanel({
         {hasFreeTextProtocol ? <p className="mt-1 text-xs text-muted-foreground">{isCustomized ? `${chooseLocalized(protocolLanguage, "البروتوكول المرجعي", "Reference protocol")}: ${protocolTitle}` : protocolTitle}</p> : null}
       </div>
 
-      {hasMeaningfulValue(assignment.protocolNotes) ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "تعليمات خاصة بالمريض", "Patient-specific instructions")} value={assignment.protocolNotes} multiline /></div> : null}
-      {hasContrastNotes ? <div className="mt-3"><DetailField label={t(protocolLanguage, "modality.contrastPreparation")} value={assignment.contrastNotes} multiline /></div> : null}
+      {hasMeaningfulValue(assignment.protocolNotes) ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "تعليمات الطبيب الخاصة بالمريض", "Doctor's patient-specific instructions")} value={assignment.protocolNotes} multiline /></div> : null}
+      {hasContrastNotes ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "تعليمات الطبيب للتباين والتحضير", "Doctor's contrast and preparation instructions")} value={assignment.contrastNotes} multiline /></div> : null}
 
       {[assignment.libraryContrastPolicy, assignment.libraryOralContrastPolicy, assignment.libraryBowelPreparation, assignment.libraryPreparationNotes].some(hasMeaningfulValue) ? (
         <section className="mt-3 space-y-2" aria-label={chooseLocalized(protocolLanguage, "مرجع المكتبة الحالي — ليس نسخة وقت التعيين", "Current library reference — not an assignment-time snapshot")}>
@@ -2834,11 +2838,12 @@ function ProtocolAssignmentPanel({
 
       {hasAppointmentNotes ? <div data-testid="clinical-appointment-notes" className="mt-3"><DetailField label={t(protocolLanguage, "modality.appointmentNotes")} value={appointmentNotes} /></div> : null}
 
-      {patientInstructionItems.length > 0 ? (
+      {specialInstructions ? <div className="mt-3"><DetailField label={chooseLocalized(protocolLanguage, "ملاحظات خاصة بالموعد", "Appointment-specific notes")} value={specialInstructions} multiline /></div> : null}
+      {generalInstructionItems.length > 0 ? (
         <PatientInstructionsDisclosure
           id={patientInstructionsId}
           language={protocolLanguage}
-          items={patientInstructionItems}
+          items={generalInstructionItems}
           open={patientInstructionsOpen}
           onToggle={() => setPatientInstructionsOpen((current) => !current)}
         />
@@ -2952,7 +2957,7 @@ function PatientInstructionsDisclosure({
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-900 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
       >
         <span className="min-w-0">
-          <span className="block">{t(language, "modality.patientInstructions")}</span>
+          <span className="block">{chooseLocalized(language, "إرشادات الفحص العامة", "General examination guidance")}</span>
           <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{t(language, items.length === 1 ? "modality.patientInstructionsNote" : "modality.patientInstructionsNotes", { count: items.length })}</span>
         </span>
         <ChevronRight size={18} aria-hidden="true" className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
