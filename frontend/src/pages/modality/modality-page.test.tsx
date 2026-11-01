@@ -1760,12 +1760,20 @@ describe("ModalityPage modality board", () => {
     expect(within(workspace).getByRole("button", { name: "referral.png" }).getAttribute("aria-pressed")).toBe("true");
     expect(within(workspace).getByRole("button", { name: /^referral\.png$/ }).getAttribute("title")).toBe("referral.png");
     expect(within(workspace).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
-    const fileInput = within(workspace).getByTestId("document-file-input") as HTMLInputElement;
-    expect(within(workspace).getByText("Upload Clinical Document")).toBeTruthy();
-    expect(within(workspace).getByRole("button", { name: "Scan Paper" })).toBeTruthy();
+    const footer = screen.getByTestId("clinical-operational-footer");
+    const fileInput = within(footer).getByTestId("document-file-input") as HTMLInputElement;
+    expect(within(footer).getByText("Upload Clinical Document")).toBeTruthy();
+    expect(within(footer).getByRole("button", { name: "Scan Paper" })).toBeTruthy();
+    await user.click(within(footer).getByText("Scan options", { selector: "summary", exact: true }));
+    expect(within(footer).getByText("Scan & Attach")).toBeTruthy();
+    await user.click(within(footer).getByText(/Effective:/).closest("summary")!);
+    expect(within(footer).getByLabelText("Source")).toBeTruthy();
+    expect(within(footer).getByLabelText("Resolution")).toBeTruthy();
+    expect(within(footer).getByLabelText("Color mode")).toBeTruthy();
+    expect(within(workspace).queryByRole("button", { name: "Page 1" })).toBeNull();
 
     await user.upload(fileInput, new File(["clinical"], "clinical.pdf", { type: "application/pdf" }));
-    await user.click(within(workspace).getByRole("button", { name: "Attach Clinical Document" }));
+    await user.click(within(footer).getByRole("button", { name: "Attach Clinical Document" }));
     await waitFor(() => expect(uploadAppointmentDocumentMock).toHaveBeenCalledWith(expect.objectContaining({
       appointmentId: 6,
       appointmentRefType: "v2_booking",
@@ -1840,9 +1848,9 @@ describe("ModalityPage modality board", () => {
     const requestSection = await screen.findByTestId("clinical-request-documents");
     expect(await within(requestSection).findByText("referral.png")).toBeTruthy();
     expect(within(requestSection).getAllByRole("img", { name: "referral.png" }).length).toBeGreaterThan(0);
-    const fileInput = within(requestSection).getByTestId("document-file-input");
-    expect(fileInput).toBeTruthy();
-    expect(within(requestSection).getByText("Upload Clinical Document")).toBeTruthy();
+    const footer = screen.getByTestId("clinical-operational-footer");
+    expect(within(footer).getByTestId("document-file-input")).toBeTruthy();
+    expect(within(footer).getByText("Upload Clinical Document")).toBeTruthy();
     expect(within(requestSection).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(requestSection).queryByRole("toolbar", { name: "Document annotation controls" })).toBeNull();
   });

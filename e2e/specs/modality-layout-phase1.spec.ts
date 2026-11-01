@@ -98,6 +98,8 @@ test("synthetic multi-page documents retain selection across panel changes", asy
     await pdfPage.setContent(`<style>body{font:14px Arial;color:#172339}article{height:940px;page-break-after:always}h1{font-size:23px}</style>${Array.from({ length: count }, (_, index) => `<article><h1>SYNTHETIC RADIOLOGY REFERRAL</h1><p>Patient: E2E Acquisition Patient · Page ${index + 1} of ${count}</p><hr><h2>Clinical history and examination request</h2><p>Synthetic history: assess the abdomen and liver. Confirm preparation and contrast eligibility with the treating team.</p><p>This document contains no real patient information.</p></article>`).join("")}`);
     await pdfPage.pdf({ path: resolve(fixtureDirectory, name), format: "A4" });
   }
+  await pdfPage.setContent("<main style='padding:50px;font:24px Arial'>SYNTHETIC REFERRAL ? no real patient information</main>");
+  await pdfPage.screenshot({ path: resolve(fixtureDirectory, "synthetic-image.png") });
   await pdfPage.close();
   const db = new pg.Pool({ connectionString: target.url });
   let ctId: number;
@@ -108,8 +110,11 @@ test("synthetic multi-page documents retain selection across panel changes", asy
     const names = ["synthetic-imaging-request.pdf", "synthetic-second-ten-page.pdf", "synthetic-clinical-history-with-a-deliberately-long-filename-to-assess-identification.pdf"];
     await db.query("delete from documents where v2_booking_id=$1 and original_filename=any($2::text[])", [booking.id, names]);
     for (const name of names) await db.query("insert into documents(patient_id,v2_booking_id,document_type,original_filename,stored_path,mime_type,file_size,source) values($1,$2,'appointment_request',$3,$4,'application/pdf',$5,'manual_upload')", [booking.patient_id, booking.id, name, relative(process.cwd(), resolve(fixtureDirectory, name)).replaceAll("\\", "/"), statSync(resolve(fixtureDirectory, name)).size]);
+    await db.query("delete from documents where v2_booking_id=$1 and original_filename='synthetic-image.png'", [booking.id]);
+    await db.query("insert into documents(patient_id,v2_booking_id,document_type,original_filename,stored_path,mime_type,file_size,source) values($1,$2,'appointment_request','synthetic-image.png',$3,'image/png',$4,'manual_upload')", [booking.patient_id, booking.id, relative(process.cwd(), resolve(fixtureDirectory, "synthetic-image.png")).replaceAll("\\", "/"), statSync(resolve(fixtureDirectory, "synthetic-image.png")).size]);
   } finally { await db.end(); }
   mkdirSync(output, { recursive: true });
+  await page.route("**/api/integrations/status", route => route.fulfill({ json: { status: { scanner: { naps2WebScanEnabled: true, naps2WebScanEndpoint: "http://127.0.0.1:18622", scannerSource: "feeder", scanDpi: "200", scanColorMode: "color" } } } }));
   await signInWithSession(page, "e2e_supervisor");
   for (const [width, height] of [[1440, 900], [1366, 768], [768, 1024], [390, 844]]) {
     await page.setViewportSize({ width, height });
@@ -118,6 +123,23 @@ test("synthetic multi-page documents retain selection across panel changes", asy
     const drawer = page.getByTestId("selected-appointment-drawer");
     if (width < 1024) await drawer.getByRole("group", { name: "Clinical workspace" }).getByRole("button", { name: "Documents" }).click();
     const documents = drawer.getByTestId("clinical-request-documents");
+    if (width >= 768) {
+      const footer = drawer.getByTestId("clinical-operational-footer");
+      const actions = footer.getByTestId("document-footer-actions");
+      await expect(actions.getByText("Upload Clinical Document")).toBeVisible();
+      await expect(actions.getByRole("button", { name: "Scan Paper" })).toBeVisible();
+      await actions.getByText("Scan options", { exact: true }).first().click();
+      await actions.getByText(/Effective:/).click();
+      for (const setting of ["Source", "Resolution", "Color mode"]) await expect(actions.locator("label").filter({ hasText: setting }).locator("select")).toBeVisible();
+      if (width === 1440) await page.screenshot({ path: resolve(output, "naps2-scan-options-1440x900.png") });
+      await actions.getByText("Scan options", { exact: true }).first().click();
+      await expect(documents.getByTestId("document-rail").getByText("Upload Clinical Document")).toHaveCount(0);
+    }
+    const imageButton = documents.getByRole("button", { name: /^synthetic-image\.png$/ });
+    await imageButton.click();
+    await expect(documents.getByRole("img", { name: "synthetic-image.png" })).toBeVisible();
+    await expect(documents.getByRole("button", { name: "Page 1", exact: true })).toHaveCount(0);
+    if (width === 1440) await page.screenshot({ path: resolve(output, "synthetic-image-no-thumbnail-1440x900.png") });
     const selected = documents.getByRole("button", { name: /^synthetic-imaging-request\.pdf$/ });
     await selected.click();
     await expect(selected).toHaveAttribute("aria-pressed", "true");

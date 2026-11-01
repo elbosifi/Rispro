@@ -575,6 +575,7 @@ export default function ModalityPage() {
   const [confirmVerified, setConfirmVerified] = useState(false);
   const [statusAction, setStatusAction] = useState<BoardStatusAction | null>(null);
   const [statusReason, setStatusReason] = useState("");
+  const [documentActionsTarget, setDocumentActionsTarget] = useState<HTMLDivElement | null>(null);
   const [reopenForScanningAppointment, setReopenForScanningAppointment] = useState<AppointmentWithDetails | null>(null);
   const [reopenForScanningReason, setReopenForScanningReason] = useState("");
   const [reopenForScanningError, setReopenForScanningError] = useState<string | null>(null);
@@ -1983,6 +1984,8 @@ export default function ModalityPage() {
                       layout="workspace"
                       compactMobileWorkspace
                       compactDocumentRows
+                      documentActionsTarget={documentActionsTarget}
+                      hideImageThumbnail
                       pdfInitialSizingMode="fit-width"
                       expanded={expandedClinicalPane === "documents"}
                       onExpandedChange={(expanded) => setExpandedClinicalPane(expanded ? "documents" : null)}
@@ -2030,6 +2033,7 @@ export default function ModalityPage() {
                 >
                   <span>{chooseLocalized(language, "إغلاق", "Close")}</span>
                 </Button>
+                <div ref={setDocumentActionsTarget} className="hidden min-w-0 flex-1 items-center md:flex" />
                 <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-wrap">
                 {selectedAppointment.status === "scheduled" || selectedAppointment.status === "waiting" ? (
                   <Button

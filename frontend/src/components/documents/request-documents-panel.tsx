@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileImage, FileText, Loader2, MoreVertical, MousePointer2, Pencil, Printer, Redo2, Save as SaveIcon, ScanLine, Square, Trash2, Type, Undo2, Upload } from "lucide-react";
 import { useLanguage } from "@/providers/language-provider";
@@ -66,6 +67,8 @@ interface RequestDocumentsPanelProps {
   pdfInitialSizingMode?: "fit-page" | "fit-width";
   compactMobileWorkspace?: boolean;
   compactDocumentRows?: boolean;
+  documentActionsTarget?: HTMLElement | null;
+  hideImageThumbnail?: boolean;
   hideSatisfiedProtocolEligibilityStatus?: boolean;
   enableAnnotations?: boolean;
   onAnnotationDirtyChange?: (dirty: boolean) => void;
@@ -92,6 +95,8 @@ export function RequestDocumentsPanel({
   pdfInitialSizingMode = "fit-page",
   compactMobileWorkspace = false,
   compactDocumentRows = false,
+  documentActionsTarget,
+  hideImageThumbnail = false,
   hideSatisfiedProtocolEligibilityStatus = false,
   enableAnnotations = false,
   onAnnotationDirtyChange,
@@ -616,6 +621,7 @@ export function RequestDocumentsPanel({
 
   const compactAppointmentMobile = layout === "workspace" && compactMobileWorkspace && isMobile;
   const showCollapsedRail = documentRailCollapsed && !isMobile;
+  const footerActionsTarget = isMobile ? null : documentActionsTarget;
 
   const scanControlsContent = (
     <section id="request-documents-scan-upload" className={`rounded-xl border border-border bg-background ${compactAppointmentMobile ? "p-2" : "p-3"}`}>
@@ -627,7 +633,7 @@ export function RequestDocumentsPanel({
         <ScanLine size={18} className="text-accent" aria-hidden="true" />
       </div>
       <div className={`flex flex-col ${compactAppointmentMobile ? "gap-1.5" : "gap-2"}`}>
-        {naps2ScannerEnabled && (layout !== "workspace" || !isMobile) ? (
+        {!footerActionsTarget && naps2ScannerEnabled && (layout !== "workspace" || !isMobile) ? (
           <button
             type="button"
             onClick={handleScanAndAttach}
@@ -638,7 +644,7 @@ export function RequestDocumentsPanel({
             {scanUploading ? t("documents.scanning") : t("documents.scanPaper")}
           </button>
         ) : null}
-        {!naps2ScannerEnabled && scannerAppEnabled && (layout !== "workspace" || !isMobile) ? (
+        {!footerActionsTarget && !naps2ScannerEnabled && scannerAppEnabled && (layout !== "workspace" || !isMobile) ? (
           <button
             type="button"
             onClick={handleLaunchScannerApp}
@@ -649,7 +655,7 @@ export function RequestDocumentsPanel({
             {scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}
           </button>
         ) : null}
-        <label htmlFor="request-documents-upload-file" className="order-0 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground transition hover:opacity-90 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
+        {!footerActionsTarget ? <><label htmlFor="request-documents-upload-file" className="order-0 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-foreground transition hover:opacity-90 focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50">
           <Upload size={15} aria-hidden="true" />
           <span dir="ltr">{file ? `${file.name} · ${formatFileSize(file.size)}` : uploadDocumentLabel}</span>
         </label>
@@ -672,7 +678,7 @@ export function RequestDocumentsPanel({
             <Upload size={15} aria-hidden="true" />
             {uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}
           </button>
-        ) : null}
+        ) : null}</> : null}
       </div>
       {naps2ScannerEnabled ? <ScanOptionsDisclosure
         language={language}
@@ -705,6 +711,15 @@ export function RequestDocumentsPanel({
   if (layout === "workspace") {
     return (
       <div data-expanded={expanded ? "true" : "false"} data-layout="appointment-workspace" data-testid="appointment-document-workspace" className={compactAppointmentMobile ? "flex min-w-0 flex-col" : "flex h-full min-h-0 min-w-0 flex-col"}>
+        {footerActionsTarget && canAttachDocuments ? createPortal(
+          <div className="relative flex min-w-0 items-center gap-2" data-testid="document-footer-actions">
+            <label htmlFor="request-documents-upload-file" className="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border border-border px-2 text-xs font-semibold focus-within:ring-2 focus-within:ring-accent/50"><Upload size={15} aria-hidden="true" /><span className={file ? "max-w-36 truncate" : "whitespace-nowrap"} title={file?.name}>{file ? file.name : uploadDocumentLabel}</span></label>
+            <input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />
+            {file ? <button type="button" title={file.name} onClick={() => uploadMutation.mutate()} disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads} className="min-h-11 rounded-lg bg-accent px-2 text-xs font-semibold text-accent-foreground disabled:opacity-50">{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}
+            {!isMobile && (naps2ScannerEnabled || scannerAppEnabled) ? <button type="button" onClick={naps2ScannerEnabled ? handleScanAndAttach : handleLaunchScannerApp} disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending} className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-border px-2 text-xs font-semibold disabled:opacity-50"><ScanLine size={15} aria-hidden="true" />{scanUploading ? t("documents.scanning") : scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}</button> : null}
+            {!isMobile ? <details className="text-xs"><summary className="cursor-pointer rounded-lg border border-border px-2 py-3">{language === "ar" ? "?????? ?????" : "Scan options"}</summary><div className="absolute bottom-full start-0 z-30 w-[min(36rem,calc(100vw-2rem))] pb-2 shadow-lg">{scanControlsContent}</div></details> : null}
+          </div>, footerActionsTarget
+        ) : null}
         {protocolEligibilityStatus ? <div className="mb-2 shrink-0">{protocolEligibilityStatus}</div> : null}
         <div className={compactAppointmentMobile ? "flex min-w-0 flex-col gap-2" : `grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 ${showCollapsedRail ? "lg:grid-cols-[minmax(0,1fr)_44px]" : workspaceRailSize === "wide" ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(140px,180px)]"}`}>
           <section className={`${compactAppointmentMobile ? "flex min-w-0" : "flex min-h-0"} flex-col rounded-xl border border-border bg-background p-1 sm:p-1.5`} aria-label={resolvedTitle}>
@@ -716,10 +731,10 @@ export function RequestDocumentsPanel({
                   <FileText size={compactAppointmentMobile ? 22 : 30} className={`${compactAppointmentMobile ? "mb-1.5" : "mb-3"} text-muted-foreground`} aria-hidden="true" />
                   <p className="text-sm font-semibold text-foreground">{t("documents.noDocuments")}</p>
                   <p className="mt-1 max-w-sm text-xs text-muted-foreground">{!canAttachDocuments ? t("documents.emptyNoPermission") : t("documents.emptyUploadHint")}</p>
-                  {canAttachDocuments ? <div className={`${compactAppointmentMobile ? "mt-2" : "mt-4"} w-full max-w-sm`}>{scanControlsContent}</div> : null}
+                  {canAttachDocuments && !footerActionsTarget ? <div className={`${compactAppointmentMobile ? "mt-2" : "mt-4"} w-full max-w-sm`}>{scanControlsContent}</div> : null}
                 </div>
               ) : null}
-              {selectedDocument ? <DocumentPreviewWorkspace document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage utilityToolbarPlacement={pdfUtilityToolbarPlacement} initialPdfSizingMode={pdfInitialSizingMode} annotationToolbar={annotationToolbar} annotations={annotationToolbar ? annotations : []} annotationTool={annotationTool} selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null} onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined} onCreateAnnotation={annotationToolbar ? createAnnotation : undefined} /> : null}
+              {selectedDocument ? <DocumentPreviewWorkspace hideImageThumbnail={hideImageThumbnail} document={selectedDocument} expanded={expanded} onExpandedChange={onExpandedChange} preferSinglePage utilityToolbarPlacement={pdfUtilityToolbarPlacement} initialPdfSizingMode={pdfInitialSizingMode} annotationToolbar={annotationToolbar} annotations={annotationToolbar ? annotations : []} annotationTool={annotationTool} selectedAnnotationId={annotationToolbar ? selectedAnnotationId : null} onSelectAnnotation={annotationToolbar ? setSelectedAnnotationId : undefined} onCreateAnnotation={annotationToolbar ? createAnnotation : undefined} /> : null}
             </div>
           </section>
 
@@ -737,7 +752,7 @@ export function RequestDocumentsPanel({
                 {!isMobile ? <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted" onClick={() => setDocumentRailCollapsed(true)} aria-label="Collapse document rail" title="Collapse document rail"><ChevronRight size={14} aria-hidden="true" /></button> : null}
               </div>
               <span className="block text-[10px] text-muted-foreground">{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
-              {canAttachDocuments && documents.length > 0 ? <>
+              {canAttachDocuments && documents.length > 0 && !footerActionsTarget ? <>
                 <label htmlFor="request-documents-upload-file" className="mt-2 inline-flex min-h-8 w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11px] font-semibold text-accent focus-within:outline-none focus-within:ring-2 focus-within:ring-accent/50"><Upload size={13} aria-hidden="true" />{uploadDocumentLabel}</label>
                 <input ref={fileInputRef} id="request-documents-upload-file" data-testid="document-file-input" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" />
                 {file ? <button type="button" onClick={() => uploadMutation.mutate()} className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[11px] font-semibold text-accent-foreground disabled:opacity-50" disabled={uploadMutation.isPending || scanUploading || retryingFailedUploads}>{uploadMutation.isPending ? t("documents.uploading") : attachDocumentLabel}</button> : null}

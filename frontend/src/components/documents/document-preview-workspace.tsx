@@ -99,7 +99,7 @@ function PreviewFailure({ message, href, label, includeOpenAction = true }: { me
   );
 }
 
-function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, toolbar, utilityToolbar }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode; toolbar?: ReactNode; utilityToolbar?: ReactNode }) {
+function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, toolbar, utilityToolbar, hideThumbnail }: { document: RequestDocument; labels: DocumentPreviewLabels; includeOpenAction: boolean; annotationOverlay?: (pageNumber: number, rotation: number) => ReactNode; toolbar?: ReactNode; utilityToolbar?: ReactNode; hideThumbnail?: boolean }) {
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const src = viewUrl(document);
@@ -126,7 +126,7 @@ function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, 
           </div>
         </div>
       </div>
-      <div className="h-[120px] shrink-0 rounded-xl border border-border bg-muted/10 p-2">
+      {!hideThumbnail ? <div className="h-[120px] shrink-0 rounded-xl border border-border bg-muted/10 p-2">
         <div className="flex h-full items-center gap-2 overflow-x-auto" role="list" aria-label={labels.page}>
           <button
             type="button"
@@ -140,7 +140,7 @@ function ImagePreview({ document, labels, includeOpenAction, annotationOverlay, 
             <span className="text-[11px] font-semibold">1</span>
           </button>
         </div>
-      </div>
+      </div> : null}
       {utilityToolbar}
     </div>
   );
@@ -190,6 +190,7 @@ interface DocumentPreviewWorkspaceProps {
   onCreateAnnotation?: (input: { pageNumber: number; annotationType: "arrow" | "rectangle" | "freehand" | "text"; geometry: Record<string, unknown>; textContent?: string | null }) => void;
   utilityToolbarPlacement?: DocumentUtilityToolbarPlacement;
   initialPdfSizingMode?: PdfInitialSizingMode;
+  hideImageThumbnail?: boolean;
 }
 
 export function DocumentPreviewWorkspace({
@@ -206,6 +207,7 @@ export function DocumentPreviewWorkspace({
   onCreateAnnotation,
   utilityToolbarPlacement = "bottom",
   initialPdfSizingMode = "fit-page",
+  hideImageThumbnail = false,
 }: DocumentPreviewWorkspaceProps) {
   const { t, isArabic } = useLanguage();
   const labels = labelsFor(t);
@@ -250,7 +252,7 @@ export function DocumentPreviewWorkspace({
   if (kind === "image") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-1">
-        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} toolbar={toolbar} utilityToolbar={utilityToolbar} />
+        <ImagePreview document={document} labels={labels} includeOpenAction={!showOpenAction} annotationOverlay={annotationOverlay} toolbar={toolbar} utilityToolbar={utilityToolbar} hideThumbnail={hideImageThumbnail} />
       </div>
     );
   }
