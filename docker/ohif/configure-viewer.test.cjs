@@ -86,7 +86,7 @@ test('actual selected diagnostic frame failure triggers fallback once and remove
   assert.equal(await waiting.promise, false);
   f.viewport.rendered = true; f.target.dispatchEvent(new Event('render')); waiting.cancel();
   await Promise.resolve(); assert.equal(resolutions, 1);
-  assert.deepEqual(removals.sort(), ['error', 'failed', 'render']);
+  assert.deepEqual(removals.sort(), ['error', 'failed', 'render', 'rispro-series-selected']);
 });
 
 test('selected-frame failure cannot undo diagnostic pixels that have already rendered', async () => {
@@ -576,4 +576,45 @@ test('diagnostic preferences favor a multi-image CT/MRI over single-page documen
   assert.ok(preference({Modality:'MR',numImageFrames:4,SOPClassUID:'1.2.840.10008.5.1.4.1.1.4.1'})>preference(documents));
   assert.ok(preference(documents)+20>preference({Modality:'MR',numImageFrames:800}));
   assert.equal(diagnosticSeriesRules.some(rule=>rule.required),false);
+});
+
+
+test('manual selection settles only its viewport wait as superseded, never as a failed image', async () => {
+  const f = diagnosticGateFixture(); f.viewport.id = 'left';
+  const waiting = f.wait(); let outcome;
+  waiting.promise.then(value => { outcome = value; });
+  f.target.dispatchEvent(new CustomEvent('rispro-series-selected', { detail: { viewportId: 'right' } }));
+  await Promise.resolve(); assert.equal(outcome, undefined);
+  f.target.dispatchEvent(new CustomEvent('rispro-series-selected', { detail: { viewportId: 'left' } }));
+  assert.equal(await waiting.promise, 'superseded');
+  f.target.dispatchEvent(new CustomEvent('error', { detail: { imageId: f.viewport.imageId } }));
+  assert.equal(await waiting.promise, 'superseded');
+});
+
+test('progressive metadata delivery preserves raw instances for overlapping consumers and awaits publication', async () => {
+  const {deliverMetadata}=require('./configure-progressive.cjs');
+  const instances=[{SOPInstanceUID:'synthetic'}]; let published=false, release;
+  const barrier=new Promise(resolve=>{release=resolve;});
+  const metadata=deliverMetadata(Promise.resolve(instances),async value=>{
+    assert.equal(value,instances); await barrier; published=true;
+  });
+  let completed=false; metadata.then(()=>{completed=true;});
+  await Promise.resolve(); assert.equal(completed,false);
+  release(); assert.equal(await metadata,instances); assert.equal(published,true);
+  assert.deepEqual(await metadata.then(value=>value.map(v=>v.SOPInstanceUID)),['synthetic']);
+  await assert.rejects(deliverMetadata(Promise.reject(Error('metadata failed')),()=>{}),/metadata failed/);
+});
+
+test('progressive startup supersession never reapplies a hanging protocol or emits exhaustion', async () => {
+  let selected = false, release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const applied = [], failures = [];
+  const stop = await loadProgressively({
+    promises: [{ metadata: { SeriesInstanceUID: 'A' }, start: () => pending }],
+    services: { displaySetService: { getActiveDisplaySets: () => [] }, cornerstoneViewportService: { getCornerstoneViewport: () => ({}) }, viewportGridService: { getActiveViewportId: () => 'left' }, uiNotificationService: { show: x => failures.push(x) } },
+    apply: x => applied.push(x), waitForImage() { throw Error('obsolete wait'); }, isReady: () => true,
+    hasManualSelection: () => selected,
+  });
+  selected = true; release(); await new Promise(resolve => setImmediate(resolve));
+  stop(); assert.deepEqual(applied, []); assert.deepEqual(failures, []);
 });

@@ -40,6 +40,7 @@ const nativeBenchmark=process.env.OHIF_NATIVE_BENCHMARK==='1';
 const progressive=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='progressive';
 const dynamicMri=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='dynamic-mri';
 const resilience=process.env.OHIF_RESILIENCE_ACCEPTANCE==='1';
+const startupSelection=process.env.OHIF_STARTUP_SELECTION_ACCEPTANCE==='1';
 const recoveryCredentials={username:'native.'+randomUUID().slice(0,8),password:'synthetic-recovery-only'};
 const transportCounts={proxyFrames:0,authorizations:0};
 let benchmarkPort,dbNetworkConnected=false;
@@ -51,7 +52,7 @@ const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1';let workspaceFixture;
 // authorization for every static chunk. Keep that backend hop inside the same
 // disposable Docker network for Express as well as Native; Windows published-
 // port hairpins previously timed out before MR could even start.
-const dockerBackend=nativeDelivery || resilience;
+const dockerBackend=nativeDelivery || resilience || startupSelection;
 const reliability=responsive && process.env.OHIF_RELIABILITY==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
@@ -201,7 +202,11 @@ try{
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(dynamicMri){
+  if(startupSelection){
+    const {runStartupSelectionAcceptance}=await import('./ohif-startup-selection-browser.mjs');
+    await runStartupSelectionAcceptance({context,cases,origin,temp,archiveRequest,nativeDelivery,
+      launch:async c=>{const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});
+  }else if(dynamicMri){
     const {runDynamicMriAcceptance}=await import('./ohif-dynamic-mri-browser.mjs');
     await runDynamicMriAcceptance({context,cases,origin,temp,archiveRequest,
       launch:async c=>{const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});

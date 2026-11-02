@@ -2,6 +2,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+async function deliverMetadata(promise, deliver) {
+  const instances = await promise;
+  await deliver(instances);
+  // DeferredPromise.start() must keep returning the original metadata when a
+  // second consumer subscribes during startup or manual series selection.
+  return instances;
+}
+
 function prioritizeSeries(series, rules, search = '', metadataOf = value => value) {
   const params = new URLSearchParams(search);
   const selected = [...params].filter(([key]) => key.toLowerCase() === 'initialseriesinstanceuid')
@@ -30,18 +38,21 @@ function prioritizeSeries(series, rules, search = '', metadataOf = value => valu
 
 // Consumes OHIF DeferredPromises serially. Only metadata is bounded here;
 // Cornerstone continues to own every image request and interaction priority.
-async function loadProgressively({ promises, services, apply, waitForImage, isReady }) {
+async function loadProgressively({ promises, services, apply, waitForImage, isReady, hasManualSelection = () => false }) {
   let stopped = false;
   let cancelWait = () => {};
   const { displaySetService, cornerstoneViewportService, viewportGridService, uiNotificationService } = services;
   const viewport = () => cornerstoneViewportService.getCornerstoneViewport(viewportGridService.getActiveViewportId());
   const run = async () => {
     let rendered = false;
+    let superseded = hasManualSelection();
     for (const promise of promises) {
       if (stopped) return;
+      if (hasManualSelection()) { superseded = true; break; }
       try {
         await promise.start();
         if (stopped) return;
+        if (hasManualSelection()) { superseded = true; break; }
         const uid = promise.metadata.SeriesInstanceUID;
         const sets = displaySetService.getActiveDisplaySets().filter(ds => ds.SeriesInstanceUID === uid);
         if (!sets.some(ds => !ds.unsupported && ds.numImageFrames > 0 &&
@@ -49,8 +60,11 @@ async function loadProgressively({ promises, services, apply, waitForImage, isRe
         const waiting = waitForImage(viewport, uid);
         cancelWait = waiting.cancel;
         apply(uid);
-        rendered = await waiting.promise;
+        const outcome = await waiting.promise;
+        superseded = outcome === 'superseded' || hasManualSelection();
+        rendered = outcome === true;
         cancelWait();
+        if (superseded) break;
         if (rendered || stopped) break;
       } catch (error) {
         cancelWait();
@@ -58,7 +72,7 @@ async function loadProgressively({ promises, services, apply, waitForImage, isRe
       }
     }
     if (stopped) return;
-    if (!rendered) {
+    if (!rendered && !superseded) {
       // All candidates failed: expose upstream document fallback and an explicit
       // error, rather than a permanent loading overlay.
       apply();
@@ -71,7 +85,7 @@ async function loadProgressively({ promises, services, apply, waitForImage, isRe
     for (const promise of promises) {
       if (stopped) return;
       if (promise.internalPromise) continue;
-      if (rendered && !isReady(viewport())) {
+      if ((rendered || superseded) && !isReady(viewport())) {
         const waiting = waitForImage(viewport);
         cancelWait = waiting.cancel;
         await waiting.promise;
@@ -104,6 +118,9 @@ function waitForDiagnosticImage(getViewport, seriesUID, core, ready, target = do
     if (rendered) complete(true);
     return rendered;
   };
+  const supersede = event => {
+    if (!event.detail?.viewportId || event.detail.viewportId === getViewport()?.id) complete('superseded');
+  };
   const failure = event => {
     const v = getViewport(), id = event.detail?.imageId;
     if (settled || !matches(v) || !id) return;
@@ -120,10 +137,12 @@ function waitForDiagnosticImage(getViewport, seriesUID, core, ready, target = do
   const timer = setTimeout(() => { if (!check()) complete(false); }, timeoutMs);
   function cleanup() {
     clearTimeout(timer);
+    target.removeEventListener('rispro-series-selected', supersede);
     target.removeEventListener(events.IMAGE_RENDERED, check, true);
     target.removeEventListener(events.IMAGE_LOAD_ERROR, failure, true);
     core.eventTarget.removeEventListener(events.IMAGE_LOAD_FAILED, failure);
   }
+  target.addEventListener('rispro-series-selected', supersede);
   target.addEventListener(events.IMAGE_RENDERED, check, true);
   target.addEventListener(events.IMAGE_LOAD_ERROR, failure, true);
   core.eventTarget.addEventListener(events.IMAGE_LOAD_FAILED, failure);
@@ -142,10 +161,10 @@ function configureProgressive(root, diagnosticRules, ready) {
   const hp = 'extensions/default/src/getHangingProtocolModule.js';
   replace(hp, "  id: 'default',", "  id: 'default',\n  ...(window.config?.risproProgressiveLoading ? { hpInitiationCriteria: { minSeriesLoaded: 1 } } : {}),");
   const loader = 'extensions/default/src/DicomWebDataSource/wado/retrieveMetadataLoaderAsync.js';
-  replace(loader, 'export class DeferredPromise {', `${prioritizeSeries.toString()}\nconst risproDiagnosticRules = ${JSON.stringify(diagnosticRules)};\n\nexport class DeferredPromise {`);
+  replace(loader, 'export class DeferredPromise {', `${deliverMetadata.toString()}\n${prioritizeSeries.toString()}\nconst risproDiagnosticRules = ${JSON.stringify(diagnosticRules)};\n\nexport class DeferredPromise {`);
   replace(loader, '    this.internalPromise = this.processFunction();', `    this.internalPromise = this.processFunction();
     if (window.config?.risproProgressiveLoading && this.thenFunction) {
-      this.internalPromise = this.internalPromise.then(this.thenFunction);
+      this.internalPromise = deliverMetadata(this.internalPromise, this.thenFunction);
       this.thenFunction = undefined;
     }`);
   replace(loader, "const includeField = ['00080021', '00080031', '0008103E', '00200011'].join(',');",
@@ -155,7 +174,11 @@ function configureProgressive(root, diagnosticRules, ready) {
   const route = 'platform/app/src/routes/Mode/defaultRouteInit.ts';
   replace(route, "import getStudies from './studiesList';", "import getStudies from './studiesList';\nimport { loadProgressively, waitForImage, isReady, prioritizePromises } from './risproProgressive';");
   replace(route, 'function applyHangingProtocol() {\n    const displaySets = displaySetService.getActiveDisplaySets();',
-    "function applyHangingProtocol(progressiveSeriesUID = undefined) {\n    const displaySets = displaySetService.getActiveDisplaySets().filter(ds =>\n      typeof progressiveSeriesUID !== 'string' || ds.SeriesInstanceUID === progressiveSeriesUID);");
+    "function applyHangingProtocol(progressiveSeriesUID = undefined) {\n    if (manualSelection) return;\n    const displaySets = displaySetService.getActiveDisplaySets().filter(ds =>\n      typeof progressiveSeriesUID !== 'string' || ds.SeriesInstanceUID === progressiveSeriesUID);");
+  replace(route, '  const unsubscriptions = [];', `  let manualSelection = false;
+  const onManualSelection = () => { manualSelection = true; };
+  document.addEventListener('rispro-series-selected', onManualSelection);
+  const unsubscriptions = [() => document.removeEventListener('rispro-series-selected', onManualSelection)];`);
   replace(route, '  await Promise.allSettled(allRetrieves).then(async promises => {', `  const discovered = await Promise.allSettled(allRetrieves);
   const protocolId = Array.isArray(hangingProtocolId) ? hangingProtocolId[0] : hangingProtocolId;
   // SOP-only selection needs upstream all-series matching: QIDO cannot identify
@@ -164,10 +187,31 @@ function configureProgressive(root, diagnosticRules, ready) {
       (!initialSOPInstanceUID || initialSeriesInstanceUID)) {
     const series = prioritizePromises(discovered.flatMap(result => result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : []));
     unsubscriptions.push(await loadProgressively({ promises: series, services: servicesManager.services,
-      apply: applyHangingProtocol, waitForImage, isReady }));
+      apply: applyHangingProtocol, waitForImage, isReady, hasManualSelection: () => manualSelection }));
     return unsubscriptions;
   }
   await Promise.resolve(discovered).then(async promises => {`);
+  replace('extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx',
+    '    async displaySetInstanceUID => {',
+    `    async displaySetInstanceUID => {
+      document.dispatchEvent(new CustomEvent('rispro-series-selected', { detail: { viewportId: activeViewportId } }));`);
+  // Preserve the existing parallel thumbnail tasks, observing only their errors.
+  // forEach otherwise discards the rejected promise when an old series fails.
+  replace('extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx',
+    '    currentDisplaySets.forEach(async dSet => {',
+    '    currentDisplaySets.forEach(dSet => {\n      const loadThumbnail = async () => {');
+  replace('extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx',
+    '    });\n  }, [displaySetService, dataSource, getImageSrc, activeViewportId, hasLoadedViewports]);',
+    `      };
+      void loadThumbnail().catch(error => {
+        if (error?.name !== 'AbortError') console.warn('OHIF thumbnail unavailable', error);
+      });
+    });
+  }, [displaySetService, dataSource, getImageSrc, activeViewportId, hasLoadedViewports]);`);
+  replace('platform/app/src/components/ViewportGrid.tsx',
+    '  const onDropHandler = (viewportId, { displaySetInstanceUID }) => {',
+    `  const onDropHandler = (viewportId, { displaySetInstanceUID }) => {
+    document.dispatchEvent(new CustomEvent('rispro-series-selected', { detail: { viewportId } }));`);
   fs.writeFileSync(path.join(root, 'platform/app/src/routes/Mode/risproProgressive.js'),
     "import * as core from '@cornerstonejs/core';\n" + ready.toString() + '\n' +
     prioritizeSeries.toString() + '\n' + `const risproDiagnosticRules = ${JSON.stringify(diagnosticRules)};\n` +
@@ -179,4 +223,4 @@ export { loadProgressively };
 `);
 }
 
-module.exports = { configureProgressive, prioritizeSeries, loadProgressively, waitForDiagnosticImage };
+module.exports = { configureProgressive, prioritizeSeries, loadProgressively, waitForDiagnosticImage, deliverMetadata };
