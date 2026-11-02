@@ -1,8 +1,11 @@
 import express, { Request, Response, Router } from "express";
+import { env } from "../config/env.js";
+import jwt from 'jsonwebtoken';
 import { createFailureRateLimiter, createRateLimiter } from "../middleware/rate-limit.js";
 import { asyncRoute } from "../utils/async-route.js";
 import {
   authenticateUser,
+  refreshSession,
   buildSessionToken,
   buildSupervisorReauthToken,
   recordSuccessfulLogin,
@@ -12,7 +15,8 @@ import {
   writeSupervisorReauthCookie
 } from "../services/auth-service.js";
 import { logSecurityAuditEntry } from "../services/audit-service.js";
-import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAuth, optionalAuth, readToken, requireSameOriginSessionRequest } from "../middleware/auth.js";
+import { assertViewerLogin, revokeUserViewerContexts } from "../modules/ohif-viewer/repository.js";
 import { HttpError } from "../utils/http-error.js";
 import { asString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
@@ -83,6 +87,7 @@ authRouter.post(
       throw error;
     }
     usernameFailureLimiter.reset(username || "unknown");
+    if (body.viewerContextId) await assertViewerLogin(String(body.viewerContextId), user);
     await recordSuccessfulLogin(user.id, user.auth_version);
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
@@ -110,11 +115,28 @@ authRouter.post(
   })
 );
 
-authRouter.post("/logout", (_req: Request, res: Response) => {
+authRouter.post("/refresh", requireAuth, requireSameOriginSessionRequest, asyncRoute(async (req, res) => {
+  const current = requireCurrentUser(req as AuthSessionRequest);
+  writeSessionCookie(res, await refreshSession(current.sub, current.authVersion));
+  res.setHeader("Cache-Control", "private, no-store");
+  res.json({ user: { id: current.sub, role: current.role }, expiresAt: new Date(Date.now() + env.sessionHours * 3600000).toISOString() });
+}));
+
+authRouter.post("/logout", optionalAuth, asyncRoute(async (req: Request, res: Response) => {
+  let logoutUserId=req.user?.sub;
+  if(!logoutUserId) {
+    // A signed expired cookie can only revoke its own contexts here; it grants
+    // no read/write/renew authority. Logout must also end dormant viewer tabs.
+    try {
+      const token=jwt.verify(readToken(req),env.jwtSecret,{ignoreExpiration:true});
+      if(typeof token==='object' && token.purpose===undefined && Number.isSafeInteger(Number(token.sub)) && Number(token.sub)>0)logoutUserId=Number(token.sub);
+    } catch { /* Missing/invalid cookies still clear normally. */ }
+  }
+  if (logoutUserId) await revokeUserViewerContexts(logoutUserId);
   clearSupervisorReauthCookie(res);
   clearSessionCookie(res);
   res.status(204).end();
-});
+}));
 
 authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response) => {
   const request = req as AuthSessionRequest;

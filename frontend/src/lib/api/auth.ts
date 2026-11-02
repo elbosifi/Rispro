@@ -4,11 +4,20 @@ import type { User } from "@/types/api";
 
 type RawRecord = Record<string, unknown>;
 
+function notifyViewerSession(type: 'session-changed' | 'logout') {
+  // In-memory signal only: no credentials, user details or patient data.
+  if (typeof BroadcastChannel === 'undefined') return;
+  const channel = new BroadcastChannel('rispro-session');
+  channel.postMessage({ type });
+  channel.close();
+}
+
 export async function login(username: string, password: string): Promise<User> {
   const res = await api<{ user: RawRecord }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
   });
+  notifyViewerSession('session-changed');
   return mapUser(res.user);
 }
 
@@ -17,6 +26,7 @@ export async function changeOwnPassword(currentPassword: string, newPassword: st
     method: "POST",
     body: JSON.stringify({ currentPassword, newPassword })
   });
+  notifyViewerSession('session-changed');
   return mapUser(res.user);
 }
 
@@ -74,6 +84,7 @@ export async function disableOwnActionPin(currentPassword: string): Promise<{ ok
 }
 
 export async function logout() {
+  notifyViewerSession('logout');
   await api("/auth/logout", { method: "POST" });
 }
 
@@ -120,6 +131,7 @@ export async function getPasskeyLoginOptions(): Promise<Record<string, unknown>>
 
 export async function verifyPasskeyLogin(response: unknown): Promise<User> {
   const result = await api<{ user: RawRecord }>("/auth/passkeys/login/verify", { method: "POST", body: JSON.stringify({ response }) });
+  notifyViewerSession('session-changed');
   return mapUser(result.user);
 }
 

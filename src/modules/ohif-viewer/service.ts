@@ -21,6 +21,11 @@ import {
   enqueueRetrievalJob,
   findAuthorizedViewerSession,
   findViewerContext,
+  findRecoverableViewerContext,
+  extendViewerContext,
+  viewerSourceBinding,
+  studyIdentity,
+  sameStudyIdentity,
   findPacsWebEndpoint,
   findRetrievalJob,
   findStudyResolution,
@@ -288,11 +293,13 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
     }
 
     let priors: ImagingStudy[] = [];
+    let recoveryCandidates: ImagingStudy[] | undefined;
     if (includePriors && configuration.settings.allowPriorStudies && row.patientDicomId) {
       // The primary QIDO result must independently agree with the appointment's
       // DICOM identity before it can authorize a patient-wide search.
       if (adapter.strategy !== "authoritative_orthanc" || (currentStudy.patientId && currentStudy.patientId.trim() === row.patientDicomId.trim())) {
         const candidates = await adapter.searchStudiesByPatient(adapter.strategy === "authoritative_orthanc" ? currentStudy.patientId : row.patientDicomId);
+        recoveryCandidates = candidates;
         priors = adapter.strategy === "authoritative_orthanc"
           ? selectPatientHistory(candidates, currentStudy, row.patientDicomId, currentStudyUids)
             // An acquisition arriving between the two queries requires a fresh
@@ -320,13 +327,23 @@ export async function launchReportingBoardCaseInOhif(actor: Actor, appointmentId
       }
     }
     const permittedStudyUids = [...new Set([...currentStudyUids, ...priors.map((study) => study.studyInstanceUid)])];
+    let recoveryStudies = [...currentStudies, ...priors];
+    if (adapter.strategy !== 'authoritative_orthanc') {
+      recoveryCandidates ??= await adapter.searchStudiesByPatient(row.patientDicomId || '');
+      recoveryStudies = permittedStudyUids.map(uid => {
+        const matches = recoveryCandidates!.filter(s => s.studyInstanceUid === uid);
+        if (matches.length !== 1 || matches[0].patientId.trim() !== row.patientDicomId?.trim() ||
+            (currentStudyUids.includes(uid) && matches[0].accessionNumber.trim() !== row.accessionNumber.trim())) throw new HttpError(403, 'Viewer study identity is missing or conflicting.');
+        return matches[0];
+      });
+    }
     const { token, tokenHash } = createLaunchToken();
     const expiresAt = new Date(Date.now() + configuration.settings.launchTokenTtlSeconds * 1000);
     await createViewerLaunchSession({
       patientId: row.patientId, studyDate: currentStudy.studyDate,
       userId: actor.userId, appointmentId, sourcePacsNodeId: configuration.settings.selectedPacsNodeId,
       accessStrategy: configuration.settings.accessStrategy, currentStudyUid: currentStudy.studyInstanceUid,
-      currentStudyUids, permittedStudyUids, tokenHash, expiresAt,
+      currentStudyUids, permittedStudyUids, tokenHash, expiresAt, recoveryStudies,
     });
     await auditLaunch(actor, appointmentId, "ready", { currentStudyCount: currentStudyUids.length, priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
     logger.info("viewer_launch_ready", { appointmentId, currentStudyCount: currentStudyUids.length, priorStudyCount: priors.length, durationMs: Math.round(performance.now() - started) });
@@ -410,6 +427,47 @@ export async function authorizeViewerDicomWebRequest(input: {
     throw new HttpError(403, "This DICOMweb request is outside the authorized viewer session.");
   }
   return session;
+}
+
+// Recovery keeps the UUID, allowlist, primary and report association immutable.
+// An expired selector is accepted here only, never for diagnostic reads/writes.
+export async function renewViewerContext(actor: Actor & { authVersion: number; mustChangePassword?: boolean }, contextId: string) {
+  const session = await findRecoverableViewerContext(contextId, actor.userId);
+  const bound = session?.recoveryState;
+  const denied = () => new HttpError(403, 'Viewer authorization changed or the recovery window ended. Local work is retained.', { code: 'VIEWER_DENIED' });
+  if (!session || !bound || actor.mustChangePassword || bound.authVersion !== actor.authVersion || bound.role !== actor.appRole) throw denied();
+  const configuration = await readOhifViewerConfiguration();
+  if (!env.ohifEnabled || !configuration.settings.enabled || configuration.settings.accessStrategy !== session.accessStrategy || configuration.settings.selectedPacsNodeId !== session.sourcePacsNodeId ||
+      bound.source !== await viewerSourceBinding(session.accessStrategy, session.sourcePacsNodeId)) throw denied();
+  if (session.reportingStudyKey) {
+    const {authorizeWorkspaceViewer,recoveryStudy}=await import('../reporting/workspace-viewer-service.js');
+    const {requireStudy,verifyLiveStudy}=await import('../reporting/workspace-study-service.js');
+    await authorizeWorkspaceViewer(actor, session, session.permittedStudyUids);
+    for(const uid of session.permittedStudyUids) {
+      const rows=(await pool.query('select orthanc_study_id from historical_pacs_studies where study_instance_uid=$1',[uid])).rows;
+      if(rows.length!==1)throw denied();
+      const access=await requireStudy(actor,rows[0].orthanc_study_id,pool,false,'view');
+      const live=studyIdentity(recoveryStudy(await verifyLiveStudy(access.study)));
+      if(!sameStudyIdentity(live,bound.studies.find(s=>s.uid===uid)))throw denied();
+    }
+  } else {
+    const { row } = await getAuthorizedReportingBoardAppointmentRead(actor, session.appointmentId);
+    const resolution = await findStudyResolution(session.appointmentId, session.sourcePacsNodeId);
+    if (row.patientId !== session.patientId || resolution?.studyInstanceUid !== session.studyInstanceUid ||
+        row.patientDicomId?.trim() !== bound.studies.find(s => s.uid === session.studyInstanceUid)?.patientId ||
+        (row.studyInstanceUid && row.studyInstanceUid !== session.studyInstanceUid) || row.accessionNumber.trim() !== bound.studies.find(s => s.uid === session.studyInstanceUid)?.accession) throw denied();
+  }
+  if (bound.studies.length !== session.permittedStudyUids.length || !bound.studies[0]?.patientId) throw denied();
+  if(!session.reportingStudyKey) {
+    const live = await (await createImagingSourceAdapter(configuration)).searchStudiesByPatient(bound.studies[0].patientId);
+    for (const uid of session.permittedStudyUids) {
+      const expected = bound.studies.find(s => s.uid === uid), matches = live.filter(s => s.studyInstanceUid === uid);
+      if (!expected || matches.length !== 1 || !sameStudyIdentity(studyIdentity(matches[0]),expected)) throw denied();
+    }
+  }
+  const expiresAt = new Date(Date.now() + env.sessionHours * 3600000);
+  await extendViewerContext(session, expiresAt);
+  return { contextId, userId: session.userId, expiresAt: expiresAt.toISOString() };
 }
 
 export async function listViewerStudyUids(input: {

@@ -19,7 +19,7 @@ import {createWorkspaceReport,getWorkspaceStudy,saveWorkspaceDraft,finalizeWorks
 import {doctorDashboard,assignedWork} from './workspace-dashboard-service.js';
 import {getDoctorReportingAppointments} from '../doctor-portal/cases-service.js';
 import {launchWorkspaceStudyImages,authorizeWorkspaceViewer,workspaceViewerContext} from './workspace-viewer-service.js';
-import {authorizeViewerDicomWebRequest} from '../ohif-viewer/service.js';
+import {authorizeViewerDicomWebRequest,renewViewerContext} from '../ohif-viewer/service.js';
 import {env} from '../../config/env.js';
 import {findViewerContext,consumeViewerLaunchToken} from '../ohif-viewer/repository.js';
 import {hashLaunchToken} from '../ohif-viewer/validation.js';
@@ -33,6 +33,71 @@ import { readAppointmentSlipSettings } from '../appointments-v2/public/utils/app
 import { readPatientQrSettings } from '../appointments-v2/public/utils/patient-qr-settings.js';
 import { buildNativeReportHtml } from '../../services/generated-print-html-service.js';
 const prefix='wv2_'+Date.now(),settings:AuthoritativeOrthancSettings={enabled:true,baseUrl:'http://127.0.0.1:19481',username:'synthetic',password:'synthetic',timeoutSeconds:2,verifyTls:true,displayName:'Synthetic',autoExportClinicalDocuments:false,autoRouteEnabled:false,autoRouteDestinationKey:'',autoRouteDestinationKeys:[]};
+
+test('OHIF renewal and in-page login retain context identity and reject revoked or changed authority',async()=>{
+  const oldEnabled=env.ohifEnabled,config=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
+  const originalUser=(await pool.query('select * from users where id=$1',[doctor.userId])).rows[0];
+  const originalOther=(await pool.query('select * from users where id=$1',[other.userId])).rows[0];
+  const s=studies[212];let server:import('node:http').Server|undefined;
+  try {
+    env.ohifEnabled=true;
+    await pool.query("update ohif_viewer_settings set enabled=true,access_strategy='authoritative_orthanc',selected_pacs_node_id=null,allow_prior_studies=false where singleton_key=true");
+    const make=async()=>{
+      const launched=await launchWorkspaceStudyImages(doctor,s.orthancStudyId);
+      const session=await consumeViewerLaunchToken(hashLaunchToken(decodeURIComponent(launched.launchUrl.split('/').pop()!)),doctor.userId,hashLaunchToken('session-'+Math.random()),new Date(Date.now()+60000));assert.ok(session);return session;
+    };
+    const first=await make(),second=await make();const actor={...doctor,authVersion:originalUser.auth_version};
+    assert.equal((await renewViewerContext(actor,first.reportContextId)).contextId,first.reportContextId);
+    await pool.query("update viewer_launch_sessions set expires_at=now()-interval '12 hours' where id=$1",[first.id]);
+    assert.equal(await findViewerContext(first.reportContextId,doctor.userId),null);
+    assert.equal((await renewViewerContext(actor,first.reportContextId)).contextId,first.reportContextId);
+    const retained=await findViewerContext(first.reportContextId,doctor.userId);assert.ok(retained);
+    assert.deepEqual(retained.permittedStudyUids,first.permittedStudyUids);assert.equal(retained.reportingStudyKey,first.reportingStudyKey);assert.equal(retained.reportId,first.reportId);
+    await assert.rejects(()=>renewViewerContext({...actor,userId:other.userId},first.reportContextId));
+    await assert.rejects(()=>renewViewerContext({...actor,appRole:'supervisor'},first.reportContextId));
+    await pool.query("update users set role='supervisor' where id=$1",[doctor.userId]);
+    assert.equal(await findViewerContext(first.reportContextId,doctor.userId),null);await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));
+    await pool.query("update users set role='doctor',auth_version=auth_version+1 where id=$1",[doctor.userId]);
+    await assert.rejects(()=>renewViewerContext({...actor,authVersion:actor.authVersion+1},first.reportContextId));
+    await pool.query('update users set auth_version=$2 where id=$1',[doctor.userId,actor.authVersion]);
+    await pool.query('update users set is_active=false where id=$1',[doctor.userId]);await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));await pool.query('update users set is_active=true where id=$1',[doctor.userId]);
+    const patient=s.patientId;s.patientId='CHANGED';await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));s.patientId=patient;
+    __setAuthoritativeOrthancSettingsForTests({...settings,baseUrl:'http://127.0.0.1:19482'});await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));__setAuthoritativeOrthancSettingsForTests(settings);
+    const profile=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[doctor.userId])).rows[0].id;
+    await pool.query('update doctor_portal.doctor_modality_permissions set can_report=false where doctor_id=$1',[profile]);await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));await pool.query('update doctor_portal.doctor_modality_permissions set can_report=true where doctor_id=$1',[profile]);
+    await pool.query('update viewer_launch_sessions set revoked_at=now() where id=$1',[first.id]);await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));
+    assert.equal((await renewViewerContext(actor,second.reportContextId)).contextId,second.reportContextId);
+    await pool.query("update viewer_launch_sessions set revoked_at=null,expires_at=now()-interval '25 hours' where id=$1",[first.id]);await assert.rejects(()=>renewViewerContext(actor,first.reportContextId));
+    const {cleanupExpiredViewerSessionsAndJobs,findRecoverableViewerContext}=await import('../ohif-viewer/repository.js');
+    await pool.query("update viewer_launch_sessions set expires_at=now()-interval '23 hours' where id=$1",[first.id]);
+    await cleanupExpiredViewerSessionsAndJobs(24);assert.ok(await findRecoverableViewerContext(first.reportContextId,doctor.userId));
+
+    const express=(await import('express')).default,cookies=(await import('cookie-parser')).default;
+    const {authRouter}=await import('../../routes/auth.js'),{ohifViewerRouter}=await import('../ohif-viewer/routes.js'),{errorHandler}=await import('../../middleware/error-handler.js');
+    const {buildSessionToken}=await import('../../services/auth-service.js'),jwt=(await import('jsonwebtoken')).default,bcrypt=(await import('bcryptjs')).default;
+    const app=express();app.use(express.json(),cookies());app.use('/api/auth',authRouter);app.use('/api/ohif',ohifViewerRouter);app.use(errorHandler);
+    server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server!.once('listening',r));const address=server.address();assert.ok(address&&typeof address==='object');const origin=`http://127.0.0.1:${address.port}`;
+    await pool.query('update users set password_hash=$2 where id=$1',[doctor.userId,await bcrypt.hash('synthetic-recovery-password',4)]);
+    const cookie=(token:string)=>({Cookie:env.cookieName+'='+token,'Content-Type':'application/json'});
+    const fresh=buildSessionToken(originalUser);
+    const refresh=await fetch(origin+'/api/auth/refresh',{method:'POST',headers:cookie(fresh)});assert.equal(refresh.status,200);assert.match(refresh.headers.get('set-cookie')||'',/HttpOnly/i);assert.match(refresh.headers.get('set-cookie')||'',/SameSite=/i);
+    const crossSite=await fetch(origin+'/api/auth/refresh',{method:'POST',headers:{...cookie(fresh),Origin:'http://different-origin.invalid'}});assert.equal(crossSite.status,403);assert.equal(crossSite.headers.get('set-cookie'),null);
+    const expired=jwt.sign({sub:doctor.userId,role:'doctor',authVersion:actor.authVersion},env.jwtSecret,{expiresIn:-1});
+    const expiry=await fetch(origin+'/api/auth/refresh',{method:'POST',headers:cookie(expired)});assert.equal(expiry.status,401);assert.equal((await expiry.json()).error.details.code,'AUTH_EXPIRED');
+    const login=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:originalUser.username,password:'synthetic-recovery-password',viewerContextId:second.reportContextId})});assert.equal(login.status,200);
+    const renewedCookie=login.headers.get('set-cookie')!.split(';')[0];
+    const renewed=await fetch(origin+'/api/ohif/contexts/'+second.reportContextId+'/renew',{method:'POST',headers:{Cookie:renewedCookie}});assert.equal(renewed.status,200);assert.equal((await renewed.json()).contextId,second.reportContextId);
+    await pool.query('update users set password_hash=$2 where id=$1',[other.userId,await bcrypt.hash('synthetic-other-password',4)]);
+    const wrongUser=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:originalOther.username,password:'synthetic-other-password',viewerContextId:second.reportContextId})});assert.equal(wrongUser.status,403);assert.equal(wrongUser.headers.get('set-cookie'),null);
+    const logout=await fetch(origin+'/api/auth/logout',{method:'POST',headers:cookie(expired)});assert.equal(logout.status,204);await assert.rejects(()=>renewViewerContext(actor,second.reportContextId));
+  } finally {
+    if(server)await new Promise<void>(r=>{server!.closeAllConnections();server!.close(()=>r());});env.ohifEnabled=oldEnabled;
+    await pool.query('update users set role=$2,auth_version=$3,is_active=$4,password_hash=$5 where id=$1',[doctor.userId,originalUser.role,originalUser.auth_version,originalUser.is_active,originalUser.password_hash]);
+    await pool.query('update users set password_hash=$2 where id=$1',[other.userId,originalOther.password_hash]);__setAuthoritativeOrthancSettingsForTests(settings);
+    await pool.query('update doctor_portal.doctor_modality_permissions set can_report=true where doctor_id=(select id from doctor_portal.doctor_profiles where user_id=$1)',[doctor.userId]);
+    await pool.query('update ohif_viewer_settings set enabled=$1,access_strategy=$2,selected_pacs_node_id=$3,allow_prior_studies=$4 where singleton_key=true',[config.enabled,config.access_strategy,config.selected_pacs_node_id,config.allow_prior_studies]);
+  }
+});
 let doctor:Actor,other:Actor,manager:Actor,noSign:Actor,upstreamUnavailable=false;
 let originalPolicy:unknown,originalSonic:unknown,originalSonicConfig:unknown,originalSync:Record<string,unknown>;
 let verifiedDisposable=false;const bookingIds:number[]=[],patientIds:number[]=[],policySetIds:number[]=[];

@@ -8,6 +8,12 @@ import type {Actor} from '../doctor-portal/reporting-board-service.js';
 import {getWorkspaceReport,getWorkspaceStudy,workspaceStudyRegistry} from './workspace-report-service.js';
 import {transaction} from './reporting-service.js';
 import {requireStudy,verifyLiveStudy,modality,archiveStatus} from './workspace-study-service.js';
+import type {OrthancStudyDetails} from '../../services/authoritative-orthanc-service.js';
+
+export function recoveryStudy(remote:OrthancStudyDetails) {
+  return {studyInstanceUid:remote.studyInstanceUid||'',patientId:remote.patientId||'',patientIdIssuer:remote.patientIdIssuer||'',accessionNumber:remote.accessionNumber||'',
+    modality:remote.modalitiesInStudy.join('\\'),studyDate:remote.studyDate||'',studyDescription:remote.studyDescription||'',patientName:''};
+}
 
 export async function authorizeWorkspaceViewer(actor:Actor,session:ViewerLaunchSessionRecord,requestedUids:string[] = []) {
   const linked=(await pool.query('select * from native_reporting_studies where id=$1',[session.reportingStudyKey])).rows[0];
@@ -32,6 +38,7 @@ export async function launchWorkspaceStudyImages(actor:Actor,key:string,reportId
   if(!a.policy.enabled)throw new HttpError(404,'Doctor Workspace V2 is disabled.');
   if(!env.ohifEnabled||!configuration.settings.enabled||configuration.settings.accessStrategy!=='authoritative_orthanc')throw new HttpError(409,'Enable the existing authoritative Orthanc OHIF integration to view images.');
   const remote=await verifyLiveStudy(a.study);
+  const recoveryStudies=[recoveryStudy(remote)];
   const allowed=new Set(a.me.allowedModalities.filter(p=>p.active&&p.canReport).map(p=>modality(p.modalityCode||'')));
   const remoteCodes=remote.modalitiesInStudy.map(modality).filter(c=>!['SR','PR','SEG','KO','DOC'].includes(c));
   if(!remoteCodes.length||remoteCodes.some(c=>!allowed.has(c)))throw new HttpError(403,'Reporting permission is required for every diagnostic modality in the live study.');
@@ -52,7 +59,7 @@ export async function launchWorkspaceStudyImages(actor:Actor,key:string,reportId
         if(rows.length!==1)return null;
         const p=await requireStudy(actor,rows[0].orthanc_study_id,pool,false,'view');
         if(p.study.patient_id!==a.study.patient_id||p.freshness.archiveKey!==a.freshness.archiveKey)return null;
-        await verifyLiveStudy(p.study);return p.study.study_instance_uid;
+        const live=await verifyLiveStudy(p.study);recoveryStudies.push(recoveryStudy(live));return p.study.study_instance_uid;
       } catch{return null;}
     }));
     permittedStudyUids=[...new Set([a.study.study_instance_uid,...verified.filter((uid):uid is string=>uid!==null)])];
@@ -65,7 +72,7 @@ export async function launchWorkspaceStudyImages(actor:Actor,key:string,reportId
     // or adopts a report, and a failed session insert rolls the identity back.
     const registry=await workspaceStudyRegistry(db,a,false);
     await createViewerLaunchSession({userId:actor.userId,appointmentId:a.appointment?Number(a.appointment.id):null,sourcePacsNodeId:null,accessStrategy:'authoritative_orthanc',currentStudyUid:a.study.study_instance_uid,
-      permittedStudyUids,tokenHash,expiresAt:new Date(Date.now()+configuration.settings.launchTokenTtlSeconds*1000),studyDate:a.study.study_date||'',reportingStudyKey:registry.id,reportId},db);
+      permittedStudyUids,tokenHash,expiresAt:new Date(Date.now()+configuration.settings.launchTokenTtlSeconds*1000),studyDate:a.study.study_date||'',reportingStudyKey:registry.id,reportId,recoveryStudies},db);
   });
   return {status:'ready',launchUrl:'/api/ohif/launch/'+encodeURIComponent(token),openMode:configuration.settings.openMode};
 }

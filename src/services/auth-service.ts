@@ -84,6 +84,16 @@ export async function recordSuccessfulLogin(userId: UserId, authVersion: number)
   if (!result.rowCount) throw new HttpError(401, "Session expired. Please sign in again.");
 }
 
+// Called only after requireAuth has verified the cookie and current DB version.
+export async function refreshSession(userId: UserId, authVersion: number): Promise<string> {
+  const { rows } = await pool.query<AuthUserRow>(
+    `select * from users where id=$1 and is_active=true and auth_version=$2`,
+    [Number(userId), authVersion]
+  );
+  if (!rows[0]) throw new HttpError(403, "Session access was revoked.", { code: "SESSION_REVOKED" });
+  return buildSessionToken(rows[0]);
+}
+
 export interface CurrentSessionUser {
   id: UserId;
   username: string;

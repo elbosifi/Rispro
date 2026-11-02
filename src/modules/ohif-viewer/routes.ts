@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { Router, type Request, type Response } from "express";
 import { env } from "../../config/env.js";
 import { httpsCookieName } from "../automatic-https/https-transport.js";
-import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../../middleware/auth.js";
+import { requireAuth, requireRecentSupervisorReauth, requireSupervisor, requireSameOriginSessionRequest } from "../../middleware/auth.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
 import { asyncRoute } from "../../utils/async-route.js";
@@ -12,6 +12,7 @@ import { ohifNativeAuthorizationRouter } from "./native-authorization.js";
 import { readOhifViewerConfiguration } from "./repository.js";
 import {
   exchangeViewerLaunchToken,
+  renewViewerContext,
   getOhifAdminConfiguration,
   getRetrievalStatusForDoctor,
   listViewerStudyUids,
@@ -42,6 +43,14 @@ function positiveInteger(value: unknown, field: string): number {
 
 export const ohifViewerRouter = Router();
 ohifViewerRouter.use("/native", ohifNativeAuthorizationRouter);
+
+ohifViewerRouter.post('/contexts/:contextId/renew', requireAuth, requireSameOriginSessionRequest, asyncRoute(async (req, res) => {
+  const contextId = String(req.params.contextId);
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(contextId)) throw new HttpError(400, 'Invalid viewer context.');
+  const current = user(req);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json(await renewViewerContext({ ...actor(req), authVersion: Number(current.authVersion ?? 0), mustChangePassword: current.mustChangePassword }, contextId));
+}));
 
 ohifViewerRouter.get(
   "/availability",

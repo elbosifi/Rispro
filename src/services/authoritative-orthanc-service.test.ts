@@ -27,6 +27,11 @@ test("connects without authentication and validates the compact system response"
   assert.deepEqual(await new service.AuthoritativeOrthancClient(enabled).getSystem(), { name: "Authoritative", version: "1.12.4", apiVersion: "19" });
 });
 
+test('retains the patient ID issuer for live viewer recovery identity checks',async()=>{
+  service.__setAuthoritativeOrthancFetchForTests(async()=>json(study({IssuerOfPatientID:'SYNTHETIC-ISSUER'})));
+  assert.equal((await new service.AuthoritativeOrthancClient(enabled).getStudyForIndex('study'))?.patientIdIssuer,'SYNTHETIC-ISSUER');
+});
+
 test("uses optional Basic Authentication and normalizes authentication failures", async () => {
   const settings = { ...enabled, username: "rispro", password: "secret" };
   service.__setAuthoritativeOrthancFetchForTests(async (_url, init) => { assert.equal(new Headers(init?.headers).get("authorization"), "Basic cmlzcHJvOnNlY3JldA=="); return json({}, 401); });

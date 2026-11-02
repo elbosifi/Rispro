@@ -1,11 +1,14 @@
 import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { connection } from './connection';
+import ConnectionDialog from './ConnectionDialog';
 import { Button } from '@ohif/ui-next';
 import { createReportStore } from './report-store';
 import { createCaptureAdapter } from './capture';
 import ReportPanel from './ReportPanel';
 
 const id='@rispro/extension-reporting',panel=id+'.panelModule.report';
-let store,adapter,subscriptions=[],beforeUnload;
+let store,adapter,subscriptions=[],beforeUnload,connectionRoot,connectionNode,stopConnection;
 function show(servicesManager) {
   const service=servicesManager.services.panelService;
   // v3.12.6's wrapper retains closedManually even for forceActive. Its layout
@@ -23,8 +26,13 @@ const extension={
   onModeEnter({servicesManager,commandsManager}) {
     const contextId=new URLSearchParams(window.location.search).get('risproContext');
     if(!contextId)return;
+    if(connection){
+      connectionNode=document.createElement('div');document.body.appendChild(connectionNode);
+      connectionRoot=createRoot(connectionNode);connectionRoot.render(<ConnectionDialog connection={connection}/>);
+      stopConnection=connection.start();
+    }
     adapter=createCaptureAdapter(servicesManager,commandsManager);
-    store=createReportStore({contextId,captureViewport:adapter.capture,locateSource:adapter.locate});
+    store=createReportStore({contextId,captureViewport:adapter.capture,locateSource:adapter.locate,connection});
     const activeStore=store;
     beforeUnload=e=>{if(store.hasUnsaved()){e.preventDefault();e.returnValue='';}};
     window.addEventListener('beforeunload',beforeUnload);
@@ -45,6 +53,6 @@ const extension={
       }
     }).catch(error=>{if(store===activeStore){store.setError(error);install();}});
   },
-  onModeExit(){subscriptions.forEach(s=>s.unsubscribe());subscriptions=[];window.removeEventListener('beforeunload',beforeUnload);store?.destroy();adapter?.destroy();store=null;adapter=null;},
+  onModeExit(){subscriptions.forEach(s=>s.unsubscribe());subscriptions=[];stopConnection?.();connectionRoot?.unmount();connectionNode?.remove();window.removeEventListener('beforeunload',beforeUnload);store?.destroy();adapter?.destroy();store=null;adapter=null;},
 };
 export default extension;

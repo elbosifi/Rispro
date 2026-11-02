@@ -41,6 +41,20 @@ describe("auth API contracts", () => {
     expect(api).toHaveBeenNthCalledWith(4, "/action-pin/disable", { method: "POST", body: JSON.stringify({ currentPassword: "password" }) });
   });
 
+  it('signals viewer session changes and logout without sending credentials or user data', async () => {
+    const messages: unknown[]=[];
+    class Channel {
+      constructor(name:string){expect(name).toBe('rispro-session');}
+      postMessage(message:unknown){messages.push(message);}
+      close(){}
+    }
+    vi.stubGlobal('BroadcastChannel',Channel);
+    try {
+      await login('doctor','secret');await changeOwnPassword('secret','new-secret');await logout();
+      expect(messages).toEqual([{type:'session-changed'},{type:'session-changed'},{type:'logout'}]);
+    } finally {vi.unstubAllGlobals();}
+  });
+
   it("maps the current session bilingual name fields", async () => {
     vi.mocked(api).mockResolvedValueOnce({
       user: { id: 7, username: "doctor", full_name: "الطبيب", english_name: "The Doctor", role: "doctor" },

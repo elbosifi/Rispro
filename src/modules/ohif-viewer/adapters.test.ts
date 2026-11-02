@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 process.env.DATABASE_URL ||= "postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test";
 process.env.JWT_SECRET ||= "test-secret-test-secret-test-secret";
 
-const { ImagingSourceError, NativeDicomWebSourceAdapter, proxyNativeDicomWebRequest } = await import("./adapters.js");
+const { ImagingSourceError, NativeDicomWebSourceAdapter, proxyNativeDicomWebRequest, streamFetch } = await import("./adapters.js");
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -61,16 +61,14 @@ describe("NativeDicomWebSourceAdapter", () => {
     let combined: AbortSignal | null | undefined;
     globalThis.fetch = async (_url, init) => { combined = init?.signal; return new Response("ok"); };
     const caller = new AbortController();
-    await proxyNativeDicomWebRequest({ ...endpoint(), timeoutSeconds: 1 }, "/studies/1.2.3/metadata", {}, caller.signal);
-    // The caller signal must not replace the configured source timeout.
+    const response=await proxyNativeDicomWebRequest({ ...endpoint(), timeoutSeconds: 1 }, "/studies/1.2.3/metadata", {}, caller.signal);
+    await response.arrayBuffer();
+    // A completed transfer must remove its idle timer. Ordinary REST deadlines
+    // no longer abort successful DICOMweb responses after a total one second.
     assert.ok(combined);
     assert.equal(combined.aborted, false);
-    let timeoutDeadline: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([new Promise<void>((resolve) => combined!.addEventListener("abort", () => resolve(), { once: true })), new Promise<never>((_resolve, reject) => {
-        timeoutDeadline = setTimeout(() => reject(new Error("Source timeout was lost")), 2000);
-      })]);
-    } finally { clearTimeout(timeoutDeadline); }
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    assert.equal(combined.aborted,false);
     assert.equal(caller.signal.aborted, false);
   });
 
@@ -105,6 +103,33 @@ describe("NativeDicomWebSourceAdapter", () => {
       return true;
     });
     assert.equal(authorization, `Basic ${Buffer.from("viewer:secret").toString("base64")}`);
+  });
+});
+
+describe('DICOMweb streaming deadlines',()=>{
+  it('preserves slow progressing multipart bytes and Range headers beyond the REST deadline',async(t)=>{
+    const bytes=Buffer.from('--boundary\r\nContent-Type: application/octet-stream\r\n\r\n0123456789\r\n--boundary--');
+    const server=createServer((req,res)=>{
+      assert.equal(req.headers.range,'bytes=0-99');
+      res.writeHead(206,{'Content-Type':'multipart/related; boundary=boundary','Content-Range':'bytes 0-99/100'});
+      let i=0;const timer=setInterval(()=>{if(i>=bytes.length){clearInterval(timer);res.end();}else res.write(bytes.subarray(i,i+=8));},25);
+      res.once('close',()=>clearInterval(timer));
+    });
+    await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+    t.after(()=>new Promise<void>(r=>{server.closeAllConnections();server.close(()=>r());}));
+    const address=server.address();assert.ok(address&&typeof address==='object');
+    const response=await streamFetch(`http://127.0.0.1:${address.port}`,{timeoutSeconds:0.01,headers:{Range:'bytes=0-99'}},{firstResponseMs:1000,idleMs:150});
+    assert.equal(response.status,206);assert.equal(response.headers.get('content-range'),'bytes 0-99/100');
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+  });
+  it('bounds first-response and transfer-idle stalls independently',async(t)=>{
+    const server=createServer((req,res)=>{if(req.url==='/idle'){res.writeHead(200);res.write('first');}});
+    await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+    t.after(()=>new Promise<void>(r=>{server.closeAllConnections();server.close(()=>r());}));
+    const address=server.address();assert.ok(address&&typeof address==='object');const origin=`http://127.0.0.1:${address.port}`;
+    await assert.rejects(()=>streamFetch(origin+'/headers',{timeoutSeconds:10},{firstResponseMs:80,idleMs:1000}),ImagingSourceError);
+    const response=await streamFetch(origin+'/idle',{timeoutSeconds:10},{firstResponseMs:1000,idleMs:80});
+    await assert.rejects(()=>response.arrayBuffer());
   });
 });
 

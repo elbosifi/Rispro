@@ -372,12 +372,19 @@ export async function proxyAuthoritativeOrthancDicomWebRequest(relativePath: str
   });
 }
 
-async function streamFetch(url: string, options: RequestInit & { timeoutSeconds: number; verifyTls?: boolean }): Promise<Response> {
+export async function streamFetch(url: string, options: RequestInit & { timeoutSeconds: number; verifyTls?: boolean }, deadlines = { firstResponseMs: 60000, idleMs: 300000 }): Promise<Response> {
+  const controller = new AbortController();
+  const abort = () => controller.abort(options.signal?.reason);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => controller.abort(new DOMException('DICOMweb transfer stalled.', 'TimeoutError')), ms); timer.unref?.(); };
+  const cleanup = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); };
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
+  arm(deadlines.firstResponseMs);
   try {
-    const timeoutSignal = AbortSignal.timeout(Math.max(1, options.timeoutSeconds) * 1000);
     const init: RequestInit & { dispatcher?: unknown } = {
       ...options,
-      signal: options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal,
+      signal: controller.signal,
     };
     delete (init as Partial<typeof options>).timeoutSeconds;
     delete (init as Partial<typeof options>).verifyTls;
@@ -386,8 +393,25 @@ async function streamFetch(url: string, options: RequestInit & { timeoutSeconds:
       const undici = await import("undici");
       init.dispatcher = new undici.Agent({ connect: { rejectUnauthorized: false } });
     }
-    return await fetch(url, init);
+    const response = await fetch(url, init);
+    clearTimeout(timer);
+    if (!response.body) { cleanup(); return response; }
+    const reader = response.body.getReader();
+    arm(deadlines.idleMs);
+    const body = new ReadableStream<Uint8Array>({
+      async pull(stream) {
+        try {
+          const next = await reader.read();
+          if (next.done) { cleanup(); stream.close(); return; }
+          arm(deadlines.idleMs);
+          stream.enqueue(next.value);
+        } catch (error) { cleanup(); stream.error(error); }
+      },
+      async cancel(reason) { controller.abort(reason); cleanup(); await reader.cancel(reason); },
+    });
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch (error) {
+    cleanup();
     throw sourceError(error);
   }
 }

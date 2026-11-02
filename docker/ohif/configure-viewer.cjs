@@ -97,6 +97,7 @@ function isDiagnosticReady(viewport, renderedStatus) {
 const loadingSource = `import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { Button, useImageViewer, useViewportGrid } from '@ohif/ui-next';
 import { cache, eventTarget, Enums } from '@cornerstonejs/core';
+import { retryDiagnosticImage } from '../../rispro-reporting/src/image-recovery';
 
 ${trackCachedFrames.toString()}
 ${isDiagnosticReady.toString()}
@@ -166,12 +167,20 @@ export function useFirstDiagnosticImage(servicesManager, enabled) {
   return state;
 }
 
-export function InitialImageLoading({ state }) {
+export function InitialImageLoading({ state, servicesManager }) {
+  const [retryError, setRetryError] = useState('');
+  const retry = async () => {
+    try {
+      const services = servicesManager.services;
+      const viewport = services.cornerstoneViewportService.getCornerstoneViewport(services.viewportGridService.getActiveViewportId());
+      await retryDiagnosticImage(viewport); setRetryError('');
+    } catch (error) { setRetryError(error.message); }
+  };
   if (state === 'ready') return null;
   return <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center">
     <div className="bg-black p-4 text-white" role={state === 'error' ? 'alert' : 'status'}>
       {state === 'error' ? <><p>Unable to load the diagnostic image.</p>
-        <Button className="pointer-events-auto" onClick={() => window.location.reload()}>Retry</Button></> :
+        {retryError && <p>{retryError}</p>}<Button className="pointer-events-auto" onClick={retry}>Retry</Button></> :
         <><progress aria-label="Preparing first diagnostic image" /><p>Preparing first diagnostic image…</p></>}
     </div>
   </div>;
@@ -232,7 +241,7 @@ function configureLoading(root) {
   source = source.slice(0, start) + source.slice(end + '  }, [hangingProtocolService]);'.length);
   fs.writeFileSync(filename, source);
   replace(layout, '{showLoadingIndicator && <LoadingIndicatorProgress className="h-full w-full bg-black" />}',
-    '<InitialImageLoading state={initialImageState} />');
+    '<InitialImageLoading state={initialImageState} servicesManager={servicesManager} />');
   const panel = 'extensions/default/src/Panels/StudyBrowser/PanelStudyBrowser.tsx';
   replace(panel, 'const { sortStudyInstances', "import { useActiveCachedFrames, CachedFrames } from '../../RisproLoading';\n\nconst { sortStudyInstances");
   replace(panel, '  const [activeTabName, setActiveTabName]',
@@ -381,6 +390,20 @@ function configureUsability(root) {
 }
 
 function configureViewer(root) {
+  const integrate = (file, anchor, replacement) => {
+    const name = path.join(root, file), source = fs.readFileSync(name, 'utf8').replaceAll('\r\n', '\n');
+    if (source.split(anchor).length !== 2) throw Error('Pinned OHIF connection integration changed: ' + file);
+    fs.writeFileSync(name, source.replace(anchor, replacement));
+  };
+  integrate('extensions/default/src/DicomWebDataSource/index.ts', "import { api } from 'dicomweb-client';",
+    "import { api } from 'dicomweb-client';\nimport { protectDicomClient } from '../../../rispro-reporting/src/connection';");
+  integrate('extensions/default/src/DicomWebDataSource/index.ts', ': new api.DICOMwebClient(wadoConfig);',
+    ': new api.DICOMwebClient(wadoConfig);\n      protectDicomClient(qidoDicomWebClient);\n      protectDicomClient(wadoDicomWebClient);');
+  integrate('extensions/cornerstone/src/initWADOImageLoader.js', "import dicomImageLoader from '@cornerstonejs/dicom-image-loader';",
+    "import dicomImageLoader from '@cornerstonejs/dicom-image-loader';\nimport { installImageRecovery, trackImageRequest } from '../../rispro-reporting/src/image-recovery';");
+  integrate('extensions/cornerstone/src/initWADOImageLoader.js', 'beforeSend: function (xhr) {',
+    'beforeSend: function (xhr, imageId) {\n      trackImageRequest(imageId, xhr);');
+  integrate('extensions/cornerstone/src/initWADOImageLoader.js', '  });\n}', '  });\n  installImageRecovery(dicomImageLoader);\n}');
   require('./configure-dynamic-mri.cjs').configureDynamicMri(root);
   configureProgressive(root, diagnosticSeriesRules, isDiagnosticReady);
   configureUsability(root);

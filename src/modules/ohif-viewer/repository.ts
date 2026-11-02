@@ -1,4 +1,7 @@
 import { pool } from "../../db/pool.js";
+import { createHash } from "node:crypto";
+import { readAuthoritativeOrthancSettings } from "../../services/authoritative-orthanc-service.js";
+import { resolveOrthancSettings } from "../../services/orthanc-settings-resolver.js";
 import type { DbExecutor } from "../../types/db.js";
 import type { UserId } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -198,7 +201,9 @@ export async function createViewerLaunchSession(input: {
   userId: UserId; appointmentId: number | null; sourcePacsNodeId: number | null; accessStrategy: OhifAccessStrategy;
   currentStudyUid: string; currentStudyUids?: string[]; permittedStudyUids: string[]; tokenHash: string; expiresAt: Date;
   patientId?: number; studyDate?: string; reportingStudyKey?:string;reportId?:number;
+  recoveryStudies?: ImagingStudy[];
 }, db: Pick<import('pg').PoolClient,'query'> = pool): Promise<number> {
+  const source = await viewerSourceBinding(input.accessStrategy, input.sourcePacsNodeId);
   const result = await db.query<{ id: string }>(
     `insert into viewer_launch_sessions
       (user_id,case_id,appointment_id,source_pacs_node_id,access_strategy,study_instance_uid,permitted_study_uids,token_hash,expires_at,reporting_patient_id,primary_study_date,reporting_study_key,reporting_report_id,case_type,current_study_uids)
@@ -207,10 +212,15 @@ export async function createViewerLaunchSession(input: {
      JSON.stringify(input.permittedStudyUids), input.tokenHash, input.expiresAt.toISOString(), input.patientId ?? null, input.studyDate ?? null,input.reportingStudyKey??null,input.reportId??null,
      JSON.stringify(input.currentStudyUids ?? [input.currentStudyUid])]
   );
+  await db.query(`update viewer_launch_sessions set recovery_state=jsonb_build_object(
+    'authVersion',u.auth_version,'role',u.role,'source',$2::text,'studies',$3::jsonb)
+    from users u where viewer_launch_sessions.id=$1 and u.id=viewer_launch_sessions.user_id`,
+    [result.rows[0]?.id, source, JSON.stringify((input.recoveryStudies ?? []).map(studyIdentity))]);
   return Number(result.rows[0]?.id);
 }
 
 export interface ViewerLaunchSessionRecord {
+  recoveryState?: { authVersion: number; role: string; source: string; studies: ReturnType<typeof studyIdentity>[] } | null;
   reportingStudyKey?:string|null; reportId?:number|null;
   reportContextId: string;
   patientId: number | null; studyDate: string | null;
@@ -221,6 +231,7 @@ export interface ViewerLaunchSessionRecord {
 
 function launchSessionRow(row: Row): ViewerLaunchSessionRecord {
   return {
+    recoveryState: row.recovery_state as ViewerLaunchSessionRecord['recoveryState'],
     id: Number(row.id), userId: Number(row.user_id), appointmentId: Number(row.appointment_id),
     reportingStudyKey:nullableText(row.reporting_study_key),reportId:row.reporting_report_id==null?null:Number(row.reporting_report_id),
     reportContextId: String(row.report_context_id || ""),
@@ -252,7 +263,9 @@ export async function consumeViewerLaunchToken(
 export async function findAuthorizedViewerSession(viewerSessionTokenHash: string, userId: UserId, executor: DbExecutor = pool): Promise<ViewerLaunchSessionRecord | null> {
   const result = await executor.query<Row>(
     `select * from viewer_launch_sessions where viewer_session_token_hash=$1 and user_id=$2 and used_at is not null
-     and revoked_at is null and expires_at>now() limit 1`, [viewerSessionTokenHash, userId]
+     and revoked_at is null and expires_at>now()
+     and (recovery_state is null or exists(select 1 from users u where u.id=user_id and u.is_active=true
+       and u.auth_version=(recovery_state->>'authVersion')::integer and u.role=recovery_state->>'role')) limit 1`, [viewerSessionTokenHash, userId]
   );
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
@@ -262,8 +275,49 @@ export async function findAuthorizedViewerSession(viewerSessionTokenHash: string
 export async function findViewerContext(contextId: string, userId: UserId, executor: DbExecutor = pool): Promise<ViewerLaunchSessionRecord | null> {
   const result = await executor.query<Row>(`select * from viewer_launch_sessions
     where report_context_id=$1::uuid and user_id=$2 and used_at is not null
-      and revoked_at is null and expires_at>now()`, [contextId, userId]);
+      and revoked_at is null and expires_at>now()
+      and (recovery_state is null or exists(select 1 from users u where u.id=user_id and u.is_active=true
+        and u.auth_version=(recovery_state->>'authVersion')::integer and u.role=recovery_state->>'role'))`, [contextId, userId]);
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
+}
+
+export const VIEWER_RECOVERY_HOURS = 24;
+export function studyIdentity(study: ImagingStudy) {
+  const modality=[...new Set(study.modality.toUpperCase().split(/[\\, /]+/).filter(code=>code && !['SR','PR','SEG','KO','DOC'].includes(code)))].sort().join('\\');
+  return { uid: study.studyInstanceUid, patientId: study.patientId.trim(), issuer: study.patientIdIssuer?.trim() || '', accession: study.accessionNumber.trim(), modality };
+}
+export function sameStudyIdentity(left: ReturnType<typeof studyIdentity>, right: ReturnType<typeof studyIdentity> | undefined) {
+  return !!right && (Object.keys(left) as (keyof typeof left)[]).every(key=>left[key]===right[key]);
+}
+export async function viewerSourceBinding(strategy: OhifAccessStrategy, sourceId: number | null): Promise<string> {
+  const source = strategy === 'authoritative_orthanc' ? await readAuthoritativeOrthancSettings()
+    : strategy === 'orthanc_gateway' ? await resolveOrthancSettings() : await findPacsWebEndpoint(sourceId!);
+  // Include the actual endpoint, never passwords or bearer credentials.
+  const value = source && ('baseUrl' in source ? [source.baseUrl, source.username] : [source.dicomwebBaseUrl, source.qidoRoot, source.wadoRsRoot]);
+  return createHash('sha256').update(JSON.stringify([strategy, sourceId, value])).digest('hex');
+}
+export async function findRecoverableViewerContext(contextId: string, userId: UserId, executor: DbExecutor = pool) {
+  const result = await executor.query<Row>(`select * from viewer_launch_sessions
+    where report_context_id=$1::uuid and user_id=$2 and used_at is not null and revoked_at is null
+    and expires_at > now() - interval '${VIEWER_RECOVERY_HOURS} hours'`, [contextId, userId]);
+  return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
+}
+export async function assertViewerLogin(contextId: string, user: { id: UserId; auth_version: number; role: string }) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(contextId)) throw new HttpError(400, 'Invalid viewer context.');
+  const session = await findRecoverableViewerContext(contextId, user.id);
+  if (!session?.recoveryState || session.recoveryState.authVersion !== user.auth_version || session.recoveryState.role !== user.role)
+    throw new HttpError(403, 'Sign in as the original viewer user with unchanged authorization.', { code: 'VIEWER_DENIED' });
+}
+export async function extendViewerContext(session: ViewerLaunchSessionRecord, expiresAt: Date) {
+  const result = await pool.query(`update viewer_launch_sessions s set expires_at=$3
+    from users u where s.id=$1 and s.user_id=$2 and u.id=s.user_id and u.is_active=true
+    and u.auth_version=(s.recovery_state->>'authVersion')::integer and u.role=s.recovery_state->>'role'
+    and s.revoked_at is null and s.used_at is not null and s.expires_at > now() - interval '${VIEWER_RECOVERY_HOURS} hours'
+    returning s.id`, [session.id, session.userId, expiresAt]);
+  if (!result.rowCount) throw new HttpError(403, 'Viewer access was revoked.', { code: 'VIEWER_DENIED' });
+}
+export async function revokeUserViewerContexts(userId: UserId) {
+  await pool.query('update viewer_launch_sessions set revoked_at=now() where user_id=$1 and revoked_at is null', [userId]);
 }
 
 export interface RetrievalJobRecord {
@@ -380,7 +434,7 @@ export async function deleteRetrievalJob(id: number): Promise<void> {
 }
 
 export async function cleanupExpiredViewerSessionsAndJobs(cacheRetentionHours: number): Promise<{ sessions: number; jobs: number }> {
-  const sessions = await pool.query(`delete from viewer_launch_sessions where expires_at < now() - interval '1 hour'`);
+  const sessions = await pool.query(`delete from viewer_launch_sessions where expires_at < now() - interval '${VIEWER_RECOVERY_HOURS} hours'`);
   const jobs = await pool.query(
     `delete from ohif_retrieval_jobs where status in ('not_found','ambiguous','failed','timed_out')
      and completed_at < now() - ($1::text || ' hours')::interval`, [Math.max(1, cacheRetentionHours)]

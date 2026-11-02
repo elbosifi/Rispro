@@ -39,6 +39,8 @@ const nativeDelivery=env.ohifNativeDeliveryEnabled;
 const nativeBenchmark=process.env.OHIF_NATIVE_BENCHMARK==='1';
 const progressive=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='progressive';
 const dynamicMri=process.env.OHIF_LOADING_PROFILE_BENCHMARK==='dynamic-mri';
+const resilience=process.env.OHIF_RESILIENCE_ACCEPTANCE==='1';
+const recoveryCredentials={username:'native.'+randomUUID().slice(0,8),password:'synthetic-recovery-only'};
 const transportCounts={proxyFrames:0,authorizations:0};
 let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
@@ -76,7 +78,7 @@ try{
   await setting('documents_and_uploads','storage_path','');await setting('documents_and_uploads','storage_fallback_enabled','true');
   env.uploadsDir=join(temp,'uploads');
   await pool.query("update ohif_viewer_settings set enabled=true,native_reporting_enabled=true,allow_prior_studies=true,max_prior_studies=5,access_strategy='authoritative_orthanc',selected_pacs_node_id=null where singleton_key=true");
-  userId=Number((await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'SYNTHETIC RADIOLOGIST','disabled','doctor',true) returning id",['native.'+randomUUID().slice(0,8)])).rows[0].id);
+  userId=Number((await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'SYNTHETIC RADIOLOGIST',$2,'doctor',true) returning id",[recoveryCredentials.username,resilience?await require('bcryptjs').hash(recoveryCredentials.password,4):'disabled'])).rows[0].id);
   doctorId=Number((await pool.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active,can_finalize_reports,can_assign_protocols,can_supervise) values($1,'SYNTHETIC RADIOLOGIST','consultant',true,true,false,true) returning id",[userId])).rows[0].id);
   policySetId=Number((await pool.query("insert into appointments_v2.policy_sets(key,name) values($1,'SYNTHETIC NATIVE REPORTING') returning id",['native.'+randomUUID()])).rows[0].id);
   const policyVersion=Number((await pool.query("insert into appointments_v2.policy_versions(policy_set_id,version_no,status,config_hash) values($1,1,'draft','synthetic') returning id",[policySetId])).rows[0].id);
@@ -223,10 +225,14 @@ try{
   }else{
   const pages=[];
   for(const c of cases){
-    const startAt=performance.now();const launch=await launchReportingBoardCaseInOhif({userId,appRole:'doctor'},c.appointmentId,true);assert.equal(launch.status,'ready');assert.equal(launch.priorStudyCount,1);
+    const startAt=performance.now();
+    const launch=resilience&&dockerBackend ? await (await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}})).json()
+      : await launchReportingBoardCaseInOhif({userId,appRole:'doctor'},c.appointmentId,true);
+    assert.equal(launch.status,'ready');assert.equal(launch.priorStudyCount,1);
     const launchMs=performance.now()-startAt;const page=await context.newPage();activePage=page;pages.push(page);let frames=0;const frameCounts=new Map();
     page.on('response',r=>{if(r.url().includes('/frames/') && r.ok()){frames++;frameCounts.set(r.url(),(frameCounts.get(r.url())||0)+1);}});
     page.on('pageerror',error=>console.log(JSON.stringify({browserError:error.message})));
+    const recoverInitial=resilience?await (await import('./ohif-resilience-browser.mjs')).prepareInitialRetry(page,c):null;
     await page.goto(viewerOrigin+launch.launchUrl,{waitUntil:'domcontentloaded'});
     assert.equal(await page.evaluate(()=>window.isSecureContext),workspaceV2,workspaceV2?'Synthetic loopback microphone validation requires a secure context':'Capture must work on ordinary insecure HTTP, without screen-sharing APIs');
     await page.waitForFunction(()=>{try{const s=window.services;return !!s?.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId())?.getCurrentImageId?.();}catch{return false;}},null,{timeout:120000});
@@ -236,6 +242,7 @@ try{
       if(visible){await button.click();await button.waitFor({state:'hidden'});}
     }
     await page.locator('.shepherd-modal-is-visible').waitFor({state:'hidden'});
+    await recoverInitial?.();
     await page.getByText('SYNTHETIC '+c.modality+' PRIOR 3', { exact: false }).first().waitFor({ state: 'visible', timeout: 30000 });
     assert.ok([...frameCounts.keys()].every(url => !url.includes('/studies/'+c.study+'.8/')), 'Other studies must not load frames before selection');
     await page.waitForFunction(study => { const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); return v?.getCurrentImageId?.()?.includes('/studies/'+study+'/'); }, c.study, {timeout:30000});
@@ -259,6 +266,7 @@ try{
     await panel.getByLabel('Impression',{exact:true}).fill('SYNTHETIC '+c.modality+' impression.');
     await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
     if(workspaceV2){await (await import('./ohif-workspace-v2-acceptance.mjs')).runWorkspaceV2Panel({page,panel,context,origin,c,temp,fixture:workspaceFixture,pool});continue;}
+    if(resilience){await (await import('./ohif-resilience-browser.mjs')).runResilience({page,panel,context,pool,env,userId,credentials:recoveryCredentials,c,temp,nativeDelivery});continue;}
     await page.locator('[data-cy="side-panel-header-right"]').click();await panel.waitFor({state:'hidden'});
     await page.getByRole('button',{name:'Report',exact:true}).first().click();await panel.waitFor({state:'visible'});
     assert.equal(await panel.getByLabel('Impression',{exact:true}).inputValue(),'SYNTHETIC '+c.modality+' impression.');
@@ -441,12 +449,15 @@ try{
   }
   // The two live patient tabs retain independent report/context identities.
   for(let index=0;index<pages.length;index++)assert.match(await pages[index].getByRole('region',{name:'RISpro report'}).textContent(),new RegExp('SYNTHETIC '+cases[index].modality));
+  if(resilience)await (await import('./ohif-resilience-browser.mjs')).runTabIsolation({pages,context,pool,env,userId});
   if(process.env.OHIF_REPORTING_WORKFLOW==='1')await (await import('./ohif-reporting-workflow-acceptance.mjs')).runPatientSwitch({pages,context,origin,fixture:workspaceFixture});
+  if(!resilience){
   await pool.query('update ohif_viewer_settings set native_reporting_enabled=false where singleton_key=true');
   await pages[0].reload();await pages[0].getByRole('button',{name:'Report',exact:true}).first().click();
   await pages[0].getByRole('region',{name:'RISpro report'}).getByText('Final — signed',{exact:true}).waitFor();
   assert.equal(await pages[0].getByRole('button',{name:'Add Key Image',exact:true}).count(),0);
   console.log('PASS: real modified OHIF CT/MRI native reporting browser journey');
+  }
   }
 }catch(error){
   for(const name of containers){const logs=spawnSync('docker',['logs',name],{encoding:'utf8'});writeFileSync(join(temp,name+'.log'),(logs.stdout||'')+(logs.stderr||''));}

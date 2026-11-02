@@ -1,8 +1,9 @@
 // In-memory state belongs to this viewer tab and survives closing its panel.
 // No clinical text or image bytes are written to local/session storage.
-export function createReportStore({ contextId, captureViewport, locateSource, fetcher = fetch }) {
-  let state = { context: null, report: null, text: null, dirty: false, saving: false, busy: false, error: '', conflict: false, history: null, pendingCapture: null, captionEdits: {}, addendumText: '' };
+export function createReportStore({ contextId, captureViewport, locateSource, fetcher = fetch, connection }) {
+  let state = { context: null, report: null, text: null, dirty: false, saving: false, busy: false, error: '', conflict: false, connection: 'connected', history: null, pendingCapture: null, captionEdits: {}, addendumText: '' };
   let chain = Promise.resolve(), timer, generation = 0, manualSaveRequired = false;
+  let uncertain, recovering, destroyed = false, retryCaptions=false;
   let finalizeId=newId(),addendumId=newId(),creationId=newId();
   const listeners = new Set();
   const patch = update => { state = { ...state, ...update }; listeners.forEach(fn => fn()); };
@@ -16,46 +17,96 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
       const payload = await response.json().catch(() => ({}));
       const error = new Error(payload.error?.message || payload.message || `Reporting request failed (${response.status}).`);
       error.status = response.status;
+      error.code = payload.error?.details?.code;
       throw error;
     }
     return await response.json();
     }catch(error){if(controller.signal.aborted)throw new Error('Reporting request timed out. Keep this tab open and retry.');throw error;}
     finally{clearTimeout(deadline);}
   };
-  const failed = error => { patch({ error: error.message, conflict: error.status === 409 || state.conflict,
-    ...(error.status === 401 || error.status === 403 ? { report:state.report?{...state.report,canEdit:false,canFinalize:false,finalizeReasons:[error.message]}:null,context: { ...state.context, canEdit: false, canFinalize: false, blockedReason: error.message } } : {}) }); throw error; };
+  const failed = error => {
+    patch({ error: error.message, conflict: error.status === 409 || state.conflict });
+    if (error.status === 401 || error.status === 403) {
+      // A report 403 may be a context expiry, or a permanent permission denial.
+      // Only authenticated renewal and a permission read can distinguish them.
+      connection?.renew().then(() => store.recover()).catch(() => {});
+    } else if (!error.status || error.status >= 500) connection?.notify(error);
+    throw error;
+  };
   const serial = work => {
     const result = chain.then(work);
     chain = result.catch(() => undefined);
     return result;
   };
+  const same = (a,b) => Array.isArray(a) ? JSON.stringify(a)===JSON.stringify(b)
+    : !!a && !!b && Object.keys(a).length===Object.keys(b).length && Object.keys(a).every(key=>a[key]===b[key]);
+  const images = report => report.keyImages.map(i=>({id:i.id,caption:i.caption}));
+  function acknowledge(report) {
+    if (!uncertain) return;
+    const submitted = uncertain;
+    const content = submitted.kind === 'text' ? report.sections : images(report);
+    if (Number(report.revision) > Number(submitted.revision) && same(content,submitted.content)) {
+      if(submitted.kind==='text') {
+        patch({dirty:generation!==submitted.generation});
+        if(generation===submitted.generation)manualSaveRequired=false;
+      } else {
+        const remaining={...state.captionEdits};
+        for(const [id,value] of Object.entries(submitted.edits))if(remaining[id]===value)delete remaining[id];
+        patch({captionEdits:remaining});
+      }
+    } else if (Number(report.revision) !== Number(submitted.revision)) {
+      patch({conflict:true,error:'Another editor changed this report. Local text is retained; resolve the conflict explicitly.'});
+    }
+    if(submitted.kind==='images' && !Object.keys(state.captionEdits).length)retryCaptions=false;
+    uncertain=null;
+    patch({report});
+  }
+  async function reconcile() {
+    if(uncertain){const current=await request(base());acknowledge(current.report??current);}
+  }
+  function schedule() {
+    clearTimeout(timer);
+    if(!destroyed && ((state.dirty && !manualSaveRequired)||retryCaptions) && !state.conflict && state.connection==='connected' && (state.report?.canEdit??state.context?.canEdit))
+      timer=setTimeout(async()=>{try{if(!manualSaveRequired)await save();if(retryCaptions)await saveCaptions();}catch{}},1000);
+  }
   async function save() {
     clearTimeout(timer);
     return serial(async () => {
+      await reconcile();
       if (state.conflict) throw new Error('Reload the saved report to resolve this conflict. Your text is retained until you choose to discard it.');
       if (!state.dirty) return;
       const submitted = generation;
       patch({ saving: true, error: '' });
+      uncertain={kind:'text',revision:state.report.revision,content:{...state.text},generation:submitted};
       try {
-        const report = await request(base() + '/draft', 'PUT', { expectedRevision: state.report.revision, sections: state.text });
+        const report = await request(base() + '/draft', 'PUT', { expectedRevision: uncertain.revision, sections: uncertain.content });
+        uncertain=null;
         patch({ report, dirty: generation !== submitted });
         if(generation===submitted)manualSaveRequired=false;
-      } catch (error) { failed(error); } finally { patch({ saving: false }); }
+      } catch (error) { if(error.status && error.status<500)uncertain=null; failed(error); } finally { patch({ saving: false }); }
     });
   }
-  async function flush() {
-    do { await save(); } while (state.dirty);
-    await serial(async()=>{
+  async function saveCaptions() {
+    return serial(async()=>{
+      await reconcile();
       const submitted={...state.captionEdits};
       if(!Object.keys(submitted).length)return;
       if(state.conflict)throw new Error('Resolve the report conflict before saving captions.');
       patch({saving:true});
+      retryCaptions=true;
+      uncertain={kind:'images',revision:state.report.revision,content:state.report.keyImages.map(i=>({id:i.id,caption:submitted[i.id]??i.caption})),edits:submitted};
       try{
-        const report=await request(base()+'/images','PUT',{expectedRevision:state.report.revision,images:state.report.keyImages.map(i=>({id:i.id,caption:submitted[i.id]??i.caption}))});
+        const report=await request(base()+'/images','PUT',{expectedRevision:uncertain.revision,images:uncertain.content});
+        uncertain=null;
         const remaining={...state.captionEdits};for(const [id,value] of Object.entries(submitted))if(remaining[id]===value)delete remaining[id];
         patch({report,captionEdits:remaining,error:''});
-      }catch(error){failed(error);}finally{patch({saving:false});}
+        retryCaptions=false;
+      }catch(error){if(error.status && error.status<500)uncertain=null;failed(error);}finally{patch({saving:false});}
     });
+  }
+  async function flush() {
+    do { await save(); } while (state.dirty);
+    await saveCaptions();
     await chain;
   }
   async function mutate(path, body, method = 'POST') {
@@ -82,6 +133,24 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
       patch({ context, report: context.report, text: context.report?.sections ?? null, dirty: false, conflict: false, error: '', captionEdits: {}, pendingCapture: null });
       return context;
     },
+    async recover() {
+      if(recovering)return recovering;
+      recovering=serial(async()=>{
+        try {
+          const context=await request('/api/native-reporting/contexts/'+contextId);
+          const report=state.report && context.v2 ? await request('/api/native-reporting/reports/'+state.report.id) : context.report;
+          if(state.report && (!report || Number(report.id)!==Number(state.report.id)))throw Object.assign(new Error('The report association changed.'),{status:403});
+          const previousRevision=state.report?.revision;
+          const wasUncertain=!!uncertain;
+          if(report)acknowledge(report);
+          if(!wasUncertain && state.dirty && previousRevision!==report?.revision)patch({conflict:true,error:'Another editor changed this report. Local text is retained; resolve the conflict explicitly.'});
+          patch({context,report,...(!state.dirty?{text:report?.sections??state.text}:{}),...(state.conflict?{}:{error:''})});
+          // Never replay finalize/addendum operations. The capture keeps its
+          // original bytes, provenance, request ID and expected revision.
+        } catch(error) { failed(error); }
+      }).finally(()=>{recovering=null;schedule();});
+      return recovering;
+    },
     async create(options={}) {
       return busy(async () => {
         const report = await request(state.context.v2?'/api/native-reporting/workspace/studies/'+encodeURIComponent(state.context.studyKey)+'/reports':base(), 'POST', state.context.v2?{mode:options.mode||'independent',reportType:options.reportType||'primary',requestId:creationId}:{});
@@ -103,7 +172,7 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
       patch({ text: { ...state.text, [name]: value }, dirty: true });
       clearTimeout(timer);
       if(dictated)manualSaveRequired=true;
-      if (!manualSaveRequired && !state.error && !state.conflict) timer = setTimeout(() => save().catch(() => undefined), 1000);
+      schedule();
     },
     save: flush,
     finalize(requestId=finalizeId) {
@@ -143,9 +212,17 @@ export function createReportStore({ contextId, captureViewport, locateSource, fe
     imageUrl: image => base() + '/images/' + image.id,
     printUrl: () => base() + '/print',
     setError: error => patch({error:error.message || String(error)}),
-    destroy() { clearTimeout(timer); listeners.clear(); },
+    destroy() { destroyed=true;clearTimeout(timer);unsubscribeConnection?.();listeners.clear(); },
     hasUnsaved: () => state.dirty || state.saving || state.busy || !!state.pendingCapture || !!state.addendumText || Object.keys(state.captionEdits).length>0,
   };
+  const unsubscribeConnection=connection?.subscribe(()=>{
+    const status=connection.getSnapshot().status;
+    const previous=state.connection;
+    patch({connection:status});
+    if(status==='denied')patch({context:state.context?{...state.context,canEdit:false,canFinalize:false}:null,report:state.report?{...state.report,canEdit:false,canFinalize:false}:null});
+    if(status!=='connected')clearTimeout(timer);
+    else if(previous!=='connected') (state.context?store.recover():store.load()).catch(store.setError);
+  });
   return store;
 }
 // crypto.randomUUID is unavailable on an ordinary HTTP LAN. getRandomValues works there.

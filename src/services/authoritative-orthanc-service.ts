@@ -21,7 +21,7 @@ export function authoritativeOrthancArchiveKey(settings: Pick<AuthoritativeOrtha
 }
 export type AuthoritativeOrthancSettingsDisplay = Omit<AuthoritativeOrthancSettings, "password"> & { passwordConfigured: boolean };
 export type OrthancSystemInfo = { name: string | null; version: string | null; apiVersion: string | null };
-export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyTime?: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
+export type OrthancStudyDetails = { orthancStudyId: string; studyInstanceUid: string | null; accessionNumber: string | null; patientId: string | null; patientIdIssuer?: string; patientName: string | null; patientBirthDate: string | null; patientSex: string | null; studyDate: string | null; studyTime?: string | null; studyDescription: string | null; modalitiesInStudy: string[]; seriesCount: number; instanceCount: number };
 export type OrthancChange = { sequence: number; changeType: string; resourceType: string | null; resourceId: string | null; date?: string | null };
 export type OrthancChangesPage = { changes: OrthancChange[]; lastSequence: number; done: boolean };
 export type OrthancInstanceReceptionMetadata = { orthancInstanceId: string; origin: string | null; remoteAet: string | null; remoteIp: string | null; calledAet: string | null; receptionDate: string | null };
@@ -76,12 +76,14 @@ function studyDetails(payload: unknown, orthancStudyId: string, statistics: unkn
   const row = { ...detailRow, ...record(statistics) };
   const dicom = tags(row);
   const requestedTags = record(detailRow.RequestedTags);
+  const issuer = first(dicom.IssuerOfPatientID, dicom['00100021'], requestedTags.IssuerOfPatientID);
   const series = Array.isArray(detailRow.Series) ? detailRow.Series : [];
   return {
     orthancStudyId,
     studyInstanceUid: first(dicom.StudyInstanceUID, dicom["0020000D"], requestedTags.StudyInstanceUID),
     accessionNumber: first(dicom.AccessionNumber, dicom["00080050"], requestedTags.AccessionNumber),
     patientId: first(dicom.PatientID, dicom["00100020"], requestedTags.PatientID),
+    ...(issuer ? { patientIdIssuer: issuer } : {}),
     patientName: first(dicom.PatientName, dicom["00100010"], requestedTags.PatientName),
     patientBirthDate: first(dicom.PatientBirthDate, dicom["00100030"], requestedTags.PatientBirthDate),
     patientSex: first(dicom.PatientSex, dicom["00100040"], requestedTags.PatientSex),

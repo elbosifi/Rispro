@@ -5,7 +5,7 @@ import type { DbExecutor } from "../../types/db.js";
 process.env.DATABASE_URL ||= "postgresql://rispro_test:rispro_test_password@localhost:5433/rispro_test";
 process.env.JWT_SECRET ||= "test-secret-test-secret-test-secret";
 
-const { consumeViewerLaunchToken, findAuthorizedViewerSession } = await import("./repository.js");
+const { consumeViewerLaunchToken, findAuthorizedViewerSession,studyIdentity,sameStudyIdentity } = await import("./repository.js");
 
 type SessionRow = Record<string, unknown>;
 
@@ -36,6 +36,11 @@ function memoryExecutor(row: SessionRow): DbExecutor {
 }
 
 describe("OHIF viewer launch/session tokens", () => {
+  it('compares diagnostic identity independently of JSON key order and non-diagnostic documents',()=>{
+    const study={studyInstanceUid:'1.2.3',patientId:'P1',patientIdIssuer:'I',accessionNumber:'A1',modality:'MR\\CT',patientName:'',studyDate:'',studyDescription:''};
+    assert.equal(sameStudyIdentity(studyIdentity(study),studyIdentity({...study,modality:'CT\\SR\\MR'})),true);
+    assert.equal(sameStudyIdentity(studyIdentity(study),studyIdentity({...study,patientIdIssuer:'OTHER'})),false);
+  });
   it("exchanges a launch token once and leaves the separate viewer session usable", async () => {
     const row = session();
     const db = memoryExecutor(row);

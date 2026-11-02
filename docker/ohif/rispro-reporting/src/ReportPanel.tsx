@@ -10,6 +10,8 @@ export default function ReportPanel({store}) {
   const [confirm,setConfirm]=useState(null),[tab,setTab]=useState('report');
   const [mode,setMode]=useState('independent'),[reportType,setReportType]=useState('primary');
   const addendum=s.addendumText;
+  const unsaved=s.dirty || Object.keys(s.captionEdits).length>0 || !!s.pendingCapture || !!addendum;
+  const saveStatus=s.connection==='authentication-required'?'Authentication required':s.connection==='reconnecting'?'Reconnecting':s.connection==='denied'?'Save failed':s.saving?'Saving…':s.error && unsaved?'Save failed':unsaved?'Unsaved changes':'Saved';
   const run=work=>Promise.resolve().then(work).catch(store.setError);
   const report=s.report,identity=s.context?.identity?{...report?.identity,...s.context.identity}:report?.identity;
   const editable=(report?.canEdit??s.context?.canEdit) && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
@@ -50,7 +52,7 @@ export default function ReportPanel({store}) {
       {['draft','in_review'].includes(report.status) && <div className="rispro-report-actions">
         <Button disabled={!editable || s.saving} onClick={()=>run(store.save)}>Save</Button>
         <Button disabled={finalizeReasons.length>0} aria-describedby={finalizeReasons.length?'rispro-finalize-reason':undefined} onClick={()=>setConfirm('finalize')}>Finalize</Button>
-        <span role="status">{s.saving?'Saving…':s.error && (s.dirty || Object.keys(s.captionEdits).length)?'Save failed':s.dirty || Object.keys(s.captionEdits).length?'Unsaved changes':'Saved'}</span>
+        <span role="status">{saveStatus}</span>
       </div>}
       {['draft','in_review'].includes(report.status)&&finalizeReasons.length>0&&<p id="rispro-finalize-reason" className="rispro-report-reason" role="status">{finalizeReasons.join(' ')}</p>}
       {s.conflict && <Button variant="outline" onClick={()=>{
@@ -66,6 +68,7 @@ export default function ReportPanel({store}) {
         {report.status==='final' && s.context?.canFinalize && <>
           <label>Addendum text<textarea aria-label="Addendum text" value={addendum} onChange={e=>store.editAddendum(e.target.value)} rows={5}/></label>
           <Button disabled={!addendum.trim() || s.busy} onClick={()=>setConfirm('addendum')}>Add Addendum</Button>
+          <span role="status">{saveStatus}</span>
         </>}
       </>}
       {tab==='images' && <>

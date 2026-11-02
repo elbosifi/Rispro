@@ -11,6 +11,14 @@ import type { UserId, AuthenticatedUserContext } from "../types/http.js";
 
 export type AuthRequest = Request;
 
+export function requireSameOriginSessionRequest(req: Request, _res: Response, next: NextFunction): void {
+  const publicHost=req.app.get('trust proxy') ? req.get('x-forwarded-host')?.split(',')[0].trim() || req.get('host') : req.get('host');
+  let sameOrigin=true;
+  try {if(req.get('origin'))sameOrigin=new URL(req.get('origin')!).host===publicHost;}catch{sameOrigin=false;}
+  if(req.get('sec-fetch-site')==='cross-site' || !sameOrigin)return next(new HttpError(403,'Same-origin session request required.',{code:'SESSION_DENIED'}));
+  next();
+}
+
 function parseRole(value: unknown): Role {
   const role = String(value ?? "").trim();
 
@@ -104,11 +112,11 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
     try {
       if (req.user) return next();
       const token = readToken(req);
-      if (!token) throw new HttpError(401, "Authentication required.");
+      if (!token) throw new HttpError(401, "Authentication required.", { code: "AUTH_REQUIRED" });
 
       const payload = decodeSessionToken(token);
       req.user = await currentSessionUser(payload) ?? undefined;
-      if (!req.user) throw new HttpError(401, "Session expired. Please sign in again.");
+      if (!req.user) throw new HttpError(401, "Session access was revoked.", { code: "SESSION_REVOKED" });
       next();
     } catch (error) {
       const isJwtError =
@@ -116,7 +124,7 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
         error !== null &&
         "name" in error &&
         ["JsonWebTokenError", "TokenExpiredError"].includes(String((error as Error).name));
-      next(isJwtError ? new HttpError(401, "Invalid session.") : error);
+      next(isJwtError ? new HttpError(401, "Sign in again.", { code: String((error as Error).name) === "TokenExpiredError" ? "AUTH_EXPIRED" : "AUTH_INVALID" }) : error);
     }
   })();
 }
