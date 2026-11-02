@@ -15,9 +15,10 @@ export function installImageRecovery(dicomImageLoader) {
   imageLoader.registerImageLoader('wadors', (imageId, options) => {
     let load;
     const cancellation = new AbortController();
+    const cancel=()=>{cancellation.abort();load?.cancelFn?.();requests.get(imageId)?.forEach(xhr=>xhr.abort());};
     return {
-      promise: connection.read('image:' + imageId, () => { load = original(imageId, options); return load.promise; }, cancellation.signal),
-      cancelFn: () => { cancellation.abort(); load?.cancelFn?.();requests.get(imageId)?.forEach(xhr=>xhr.abort()); },
+      promise: connection.read('image:' + imageId, () => { load = original(imageId, options); return load.promise; }, cancellation.signal,cancel),
+      cancelFn: cancel,
     };
   });
 }

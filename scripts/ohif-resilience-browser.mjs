@@ -4,6 +4,7 @@ import {expect} from '@playwright/test';
 import jwt from 'jsonwebtoken';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
 export async function prepareInitialRetry(page,c) {
   let failed=true;
@@ -61,6 +62,15 @@ export async function runResilience({page,panel,context,pool,env,userId,credenti
   await expect(dialog).toHaveCSS('opacity','1');assert.ok((await dialog.boundingBox()).width<=480,'The sign-in modal stays small on desktop');
   await page.screenshot({path:join(temp,c.modality+'-authentication-desktop.png')});
   await verify();await expect(findings).toHaveValue(retained);
+  if(c.modality==='CT'){
+    const username='resilience-login-other-'+randomUUID(),password='synthetic-other-login';
+    const other=(await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'SYNTHETIC OTHER USER',$2,'doctor',true) returning id",[username,await bcrypt.hash(password,4)])).rows[0].id;
+    try{
+      await dialog.getByLabel('Username',{exact:true}).fill(username);await dialog.getByLabel('Password',{exact:true}).fill(password);await dialog.getByRole('button',{name:'Sign in',exact:true}).click();
+      await expect(dialog.getByText(/Sign in as the original viewer user with unchanged authorization/)).toBeVisible();await expect(dialog.getByRole('button',{name:'Sign in',exact:true})).toBeEnabled();
+      await verify();await expect(findings).toHaveValue(retained);
+    }finally{await pool.query('delete from users where id=$1',[other]);}
+  }
   await dialog.getByLabel('Username',{exact:true}).fill(credentials.username);await dialog.getByLabel('Password',{exact:true}).fill(credentials.password);
   await dialog.getByRole('button',{name:'Sign in',exact:true}).click();await expect(dialog).toBeHidden();
   await expect(findings).toHaveValue(retained);await verify();
@@ -77,6 +87,29 @@ export async function runResilience({page,panel,context,pool,env,userId,credenti
     return {id,url:id.slice('wadors:'.length)};
   });
   assert.ok(missing.url.includes(nativeDelivery?'/ohif-native/':'/ohif-dicomweb/'),'Exercise the selected actual diagnostic transport');
+  if(c.modality==='CT'){
+    const started=performance.now(),frameUrl=new URL(missing.url,origin).href,renewUrl=origin+'/api/ohif/contexts/'+contextId+'/renew';
+    let failures=0,probes=0,onlineEvents=0;
+    const frame=async route=>{if(performance.now()-started<120000){failures++;await route.fulfill({status:503,body:'Synthetic prolonged outage'});}else await route.continue();};
+    const probe=async route=>{probes++;if(performance.now()-started<120000)await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'Synthetic prolonged outage'}})});else await route.continue();};
+    await page.route(frameUrl,frame);await page.route(renewUrl,probe);
+    const dirty=retained+' During sustained outage.';
+    await findings.evaluate((el,text)=>{el.dataset.dictationInserting='true';Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,text);el.dispatchEvent(new Event('input',{bubbles:true}));delete el.dataset.dictationInserting;},dirty);
+    await page.evaluate(id=>{
+      window.__outageOnlineEvents=0;window.__onOutageOnline=()=>window.__outageOnlineEvents++;window.addEventListener('online',window.__onOutageOnline);
+      window.__outageFinished=false;window.__outageRead=window.cornerstone.imageLoader.loadAndCacheImage(id).then(()=>{window.__outageFinished=true;});
+    },missing.id);
+    console.log(JSON.stringify({stage:'sustained-outage-start',transport:nativeDelivery?'Native':'Express',seconds:120}));
+    await page.waitForTimeout(15000);assert.equal(failures,4,'Image downloads stop after the initial burst');assert.ok(probes<=6);await verify();await expect(findings).toHaveValue(dirty);
+    await page.waitForFunction(()=>window.__outageFinished,null,{timeout:190000});
+    onlineEvents=await page.evaluate(()=>{window.removeEventListener('online',window.__onOutageOnline);return window.__outageOnlineEvents;});
+    assert.equal(onlineEvents,0);assert.equal(await page.evaluate(()=>navigator.onLine),true);assert.equal(failures,4);assert.ok(probes<=12);await verify();await expect(findings).toHaveValue(dirty);
+    assert.equal(await page.evaluate(id=>JSON.stringify(window.__retryPixels)===JSON.stringify(Array.from(window.cornerstone.cache.getImage(id).getPixelData())),missing.id),true);
+    await page.unroute(frameUrl,frame);await page.unroute(renewUrl,probe);
+    await panel.getByRole('button',{name:'Save',exact:true}).click();await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
+    await page.evaluate(id=>window.cornerstone.cache.removeImageLoadObject(id),missing.id);
+    console.log(JSON.stringify({stage:'sustained-outage-recovered',transport:nativeDelivery?'Native':'Express',elapsedSeconds:Math.round((performance.now()-started)/1000),failedImageAttempts:failures,probes,onlineEvents,dirtyTextRetained:true}));
+  }
   let attempts=0,active=0,maxActive=0;
   const route=async route=>{
     attempts++;active++;maxActive=Math.max(maxActive,active);

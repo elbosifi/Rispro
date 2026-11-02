@@ -47,9 +47,11 @@ const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const responsive=process.env.OHIF_RESPONSIVE==='1';
 const multiStudy=process.env.OHIF_MULTI_STUDY==='1';
 const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1';let workspaceFixture;
-// Keep native responsive discovery/callbacks on the same Docker network too;
-// Windows published-port hairpins can stall a prior QIDO and leave the panel empty.
-const dockerBackend=nativeDelivery;
+// Resilience acceptance exercises the production gateway's transport-policy
+// authorization for every static chunk. Keep that backend hop inside the same
+// disposable Docker network for Express as well as Native; Windows published-
+// port hairpins previously timed out before MR could even start.
+const dockerBackend=nativeDelivery || resilience;
 const reliability=responsive && process.env.OHIF_RELIABILITY==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
@@ -58,10 +60,10 @@ async function setting(category,key,value){await pool.query('insert into system_
 try{
   docker('image','inspect',viewerImage,'orthancteam/orthanc:26.4.0','nginx:1.27.5-alpine');
   docker('network','create',networkName);networkCreated=true;
-  if(nativeDelivery && dockerBackend){
+  if(dockerBackend){
     docker('network','connect','--alias','rispro-test-postgres',networkName,'rispro-test-postgres');dbNetworkConnected=true;
     const backendDb=new URL(dbUrl);backendDb.hostname='rispro-test-postgres';backendDb.port='5432';
-    const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:'true',OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
+    const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:String(nativeDelivery),OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
     if(progressive)vars.OHIF_LOADING_PROFILE_BENCHMARK='progressive';
     benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets'].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
     let ready=false;for(let attempt=0;attempt<120;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
@@ -163,6 +165,16 @@ try{
   let baselineOrigin,quickOrigin;
   if(nativeDelivery)docker('exec',prefix+'-edge','test','-s','/etc/nginx/ohif-native/native.conf');
   docker('exec',prefix+'-edge','nginx','-t');
+  if(resilience){
+    // Check DNS/routing and the real policy endpoint from the gateway network.
+    // Do not bypass auth_request or replace its response with a fixture.
+    const probe=spawnSync('docker',['exec',prefix+'-edge','wget','-q','-T','10','-S','-O','/dev/null','http://benchmark-backend:3000/api/internal/automatic-https/transport-policy'],{encoding:'utf8'});
+    assert.equal(probe.status,0,probe.stderr);assert.match(probe.stderr,/HTTP\/1\.1 204/);
+    const asset=await fetch(edgeOrigin+'/ohif/app-config.js',{signal:AbortSignal.timeout(10000)});assert.equal(asset.status,200);await asset.arrayBuffer();
+    const protectedRead=await fetch(edgeOrigin+'/api/auth/me',{signal:AbortSignal.timeout(10000)});assert.equal(protectedRead.status,401);await protectedRead.arrayBuffer();
+    const evidence={harnessConnectivity:'PASS',backend:'benchmark-backend:3000',policyProbe:probe.stderr.trim(),staticStatus:asset.status,unauthenticatedStatus:protectedRead.status,transport:nativeDelivery?'Native':'Express'};
+    writeFileSync(join(temp,'harness-connectivity.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence));
+  }
   if(nativeBenchmark && process.env.OHIF_NATIVE_AUTH_ACCEPTANCE!=='1'){
     for(const [alias,image] of [['baseline',process.env.OHIF_BASELINE_IMAGE||'rispro-ohif:ios-reliability'],['quick',process.env.OHIF_QUICK_TEST_IMAGE||'rispro-ohif:lan-native-quick']]){
       start(prefix+'-'+alias,image,80,['--network',networkName,'--network-alias','ohif-'+alias]);
