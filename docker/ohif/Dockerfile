@@ -35,6 +35,7 @@ COPY docker/ohif/configure-series-windowing.cjs /tmp/configure-series-windowing.
 COPY docker/ohif/configure-responsive.cjs /tmp/configure-responsive.cjs
 COPY docker/ohif/configure-cornerstone-compat.cjs /tmp/configure-cornerstone-compat.cjs
 COPY docker/ohif/configure-viewport-reliability.cjs /tmp/configure-viewport-reliability.cjs
+COPY docker/ohif/configure-rendering-resilience.cjs /tmp/configure-rendering-resilience.cjs
 COPY docker/ohif/configure-thumbnails.cjs /tmp/configure-thumbnails.cjs
 COPY docker/ohif/responsive /tmp/responsive
 COPY docker/ohif/verify-browser-build.cjs /tmp/verify-browser-build.cjs

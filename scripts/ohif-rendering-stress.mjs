@@ -56,7 +56,7 @@ async function snapshot(page){
     return {probe:{events:window.__renderProbe.events,contexts:window.__renderProbe.snapshot()},
       configuration:core?.getConfiguration(),cacheBytes:core?.cache.getCacheSize(),cacheLimit:core?.cache.getMaxCacheSize(),
       volumes:core?.cache.getVolumes().map(v=>({dimensions:v.dimensions,loaded:v.loadStatus.loaded,sourceBytes:v.dimensions.reduce((a,b)=>a*b,2)})),
-      engines:core?.getRenderingEngines().map(e=>({id:e.id,viewports:e.getViewports().map(v=>({type:v.type,images:v.getImageIds?.().length}))})),
+      engines:core?.getRenderingEngines().map(e=>({id:e.id,contexts:e.contextPool?.getContextCount(),viewports:e.getViewports().map(v=>({type:v.type,images:v.getImageIds?.().length}))})),
       activeViewports:s?[...s.viewportGridService.getState().viewports.keys()].length:0};
   });
 }
@@ -101,8 +101,11 @@ async function capture(page,context,apiOrigin,c){
   await report.click();
   const panel=page.getByRole('region',{name:'RISpro report'});
   const create=panel.getByRole('button',{name:'Create RISpro Report',exact:true});
-  if(await create.count())await create.click();
-  await panel.getByRole('button',{name:'Report',exact:true}).click();
+  const reportTab=panel.getByRole('button',{name:'Report',exact:true});
+  // Decide only after context/report hydration, not while the panel is loading.
+  await create.or(reportTab).first().waitFor();
+  if(await create.isVisible())await create.click();
+  await reportTab.click();
   await panel.getByLabel('Findings',{exact:true}).fill('SYNTHETIC large MRI rendering regression.');
   await panel.getByRole('button',{name:'Save',exact:true}).click();
   await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
@@ -169,6 +172,7 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
       await page.reload({waitUntil:'domcontentloaded'});await ready();await pixels(page);
       const cdp=await context.newCDPSession(page);await cdp.send('Page.reload',{ignoreCache:true});await page.waitForLoadState('domcontentloaded');await ready();await pixels(page);await cdp.detach();
       const initial=await snapshot(page);
+      if(process.env.OHIF_TEST_CONTEXT_COUNT){const expected=Number(process.env.OHIF_TEST_CONTEXT_COUNT);assert.equal(initial.configuration.rendering.webGlContextCount,expected);assert.ok(initial.engines.some(e=>e.contexts===expected),'The experimental pool count must reach the real engine');}
       const seriesSwitchMs=[];
       for(let cycle=0;cycle<6;cycle++){
         const switching=performance.now();

@@ -1,0 +1,16 @@
+# Synthetic comparison only. Never use this image as the production default.
+ARG BUILDER_IMAGE=rispro-ohif:reliability-context-builder
+FROM ${BUILDER_IMAGE} AS experiment
+ARG TEST_CONTEXT_COUNT=2
+# Modify the pinned upstream source, then rebuild; never edit browser bundles.
+RUN node -e 'const fs=require("node:fs"); const root="node_modules/@cornerstonejs/core/"; if(JSON.parse(fs.readFileSync(root+"package.json")).version!=="4.15.29")throw Error("Review pinned experiment version"); const count=Number(process.argv[1]); if(![1,2].includes(count))throw Error("Experimental count must be 1 or 2"); const file=root+"dist/esm/init.js",source=fs.readFileSync(file,"utf8"),anchor="webGlContextCount: 7,"; if(source.split(anchor).length!==2)throw Error("Review pinned context-count anchor"); fs.writeFileSync(file,source.replace(anchor,"webGlContextCount: "+count+","));' "$TEST_CONTEXT_COUNT"
+# The parent is already built. Webpack treats installed dependencies as managed
+# immutable paths, so this source experiment must bypass that inherited cache.
+RUN (cd platform/app && NODE_ENV=production bun run build --no-cache) \
+  && node /tmp/verify-browser-build.cjs
+
+FROM nginx:1.27.5-alpine
+COPY docker/ohif/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=experiment /usr/src/app/platform/app/dist /usr/share/nginx/html/ohif
+COPY --from=experiment /usr/src/app/platform/app/dist/dicom-microscopy-viewer /usr/share/nginx/html/dicom-microscopy-viewer
+EXPOSE 80

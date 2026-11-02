@@ -60,14 +60,14 @@ export async function authenticateUser(
   const user = rows[0];
 
   if (!user || !user.is_active) {
-    throw new HttpError(401, "Invalid username or password.");
+    throw new HttpError(401, "Invalid username or password.", { code: "CREDENTIALS_REJECTED" });
   }
   const authenticatedUser = requireRow(user, "Failed to load authenticated user.");
 
   const isValid = await bcrypt.compare(password, authenticatedUser.password_hash);
 
   if (!isValid) {
-    throw new HttpError(401, "Invalid username or password.");
+    throw new HttpError(401, "Invalid username or password.", { code: "CREDENTIALS_REJECTED" });
   }
 
   return authenticatedUser;

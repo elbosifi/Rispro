@@ -303,10 +303,29 @@ export async function findRecoverableViewerContext(contextId: string, userId: Us
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
 export async function assertViewerLogin(contextId: string, user: { id: UserId; auth_version: number; role: string }) {
-  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(contextId)) throw new HttpError(400, 'Invalid viewer context.');
-  const session = await findRecoverableViewerContext(contextId, user.id);
-  if (!session?.recoveryState || session.recoveryState.authVersion !== user.auth_version || session.recoveryState.role !== user.role)
-    throw new HttpError(403, 'Sign in as the original viewer user with unchanged authorization.', { code: 'VIEWER_DENIED' });
+  const session = await requireRecoverableViewerContext(contextId, user.id);
+  if (session.recoveryState!.authVersion !== user.auth_version || session.recoveryState!.role !== user.role)
+    throw new HttpError(403, 'Viewer authorization changed. Reopen the study from RISpro.', { code: 'VIEWER_DENIED' });
+}
+// Diagnostics grant no access or clinical data. Renewal still performs every live
+// identity/authorization check, and the conditional update rechecks revocation.
+export async function requireRecoverableViewerContext(contextId: string, userId: UserId) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(contextId))
+    throw new HttpError(400, 'Invalid viewer context. Reopen the study from RISpro.', { code: 'VIEWER_CONTEXT_INVALID' });
+  const result = await pool.query<Row>('select * from viewer_launch_sessions where report_context_id=$1::uuid and user_id=$2', [contextId, userId]);
+  const session = result.rows[0] ? launchSessionRow(result.rows[0]) : null;
+  if (!session) {
+    // A retired/missing UUID must not keep asking the correct user to sign in.
+    // Return only an existence distinction; never another owner's session data.
+    const exists = await pool.query('select 1 from viewer_launch_sessions where report_context_id=$1::uuid', [contextId]);
+    if (!exists.rowCount) throw new HttpError(403, 'This viewer context is no longer available. Reopen the study from RISpro.', { code: 'VIEWER_CONTEXT_INVALID' });
+    throw new HttpError(403, 'Sign in as the original viewer user with unchanged authorization.', { code: 'VIEWER_USER_CHANGED' });
+  }
+  if (session.revokedAt) throw new HttpError(403, 'This viewer session has ended. Reopen the study from RISpro after signing in.', { code: 'VIEWER_REVOKED' });
+  if (!session.usedAt || new Date(session.expiresAt).getTime() <= Date.now() - VIEWER_RECOVERY_HOURS * 3600000)
+    throw new HttpError(403, 'The viewer recovery window ended. Reopen the study from RISpro.', { code: 'VIEWER_RECOVERY_EXPIRED' });
+  if (!session.recoveryState) throw new HttpError(403, 'This older viewer session has no recovery snapshot. Reopen the study from RISpro.', { code: 'VIEWER_RECOVERY_UNAVAILABLE' });
+  return session;
 }
 export async function extendViewerContext(session: ViewerLaunchSessionRecord, expiresAt: Date) {
   const result = await pool.query(`update viewer_launch_sessions s set expires_at=$3

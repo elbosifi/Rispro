@@ -34,6 +34,14 @@ async function dynamicFixture(c, archiveRequest) {
       MeasurementUnitsCodeSequence: [{ CodeValue: '1', CodingSchemeDesignator: 'UCUM', CodeMeaning: 'no units' }] }];
     instances.push(ds); await upload(ds);
   }
+  // Separate echoes must retain their own dimension groups, never become a
+  // temporal enhancement curve or be flattened into a 2D fallback.
+  for(let echo=0;echo<2;echo++)for(let slice=0;slice<slices;slice++){
+    const ds={...instances[echo*slices+slice],SOPInstanceUID:c.study+'.12.'+(echo*slices+slice+1),SeriesInstanceUID:c.study+'.12',SeriesNumber:12,
+      SeriesDescription:'SYNTHETIC TWO ECHO MDIXON-LIKE MR',EchoTime:2+echo*2,EchoNumbers:echo+1};
+    delete ds.TemporalPositionIdentifier;delete ds.NumberOfTemporalPositions;delete ds.AcquisitionDateTime;
+    await upload(ds);
+  }
   // Exercise the pinned loader's supported multiframe TimeSlotVector path.
   // This explicit synthetic compatibility layout does not claim support for all enhanced-MR dimension layouts.
   const enhanced = { ...instances[0], SOPClassUID: '1.2.840.10008.5.1.4.1.1.4.1', SOPInstanceUID: c.study + '.11.1', SeriesInstanceUID: c.study + '.11', SeriesNumber: 11,
@@ -109,6 +117,16 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     await page.waitForFunction(() => window.cornerstone.cache.getVolumes().some(v => v.isDynamicVolume?.() && v.dimensionGroupNumber === 2));
     const horizontal = await state(); assert.equal(horizontal.phase, 2); assert.deepEqual(horizontal.camera, before.camera); assert.deepEqual(horizontal.properties, before.properties);
     checks.push('horizontal drag changes phase and preserves camera, slice and VOI');
+    if(process.env.OHIF_DYNAMIC_RECOVERY==='1'){
+      const before=await state();
+      await page.evaluate(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()),gl=v.getRenderingEngine().getOffscreenMultiRenderWindow(v.id).getOpenGLRenderWindow().get3DContext(),ext=gl.getExtension('WEBGL_lose_context');window.__dynamicRestore=()=>ext.restoreContext();ext.loseContext();});
+      const recovery=page.getByRole('alert',{name:'Rendering recovery'});await recovery.waitFor();await page.waitForTimeout(100);await page.evaluate(()=>window.__dynamicRestore());await recovery.waitFor({state:'hidden',timeout:30000});
+      const after=await state();assert.equal(after.phase,before.phase);
+      // VTK may normalize signed zero while preserving identical geometry.
+      assert.deepEqual(JSON.parse(JSON.stringify(after.camera)),JSON.parse(JSON.stringify(before.camera)));assert.deepEqual(after.properties,before.properties);
+      assert.equal(await page.evaluate(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()),c=document.createElement('canvas');c.width=c.height=64;const ctx=c.getContext('2d');ctx.drawImage(v.canvas,0,0,64,64);const p=ctx.getImageData(0,0,64,64).data;let low=255,high=0;for(let i=0;i<p.length;i+=4){low=Math.min(low,p[i]);high=Math.max(high,p[i]);}return high-low>20;}),true);
+      checks.push('dynamic context restoration retains selected phase, camera and VOI with actual pixels');
+    }
     await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(start.x, start.y + 220, { steps: 12 }); await page.mouse.up();
     const vertical = await state(); assert.equal(vertical.phase, 2); assert.notDeepEqual(vertical.position, horizontal.position);
     await page.mouse.wheel(0, -150);
@@ -243,7 +261,9 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
       core.cache.removeImageLoadObject(id, { force: true }); return id.replace(/^wadors:/, '');
     });
     const missingURL = new URL(missingId, page.url()).href;
-    await page.route(missingURL, route => route.abort());
+    // A permanent missing frame is distinct from a temporary network outage,
+    // which the connection controller intentionally keeps pending for recovery.
+    await page.route(missingURL, route => route.fulfill({status:404,body:'Synthetic permanently missing phase frame'}));
     await page.evaluate(() => {
       const s = window.services, tools = window.cornerstoneTools, core = window.cornerstone, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
       const annotation = tools.annotation.state.getAnnotations('EllipticalROI', v.element)[0];
@@ -403,6 +423,18 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     await page.mouse.move(enhancedBox.x + enhancedCorners[1][0], enhancedBox.y + enhancedCorners[1][1], { steps: 10 }); await page.mouse.up();
     await chart.waitFor({ timeout: 30000 }); assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [100, 150, 125]);
     checks.push('supported enhanced multiframe compatibility layout samples the corresponding native frame per phase');
+    if(process.env.OHIF_DYNAMIC_RECOVERY==='1'){
+      url.searchParams.set('initialSeriesInstanceUID',c.study+'.12');await page.goto(url.href,{waitUntil:'domcontentloaded'});
+      await page.waitForFunction(()=>window.cornerstone?.cache.getVolumes().some(v=>v.isDynamicVolume?.()&&v.numDimensionGroups===2&&v.loadStatus.loaded));
+      assert.equal(await page.getByRole('button',{name:'Enhancement Curve',exact:true}).count(),0);
+      await page.evaluate(()=>{const volume=window.cornerstone.cache.getVolumes().find(v=>v.isDynamicVolume?.()&&v.numDimensionGroups===2);volume.dimensionGroupNumber=2;const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());v.render();});
+      await page.waitForTimeout(200);
+      await page.evaluate(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()),ext=v.getRenderingEngine().getOffscreenMultiRenderWindow(v.id).getOpenGLRenderWindow().get3DContext().getExtension('WEBGL_lose_context');window.__echoRestore=()=>ext.restoreContext();ext.loseContext();});
+      const recovery=page.getByRole('alert',{name:'Rendering recovery'});await recovery.waitFor();assert.equal(await recovery.getByRole('button',{name:'Open in 2D stack',exact:true}).count(),0);
+      await page.waitForTimeout(100);await page.evaluate(()=>window.__echoRestore());await recovery.waitFor({state:'hidden',timeout:30000});
+      assert.equal(await page.evaluate(()=>window.cornerstone.cache.getVolumes().find(v=>v.isDynamicVolume?.()&&v.numDimensionGroups===2).dimensionGroupNumber),2);
+      checks.push('two-echo MRI retains echo 2 through GPU recovery and refuses temporal analysis/stack flattening');
+    }
     url.searchParams.delete('risproDynamicMri'); url.searchParams.set('initialSeriesInstanceUID', c.study + '.2');
     await page.goto(url.href, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => { try { const s = window.services, v = s?.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()); return v?.getCurrentImageId?.()?.includes('.2/instances/'); } catch { return false; } }, null, { timeout: 90000 });

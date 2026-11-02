@@ -3,6 +3,46 @@ import assert from 'node:assert/strict';
 import {createConnection} from './src/connection.js';
 import {createReportStore} from './src/report-store.js';
 const error=(status,code)=>Response.json({error:{message:code,details:{code}}},{status});
+test('an unavailable optional cross-tab channel cannot reject a valid same-tab login',async()=>{
+  for(const constructorFails of [true,false]){
+    const f=fixture({fetcher:async url=>url.endsWith('/login')?Response.json({user:{id:7}}):Response.json({userId:7})});
+    f.target.BroadcastChannel=class {constructor(){if(constructorFails)throw Error('Channel unavailable');}postMessage(){throw Error('Channel unavailable');}close(){}};
+    f.controller.notify({status:401,code:'AUTH_EXPIRED'});
+    try{f.controller.start();await f.controller.login('original','correct');assert.equal(f.controller.getSnapshot().status,'connected');}finally{f.controller.destroy();}
+  }
+});
+test('credential rejection and rate limiting keep the form retryable with stage-specific feedback',async()=>{
+  for(const [status,code] of [[401,'CREDENTIALS_REJECTED'],[429,undefined],[403,'VIEWER_USER_CHANGED']]){
+    const f=fixture({fetcher:async()=>error(status,code)});
+    f.controller.notify({status:401,code:'AUTH_EXPIRED'});
+    await assert.rejects(f.controller.login('original','incorrect'));
+    assert.equal(f.controller.getSnapshot().status,'authentication-required');
+    assert.equal(f.controller.getSnapshot().stage,'credentials');
+    if(status===429)assert.match(f.controller.getSnapshot().message,/Too many login attempts/);
+    f.controller.destroy();
+  }
+});
+test('login cookie failure is distinct from successful login followed by failed viewer renewal',async()=>{
+  for(const scenario of ['cookie','renewal','old-context','revoked','origin']){
+    const calls=[];let broadcasts=0;
+    const f=fixture({fetcher:async(url,options)=>{
+      assert.equal(options.credentials,'same-origin');calls.push(url);
+      if(url.endsWith('/login'))return Response.json({user:{id:7}});
+      if(url.endsWith('/refresh'))return scenario==='cookie'?error(401,'AUTH_REQUIRED'):scenario==='origin'?error(403,'SESSION_DENIED'):Response.json({user:{id:7}});
+      return scenario==='old-context'?error(403,'VIEWER_RECOVERY_UNAVAILABLE'):scenario==='revoked'?error(403,'VIEWER_REVOKED'):error(503,'UNAVAILABLE');
+    }});
+    f.target.BroadcastChannel=class {postMessage(){broadcasts++;}close(){}};
+    f.controller.notify({status:401,code:'AUTH_EXPIRED'});
+    await assert.rejects(f.controller.login('original','correct'),e=>e.authenticated===true);
+    const state=f.controller.getSnapshot();
+    if(scenario==='cookie'){assert.equal(state.code,'SESSION_COOKIE_MISSING');assert.equal(state.stage,'cookie');assert.equal(calls.length,2);}
+    if(scenario==='renewal'){assert.equal(state.stage,'renewal');assert.match(state.message,/Sign-in succeeded/);}
+    if(['old-context','revoked'].includes(scenario)){assert.equal(state.status,'denied');const count=calls.length;await assert.rejects(f.controller.login('original','correct'));assert.equal(calls.length,count);}
+    if(scenario==='origin')assert.match(state.message,/Same-origin/);
+    assert.equal(broadcasts,['cookie','origin'].includes(scenario)?0:1,'Only a verified login cookie broadcasts, independently of viewer renewal');
+    f.controller.destroy();
+  }
+});
 function fixture(overrides={}) {
   const target=new EventTarget();target.navigator={onLine:true};target.document=new EventTarget();target.document.visibilityState='visible';
   const calls=[],delays=[];
@@ -150,7 +190,9 @@ test('explicit logout cannot be undone by an in-flight renewal response',async()
   class Channel {constructor(){channel=this;}close(){}}
   const target=new EventTarget();target.navigator={onLine:true};target.BroadcastChannel=Channel;
   let calls=0;const f=fixture({target,fetcher:async()=>{if(calls++===0)await new Promise(r=>release=r);return Response.json({userId:7});}});
-  const stop=f.controller.start();await new Promise(r=>setImmediate(r));channel.onmessage({data:{type:'logout'}});release();
+  const stop=f.controller.start();try{await new Promise(r=>setImmediate(r));channel.onmessage({data:{type:'logout'}});release();
   await new Promise(r=>setImmediate(r));assert.equal(f.controller.getSnapshot().status,'denied');
-  f.controller.notify(new TypeError('Late network error'));assert.equal(f.controller.getSnapshot().status,'denied');stop();
+  assert.equal(f.controller.getSnapshot().code,'VIEWER_LOGGED_OUT','A late renewal cannot replace the explicit logout reason');
+  f.controller.notify(new TypeError('Late network error'));assert.equal(f.controller.getSnapshot().status,'denied');
+  }finally{stop();}
 });

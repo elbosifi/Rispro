@@ -58,11 +58,15 @@ export async function runResilience({page,panel,context,pool,env,userId,credenti
   const expired=jwt.sign({sub:userId,role:'doctor',authVersion:0},env.jwtSecret,{expiresIn:-1});
   await context.addCookies([{name:env.cookieName,value:expired,url:origin,httpOnly:true}]);
   await panel.getByRole('button',{name:'Save',exact:true}).click();
-  const dialog=page.getByRole('dialog');await expect(dialog.getByText('Authentication required',{exact:true})).toBeVisible();
+  const dialog=page.getByRole('dialog');await expect(dialog.getByText('Session expired',{exact:true})).toBeVisible();
   await expect(dialog).toHaveCSS('opacity','1');assert.ok((await dialog.boundingBox()).width<=480,'The sign-in modal stays small on desktop');
   await page.screenshot({path:join(temp,c.modality+'-authentication-desktop.png')});
   await verify();await expect(findings).toHaveValue(retained);
   if(c.modality==='CT'){
+    await dialog.getByLabel('Username',{exact:true}).fill(credentials.username);await dialog.getByLabel('Password',{exact:true}).fill('synthetic-wrong-password');
+    await dialog.getByRole('button',{name:'Sign in',exact:true}).click();
+    await expect(dialog.getByRole('alert')).toHaveText('Invalid username or password.');
+    await expect(dialog.getByLabel('Password',{exact:true})).toHaveValue('synthetic-wrong-password');
     const username='resilience-login-other-'+randomUUID(),password='synthetic-other-login';
     const other=(await pool.query("insert into users(username,full_name,password_hash,role,is_active) values($1,'SYNTHETIC OTHER USER',$2,'doctor',true) returning id",[username,await bcrypt.hash(password,4)])).rows[0].id;
     try{
@@ -71,12 +75,30 @@ export async function runResilience({page,panel,context,pool,env,userId,credenti
       await verify();await expect(findings).toHaveValue(retained);
     }finally{await pool.query('delete from users where id=$1',[other]);}
   }
-  await dialog.getByLabel('Username',{exact:true}).fill(credentials.username);await dialog.getByLabel('Password',{exact:true}).fill(credentials.password);
+  // Password managers can set the native value without a React/input event.
+  await dialog.getByLabel('Username',{exact:true}).evaluate((el,value)=>{el.value=value;},credentials.username);
+  await dialog.getByLabel('Password',{exact:true}).evaluate((el,value)=>{el.value=value;},credentials.password);
+  const renewalUrl=origin+'/api/ohif/contexts/'+contextId+'/renew';
+  let renewalFailed=false,allowRenewal;
+  const renewalGate=new Promise(resolve=>{allowRenewal=resolve;});
+  const renewalFailure=async route=>{if(!renewalFailed){renewalFailed=true;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'Synthetic viewer renewal outage',details:{code:'SYNTHETIC_RENEWAL_OUTAGE'}}})});}else {await renewalGate;await route.continue();}};
+  if(c.modality==='CT')await page.route(renewalUrl,renewalFailure);
   await dialog.getByRole('button',{name:'Sign in',exact:true}).click();await expect(dialog).toBeHidden();
+  if(c.modality==='CT'){
+    await expect(page.getByText(/Sign-in succeeded, but viewer-context renewal failed/)).toBeVisible();
+    allowRenewal();
+    await page.unroute(renewalUrl,renewalFailure);
+    await expect(page.getByRole('button',{name:'Retry connection',exact:true})).toBeHidden({timeout:30000});
+  }
   await expect(findings).toHaveValue(retained);await verify();
   const saved=await page.evaluate(async id=>(await (await fetch('/api/native-reporting/appointments/'+id)).json()).report,c.appointmentId);
   assert.notEqual(saved.sections.findings,retained,'Dictated text still requires explicit Save');
   await panel.getByRole('button',{name:'Save',exact:true}).click();await panel.getByRole('status').filter({hasText:/^Saved$/}).waitFor();
+
+  if(process.env.OHIF_AUTH_STAGE_ONLY==='1'){
+    console.log(JSON.stringify({authenticationStages:'PASS',modality:c.modality,transport:nativeDelivery?'Native':'Express',domAutofill:true,credentialRejections:c.modality==='CT',renewalFailureSeparated:c.modality==='CT',unsavedWork:true}));
+    return;
+  }
 
   // Simulate eviction of one synthetic, non-visible frame. Keep the currently
   // displayed image in cache and assert identical decoded values after retry.
@@ -131,7 +153,7 @@ export async function runResilience({page,panel,context,pool,env,userId,credenti
   await page.setViewportSize({width:390,height:844});
   if(!await panel.isVisible())await page.getByRole('button',{name:'Report',exact:true}).first().click();
   await context.addCookies([{name:env.cookieName,value:expired,url:origin,httpOnly:true}]);
-  await findings.fill(retained+' Phone.');await panel.getByRole('button',{name:'Save',exact:true}).click();await expect(dialog.getByText('Authentication required',{exact:true})).toBeVisible();
+  await findings.fill(retained+' Phone.');await panel.getByRole('button',{name:'Save',exact:true}).click();await expect(dialog.getByText('Session expired',{exact:true})).toBeVisible();
   await expect(dialog).toHaveCSS('opacity','1');
   await page.screenshot({path:join(temp,c.modality+'-authentication-phone.png')});
   const bounds=await dialog.boundingBox();assert.ok(bounds.width<=390);
@@ -163,9 +185,19 @@ export async function runTabIsolation({pages,context,pool,env,userId}) {
     const original=jwt.sign({sub:userId,role:'doctor',authVersion:0},env.jwtSecret,{expiresIn:'1h'});
     await context.addCookies([{name:env.cookieName,value:original,url:origin,httpOnly:true}]);
     assert.equal((await pages[0].evaluate(async()=>({status:(await fetch('/api/auth/logout',{method:'POST'})).status}))).status,204);
+    await pages[0].evaluate(()=>{const channel=new BroadcastChannel('rispro-session');channel.postMessage({type:'logout'});channel.close();});
+    for(const page of pages){
+      const dialog=page.getByRole('dialog');await expect(dialog.getByText('Viewer session ended by logout',{exact:true})).toBeVisible();
+      assert.equal(await dialog.getByLabel('Password',{exact:true}).count(),0);
+      await expect(dialog.getByRole('link',{name:'Reopen study',exact:true})).toHaveAttribute('target','_blank');
+    }
     await context.addCookies([{name:env.cookieName,value:original,url:origin,httpOnly:true}]);
+    await pages[0].evaluate(()=>{const channel=new BroadcastChannel('rispro-session');channel.postMessage({type:'session-changed'});channel.close();});
     const contextId=new URL(pages[0].url()).searchParams.get('risproContext');
     const denied=await pages[0].evaluate(async id=>(await fetch('/api/ohif/contexts/'+id+'/renew',{method:'POST'})).status,contextId);assert.equal(denied,403);
-    console.log(JSON.stringify({resilience:'PASS',tabIsolation:true,changedUserDenied:true,logoutRevokesContexts:true,unsavedTextRetained:true}));
+    await expect(pages[0].getByRole('dialog').getByText('Viewer session ended by logout',{exact:true})).toBeVisible();
+    await pages[0].getByRole('button',{name:'Review unsaved work',exact:true}).click();await expect(pages[0].getByRole('dialog')).toBeHidden();
+    assert.equal(await pages[0].locator('textarea[aria-label="Findings"]').inputValue(),values[0]);
+    console.log(JSON.stringify({resilience:'PASS',tabIsolation:true,changedUserDenied:true,logoutRevokesContexts:true,logoutReasonRetained:true,reopenInNewTab:true,unsavedTextRetained:true}));
   } finally {await pool.query('delete from users where id=$1',[other]);}
 }

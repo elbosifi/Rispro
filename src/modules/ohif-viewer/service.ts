@@ -22,6 +22,7 @@ import {
   findAuthorizedViewerSession,
   findViewerContext,
   findRecoverableViewerContext,
+  requireRecoverableViewerContext,
   extendViewerContext,
   viewerSourceBinding,
   studyIdentity,
@@ -432,7 +433,7 @@ export async function authorizeViewerDicomWebRequest(input: {
 // Recovery keeps the UUID, allowlist, primary and report association immutable.
 // An expired selector is accepted here only, never for diagnostic reads/writes.
 export async function renewViewerContext(actor: Actor & { authVersion: number; mustChangePassword?: boolean }, contextId: string) {
-  const session = await findRecoverableViewerContext(contextId, actor.userId);
+  const session = await requireRecoverableViewerContext(contextId, actor.userId);
   const bound = session?.recoveryState;
   const denied = () => new HttpError(403, 'Viewer authorization changed or the recovery window ended. Local work is retained.', { code: 'VIEWER_DENIED' });
   if (!session || !bound || actor.mustChangePassword || bound.authVersion !== actor.authVersion || bound.role !== actor.appRole) throw denied();

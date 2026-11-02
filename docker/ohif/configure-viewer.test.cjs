@@ -3,6 +3,52 @@ const assert = require('node:assert/strict');
 const { getStudiesForPatientByMRN, diagnosticSeriesRules } = require('./configure-viewer.cjs');
 const { prioritizeSeries, loadProgressively, waitForDiagnosticImage } = require('./configure-progressive.cjs');
 
+test('VTK null compilation/binding stops before uniforms or draw; valid programs retain the upstream path', () => {
+  const {configureVolumeShaderGuard}=require('./configure-rendering-resilience.cjs');
+  // Pinned 34.15.1 shader boundary, including both compilation and cached binding.
+  let source=`publicAPI.updateShaders = (cellBO, ren, actor) => {
+    if (publicAPI.getNeedToRebuildShaders(cellBO, ren, actor)) {
+      const newShader = model._openGLRenderWindow.getShaderCache().readyShaderProgramArray('vertex','fragment','');
+      // if the shader changed reinitialize the VAO
+      if (newShader !== cellBO.getProgram()) cellBO.setProgram(newShader);
+    } else {
+      model._openGLRenderWindow.getShaderCache().readyShaderProgram(cellBO.getProgram());
+    }
+    publicAPI.setMapperShaderParameters(cellBO, ren, actor);
+    publicAPI.setCameraShaderParameters(cellBO, ren, actor);
+  };
+  publicAPI.setMapperShaderParameters = cellBO => {
+    // Now to update the VAO too, if necessary.
+    const program = cellBO.getProgram();
+    program.isAttributeUsed('vertexDC');
+  };`;
+  configureVolumeShaderGuard((_file,anchor,value)=>{assert.equal(source.split(anchor).length,2);source=source.replace(anchor,value);});
+  for(const rebuild of [true,false])for(const lost of [true,false]){
+    const api={getNeedToRebuildShaders:()=>rebuild,setCameraShaderParameters:()=>assert.fail('A failed shader reached camera uniforms')};
+    const model={context:{isContextLost:()=>lost},_openGLRenderWindow:{getShaderCache:()=>({readyShaderProgramArray:()=>null,readyShaderProgram:()=>null})}};
+    const cell={getProgram:()=>null,setProgram:p=>assert.equal(p,null)};
+    new Function('publicAPI','model',source)(api,model);
+    assert.throws(()=>api.updateShaders(cell),e=>e.code===(lost?'context-lost':'shader-failed'));
+    assert.throws(()=>api.setMapperShaderParameters(cell),e=>e.code==='shader-failed');
+  }
+  let uniforms=0,attributes=0;
+  const program={isAttributeUsed:()=>attributes++},api={getNeedToRebuildShaders:()=>false,setCameraShaderParameters:()=>uniforms++};
+  new Function('publicAPI','model',source)(api,{_openGLRenderWindow:{getShaderCache:()=>({readyShaderProgram:()=>program})}});
+  api.updateShaders({getProgram:()=>program});assert.equal(uniforms,1);assert.equal(attributes,1);
+});
+
+test('rendering backport fails closed before patching a different Cornerstone or VTK version', () => {
+  const {configureRenderingResilience}=require('./configure-rendering-resilience.cjs');
+  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+  for(const [core,vtk] of [['4.16.0','34.15.1'],['4.15.29','36.1.0']]){
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'rispro-render-version-'));
+    try{
+      for(const [pkg,version] of [['@cornerstonejs/core',core],['@kitware/vtk.js',vtk]]){const directory=path.join(root,'node_modules',pkg);fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify({version}));}
+      assert.throws(()=>configureRenderingResilience(root),/backport version changed/);
+    }finally{fs.rmSync(root,{recursive:true,force:true});}
+  }
+});
+
 test('progressive QIDO priority preserves sidebar input, explicit series, count evidence and stable ties', () => {
   const series = [
     { SeriesInstanceUID: '1', Modality: 'MR', SeriesDescription: 'localizer', NumberOfSeriesRelatedInstances: 3 },

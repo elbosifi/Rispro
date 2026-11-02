@@ -25,7 +25,7 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
   const patch = update => {
     // Logout/revocation is terminal for this page, including late network or
     // heartbeat completions. Only a newly authorized viewer may replace it.
-    if(state.status==='denied' && update.status && update.status!=='denied')return;
+    if(state.status==='denied' && (state.code==='VIEWER_LOGGED_OUT' || update.status && update.status!=='denied'))return;
     state = { ...state, ...update }; listeners.forEach(fn => fn());
   };
   const request = async (url, body) => {
@@ -35,13 +35,13 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
       const response = await fetcher(url, { method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw Object.assign(new Error(payload.error?.message || 'Connection unavailable.'), { status: response.status, code: payload.error?.details?.code });
+      if (!response.ok) throw Object.assign(new Error(payload.error?.message || 'Connection unavailable.'), { status: response.status, code: payload.error?.details?.code, stage: url.endsWith('/login') ? 'credentials' : url.endsWith('/refresh') ? 'cookie' : 'renewal' });
       return payload;
     } finally { clearTimer(timer);requests.delete(controller); }
   };
   const failure = error => {
-    if (error.status === 401 && ['AUTH_REQUIRED', 'AUTH_EXPIRED'].includes(error.code)) patch({ status: 'authentication-required', message: 'Sign in as the original viewer user to continue.' });
-    else if ([401,403,404,409].includes(error.status)) { authorizationEpoch++;patch({ status: 'denied', message: error.message }); }
+    if (error.status === 401 && ['AUTH_REQUIRED', 'AUTH_EXPIRED'].includes(error.code)) patch({ status: 'authentication-required', code: error.code, stage: error.stage, message: 'Sign in as the original viewer user to continue.' });
+    else if ([400,401,403,404,409].includes(error.status)) { authorizationEpoch++;patch({ status: 'denied', code: error.code, stage: error.stage, message: error.message }); }
     else patch({ status: 'reconnecting', message: 'Connection interrupted. Loaded images and unsaved work are retained.' });
     if(state.status==='denied' || state.status==='authentication-required')cancelRecovery();
     if(state.status==='denied'){
@@ -87,7 +87,7 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
         lastRenewed = now();
         recoveryRequested=false;
         if(!failedReads.size)cancelRecovery();
-        patch({ status: failedReads.size?'reconnecting':'connected', message: '' });
+        patch({ status: failedReads.size?'reconnecting':'connected', message: '', code: undefined, stage: undefined });
         const signedIn=authentication;authentication=null;signedIn?.resolve();
         resumeReads();
         return result;
@@ -127,14 +127,38 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
     getSnapshot: () => state,
     renew,
     async login(username, password) {
+      let authenticated = false;
+      if (state.status === 'denied') throw new Error('This viewer session has ended. Reopen the study from RISpro.');
       try {
         const result = await request('/api/auth/login', { username, password, viewerContextId: contextId });
+        authenticated = true;
         if (userId != null && Number(result.user.id) !== Number(userId)) throw Object.assign(new Error('Sign in as the original viewer user.'), { status: 403 });
+        // HttpOnly cookies cannot be read by JavaScript. This authenticated
+        // round-trip verifies that the browser actually sent the login cookie.
+        try { await request('/api/auth/refresh'); }
+        catch (error) {
+          if (error.status === 401) throw Object.assign(error, { code: 'SESSION_COOKIE_MISSING', message: 'Credentials accepted, but the session cookie was not accepted or sent. Open RISpro on this same address, sign in, then retry.' });
+          throw error;
+        }
+        // The verified login cookie belongs to the browser session even if
+        // this tab's live context renewal subsequently fails.
+        try {
+          if(target.BroadcastChannel){const channel=new target.BroadcastChannel('rispro-session');try{channel.postMessage({type:'session-changed'});}finally{channel.close();}}
+        } catch { /* Cross-tab notification cannot replace same-tab authorization. */ }
         await renew();
-        if(target.BroadcastChannel){const channel=new target.BroadcastChannel('rispro-session');channel.postMessage({type:'session-changed'});channel.close();}
         const pending = authentication; authentication = null; pending?.resolve();
         controller.retry();
-      } catch (error) { patch({ message: error.message }); throw error; }
+      } catch (error) {
+        const contextFailure = error.code?.startsWith('VIEWER_') && error.code !== 'VIEWER_USER_CHANGED';
+        if (contextFailure) failure(error);
+        const message = error.status === 429 ? 'Too many login attempts. Wait a few minutes, then retry.'
+          : error.code === 'SESSION_DENIED' ? 'Same-origin session check failed. Open RISpro using this viewer address and sign in again.'
+          : authenticated && error.stage === 'renewal' ? 'Sign-in succeeded, but viewer-context renewal failed. ' + error.message
+          : error.message;
+        patch({ message, stage: contextFailure ? 'viewer-context' : error.stage || 'credentials', code: error.code });
+        error.authenticated = authenticated || contextFailure || error.code === 'VIEWER_USER_CHANGED';
+        throw error;
+      }
     },
     // Only callers implementing DICOM GETs may use this. No report mutations.
     read(key, work, signal, cancel) {
@@ -195,9 +219,10 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
       const disconnected = () => controller.notify(new TypeError('Network connection unavailable. Work is retained in this tab.'));
       const events = [['pointerdown',active],['keydown',active],['wheel',active],['focus',focus],['online',connected],['offline',disconnected]];
       events.forEach(([name,fn]) => target.addEventListener(name,fn));
-      const channel=target.BroadcastChannel?new target.BroadcastChannel('rispro-session'):null;
+      let channel=null;
+      try{if(target.BroadcastChannel)channel=new target.BroadcastChannel('rispro-session');}catch{ /* Optional browser capability. */ }
       if(channel)channel.onmessage=event=>{
-        if(event.data?.type==='logout')failure(Object.assign(new Error('RISpro was signed out. Viewer access is stopped; local work is retained.'),{status:403}));
+        if(event.data?.type==='logout')failure(Object.assign(new Error('RISpro was signed out. Reopen the study after signing in again. Local work is retained.'),{status:403,code:'VIEWER_LOGGED_OUT'}));
         else if(event.data?.type==='session-changed')renew().catch(()=>{});
       };
       target.document?.addEventListener('visibilitychange', visibility);

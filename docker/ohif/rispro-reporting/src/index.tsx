@@ -2,13 +2,15 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { connection } from './connection';
 import ConnectionDialog from './ConnectionDialog';
+import RenderingStatus from './RenderingStatus';
+import { createRenderingRecovery } from './rendering-recovery';
 import { Button } from '@ohif/ui-next';
 import { createReportStore } from './report-store';
 import { createCaptureAdapter } from './capture';
 import ReportPanel from './ReportPanel';
 
 const id='@rispro/extension-reporting',panel=id+'.panelModule.report';
-let store,adapter,subscriptions=[],beforeUnload,connectionRoot,connectionNode,stopConnection;
+let store,adapter,subscriptions=[],beforeUnload,connectionRoot,connectionNode,stopConnection,renderingRecovery;
 function show(servicesManager) {
   const service=servicesManager.services.panelService;
   // v3.12.6's wrapper retains closedManually even for forceActive. Its layout
@@ -27,8 +29,10 @@ const extension={
     const contextId=new URLSearchParams(window.location.search).get('risproContext');
     if(!contextId)return;
     if(connection){
+      renderingRecovery=createRenderingRecovery(servicesManager);
+      window.risproRenderingDiagnostics=renderingRecovery.diagnostics;
       connectionNode=document.createElement('div');document.body.appendChild(connectionNode);
-      connectionRoot=createRoot(connectionNode);connectionRoot.render(<ConnectionDialog connection={connection}/>);
+      connectionRoot=createRoot(connectionNode);connectionRoot.render(<><ConnectionDialog connection={connection}/><RenderingStatus recovery={renderingRecovery}/></>);
       stopConnection=connection.start();
     }
     adapter=createCaptureAdapter(servicesManager,commandsManager);
@@ -53,6 +57,6 @@ const extension={
       }
     }).catch(error=>{if(store===activeStore){store.setError(error);install();}});
   },
-  onModeExit(){subscriptions.forEach(s=>s.unsubscribe());subscriptions=[];stopConnection?.();connectionRoot?.unmount();connectionNode?.remove();window.removeEventListener('beforeunload',beforeUnload);store?.destroy();adapter?.destroy();store=null;adapter=null;},
+  onModeExit(){subscriptions.forEach(s=>s.unsubscribe());subscriptions=[];renderingRecovery?.destroy();delete window.risproRenderingDiagnostics;stopConnection?.();connectionRoot?.unmount();connectionNode?.remove();window.removeEventListener('beforeunload',beforeUnload);store?.destroy();adapter?.destroy();store=null;adapter=null;},
 };
 export default extension;

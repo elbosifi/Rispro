@@ -102,6 +102,21 @@ test('OHIF renewal and in-page login retain context identity and reject revoked 
     await pool.query('update users set password_hash=$2 where id=$1',[other.userId,await bcrypt.hash('synthetic-other-password',4)]);
     const wrongUser=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:originalOther.username,password:'synthetic-other-password',viewerContextId:second.reportContextId})});assert.equal(wrongUser.status,403);assert.equal(wrongUser.headers.get('set-cookie'),null);
     const logout=await fetch(origin+'/api/auth/logout',{method:'POST',headers:cookie(expired)});assert.equal(logout.status,204);await assert.rejects(()=>renewViewerContext(actor,second.reportContextId));
+    const plainLogin=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:originalUser.username,password:'synthetic-recovery-password'})});
+    assert.equal(plainLogin.status,200,'Normal login works independently of revoked viewer contexts');
+    const afterLogoutCookie=plainLogin.headers.get('set-cookie')!.split(';')[0];
+    const oldViewer=await fetch(origin+'/api/ohif/contexts/'+second.reportContextId+'/renew',{method:'POST',headers:{Cookie:afterLogoutCookie}});
+    assert.equal(oldViewer.status,403);assert.equal((await oldViewer.json()).error.details.code,'VIEWER_REVOKED');
+    const freshContext=await make();
+    const freshRenewal=await fetch(origin+'/api/ohif/contexts/'+freshContext.reportContextId+'/renew',{method:'POST',headers:{Cookie:afterLogoutCookie}});
+    assert.equal(freshRenewal.status,200,'A fresh authorized context works after logout/login');
+    await pool.query('update viewer_launch_sessions set recovery_state=null where id=$1',[freshContext.id]);
+    const legacy=await fetch(origin+'/api/ohif/contexts/'+freshContext.reportContextId+'/renew',{method:'POST',headers:{Cookie:afterLogoutCookie}});
+    assert.equal(legacy.status,403);assert.equal((await legacy.json()).error.details.code,'VIEWER_RECOVERY_UNAVAILABLE');
+    const retired=await fetch(origin+'/api/ohif/contexts/'+randomUUID()+'/renew',{method:'POST',headers:{Cookie:afterLogoutCookie}});
+    assert.equal(retired.status,403);assert.equal((await retired.json()).error.details.code,'VIEWER_CONTEXT_INVALID');
+    const rejected=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:originalUser.username,password:'wrong'})});
+    assert.equal(rejected.status,401);assert.equal((await rejected.json()).error.details.code,'CREDENTIALS_REJECTED');
   } finally {
     if(server)await new Promise<void>(r=>{server!.closeAllConnections();server!.close(()=>r());});env.ohifEnabled=oldEnabled;
     await pool.query('update users set role=$2,auth_version=$3,is_active=$4,password_hash=$5 where id=$1',[doctor.userId,originalUser.role,originalUser.auth_version,originalUser.is_active,originalUser.password_hash]);
@@ -581,7 +596,8 @@ test('signing rejects a live modality change even with an otherwise fresh catalo
 
 test('personal native and external activity uses diagnostic modality, real signer and Tripoli calendar boundaries',async()=>{
   const signer=await user('activity'),signerId=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[signer.userId])).rows[0].id;
-  await pool.query("insert into doctor_portal.doctor_modality_permissions(doctor_id,modality_id,can_report,active) select $1,id,true,true from modalities where code='MR'",[signerId]);
+  const permission=await pool.query("insert into doctor_portal.doctor_modality_permissions(doctor_id,modality_id,can_report,active) select $1,id,true,true from modalities where code in ('MR','MRI')",[signerId]);
+  assert.ok(permission.rowCount,'The synthetic signer must have an MR/MRI permission before exercising activity');
   const dates=(await pool.query(`select ((now() at time zone 'Africa/Tripoli')::date::timestamp at time zone 'Africa/Tripoli') start`)).rows[0];
   const midnight=new Date(dates.start).getTime();
   const times=[midnight,midnight-1,midnight-6*86400000,midnight-6*86400000-1,midnight-29*86400000,midnight-29*86400000-1,midnight+86400000];

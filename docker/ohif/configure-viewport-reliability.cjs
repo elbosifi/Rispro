@@ -148,6 +148,7 @@ function configureViewportReliability(root) {
         if (!recoverMobileMpr(servicesManager, viewportId, displaySets, viewport.type, error)) throw error;
         return;
       }`);
+  require('./configure-rendering-resilience.cjs').configureRenderingResilience(root);
 }
 
 module.exports = { configureViewportReliability, recoverMobileMpr };
