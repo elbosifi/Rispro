@@ -130,6 +130,8 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     const listing = await request(`/api/documents?patientId=${fixture.patientId}`); assert.ok(!listing.body.documents.some((d: { id: number }) => Number(d.id) === report));
     await assert.rejects(() => getDocumentById(report));
     const denied = await request(`/api/gamma-knife/episodes/${episode.id}/documents/${report}`, undefined, createTestAuthCookie(outsider,'doctor')); assert.equal(denied.status, 403);
+    const futureVisit = await request(`/api/gamma-knife/episodes/${episode.id}/actions/followup`, { revision: episode.revision, date: '2999-12-31', condition: 'Synthetic future follow-up' }); assert.equal(futureVisit.status, 400);
+    const preTreatmentVisit = await request(`/api/gamma-knife/episodes/${episode.id}/actions/followup`, { revision: episode.revision, date: '2026-10-24', condition: 'Synthetic pre-treatment follow-up' }); assert.equal(preTreatmentVisit.status, 400);
     await command('followup', { date: '2026-10-25', condition: 'Synthetic follow-up', imaging: 'Synthetic imaging', response: 'Recorded response', complications: '' }); assert.equal(episode.data.followups?.length, 1);
   });
   it('publishes only allowed routine documents and immediately invalidates replaced/revoked QR tokens', async () => {

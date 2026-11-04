@@ -9,9 +9,21 @@
 .gk-shell .gk-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; border-radius: .875rem; gap: .25rem; padding: .375rem; }
 .gk-shell .gk-tabs > button { flex-shrink: 0; min-height: 2.75rem; white-space: nowrap; border-radius: .625rem; }
 .gk-shell .gk-tabs > button[aria-selected="true"] { color: var(--accent); background: var(--background); box-shadow: 0 1px 4px var(--border); }
+.gk-shell .gk-tabs > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gk-shell .gk-next-action { border-inline-start: 3px solid var(--accent); padding-inline-start: 1rem; }
 .gk-shell [role="alert"] { border-inline-start: 3px solid var(--accent); padding: .75rem 1rem; background: var(--background); border-radius: .5rem; }
+.gk-clinical-snapshot { border-block: 1px solid var(--border); padding-block: .75rem; }
+.gk-snapshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1rem; }
+.gk-snapshot-grid > div { min-width: 0; border-inline-start: 2px solid var(--border); padding-inline-start: .75rem; }
+.gk-snapshot-grid dt { color: var(--muted-foreground); font-size: .75rem; }
+.gk-snapshot-grid dd { overflow-wrap: anywhere; font-size: .875rem; }
+.gk-assessment-preview { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.gk-clinical-note { border-inline-start: 3px solid var(--accent); padding: .5rem .75rem; color: var(--muted-foreground); }
+.gk-required-progress progress { display: block; width: min(100%, 24rem); height: .5rem; margin-block: .4rem; accent-color: var(--accent); }
+.gk-followup-form textarea { min-height: 4.5rem; }
 @media (max-width: 640px) {
-  .gk-shell .gk-tabs > button { font-size: .8rem; }
+  .gk-shell .gk-tabs { flex-wrap: wrap; overflow: visible; }
+  .gk-shell .gk-tabs > button { flex: 1 1 auto; font-size: .8rem; }
   .gk-shell form > button { min-height: 2.75rem; }
+  .gk-snapshot-grid { grid-template-columns: 1fr; }
 }

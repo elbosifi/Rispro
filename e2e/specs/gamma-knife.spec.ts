@@ -15,15 +15,17 @@ test.beforeAll(async () => {
   const db = new pg.Pool({ connectionString: target.url });
   try {
     const patient = await db.query(`insert into patients(arabic_full_name,english_full_name,national_id,normalized_arabic_name,sex,age_years,phone_1,identifier_type,identifier_value)
-      values('مريض غاما نايف التجريبي','E2E Gamma Knife Patient','100000000094','مريض غاما نايف التجريبي','F',45,'0910000094','national_id','100000000094') returning id`);
+      values('مريض قاما نايف التجريبي','E2E Gamma Knife Patient','100000000094','مريض قاما نايف التجريبي','F',45,'0910000094','national_id','100000000094') returning id`);
     patientId = Number(patient.rows[0].id);
-    const arabicPatient = await db.query("insert into patients(arabic_full_name,english_full_name,national_id,normalized_arabic_name,sex,age_years,phone_1,identifier_type,identifier_value) values('مريض تعريب غاما نايف','Arabic Gamma Knife Patient','100000000093','مريض تعريب غاما نايف','M',42,'0910000093','national_id','100000000093') returning id");
+    const arabicPatient = await db.query("insert into patients(arabic_full_name,english_full_name,national_id,normalized_arabic_name,sex,age_years,phone_1,identifier_type,identifier_value) values('مريض تعريب قاما نايف','Arabic Gamma Knife Patient','100000000093','مريض تعريب قاما نايف','M',42,'0910000093','national_id','100000000093') returning id");
     arabicPatientId = Number(arabicPatient.rows[0].id);
     const exams = await db.query('select id,modality_id from exam_types where is_active=true order by id limit 2');
     expect(exams.rows).toHaveLength(2);
     const policy = await db.query('select id from appointments_v2.policy_versions order by id limit 1');
     for (const exam of exams.rows) await db.query(`insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,booking_date,booking_time,case_category,requires_report,status,policy_version_id,capacity_resolution_mode,uses_special_quota,is_walk_in)
       values($1,$2,$3,$4,'09:00','non_oncology',false,'scheduled',$5,'standard',false,false)`, [patientId, exam.modality_id, exam.id, e2eTomorrowInTripoli(), policy.rows[0].id]);
+    await db.query(`insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,booking_date,booking_time,case_category,requires_report,status,policy_version_id,capacity_resolution_mode,uses_special_quota,is_walk_in)
+      values($1,$2,$3,$4,'09:00','non_oncology',false,'scheduled',$5,'standard',false,false)`, [arabicPatientId, exams.rows[0].modality_id, exams.rows[0].id, e2eTomorrowInTripoli(), policy.rows[0].id]);
     const setting = await db.query("select setting_value from system_settings where category='gamma_knife' and setting_key='config'");
     await db.query("update system_settings set setting_value=$1::jsonb where category='gamma_knife' and setting_key='config'", [JSON.stringify({ ...setting.rows[0].setting_value, treatmentExamTypeId: Number(exams.rows[0].id), followupExamTypeId: Number(exams.rows[1].id) })]);
     await db.query("update system_settings set setting_value=$1::jsonb where category='deployment_identity' and setting_key='public_app_base_url'", [JSON.stringify({ value: 'http://127.0.0.1:5173' })]);
@@ -47,6 +49,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByLabel('Find patient').fill('E2E Gamma Knife');
   await expect(page.getByRole('combobox', { name: 'Patient', exact: true }).locator(`option[value="${patientId}"]`)).toHaveCount(1);
   await page.getByRole('combobox', { name: 'Patient', exact: true }).selectOption(String(patientId));
+  await expect(page.getByRole('status').filter({ hasText: 'Selected patient: E2E Gamma Knife Patient' })).toBeVisible();
   await page.getByLabel('Provisional diagnosis').fill('Synthetic Gamma Knife referral');
   await page.getByRole('button', { name: 'Create episode' }).click();
   await expect(page.getByRole('heading', { name: 'E2E Gamma Knife Patient' })).toBeVisible();
@@ -56,6 +59,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
     await page.getByRole('button', { name: `${field} *`, exact: true }).click();
     await page.getByLabel(field, { exact: true }).fill(`Synthetic ${field}`);
   }
+  await expect(page.getByText('Required sections complete: 4/4')).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Saved', { timeout: 10000 });
   await page.getByRole('button', { name: 'Submit provisional', exact: true }).click();
   await expect(page.getByText('Assessment: Provisional')).toBeVisible();
@@ -65,11 +69,30 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByRole('button', { name: 'Submit finalized', exact: true }).click();
   await expect(page.getByText('Assessment: Finalized')).toBeVisible();
   await page.getByRole('tab', { name: 'MDT', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Clinical summary: Finalized', exact: true })).toBeVisible();
   await page.getByLabel('Responsible consultants (one name per line)').fill('External consultant');
   await page.getByRole('combobox', { name: 'Decision', exact: true }).selectOption('approved');
   await page.getByRole('button', { name: 'Record MDT decision', exact: true }).click();
   await expect(page.getByText('Current status: Preparation')).toBeVisible();
+  await page.getByRole('tab', { name: 'MDT', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Correct recorded MDT decision', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Correct recorded MDT decision', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Cancel MDT correction', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('mdt-correction-open-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('mdt-correction-open-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.getByRole('button', { name: 'Cancel MDT correction', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Correct recorded MDT decision', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Correct recorded MDT decision', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Responsible consultants (one name per line)', exact: true })).toHaveValue('External consultant');
+  await expect(page.getByRole('combobox', { name: 'Decision', exact: true })).toHaveValue('approved');
+  await page.getByRole('textbox', { name: 'Discussion', exact: true }).fill('Synthetic correction; approval remains unchanged.');
+  await page.getByRole('textbox', { name: 'Correction reason', exact: true }).fill('Added a missing discussion note.');
+  await page.getByRole('button', { name: 'Save MDT correction', exact: true }).click();
+  await expect(page.getByText('Current status: Preparation')).toBeVisible();
   await page.getByRole('tab', { name: 'Treatment', exact: true }).click();
+  await expect(page.getByText('This count describes the whole course. RISpro does not record delivery or interruption of individual fractions.', { exact: true })).toBeVisible();
   await page.getByLabel('Consent', { exact: true }).check();
   await page.getByLabel('Required imaging', { exact: true }).check();
   await page.getByLabel('Clinical readiness', { exact: true }).check();
@@ -91,15 +114,36 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByRole('button', { name: 'Link appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled · Confirmed/)).toBeVisible();
   await page.getByLabel('Treatment team (one name per line)').fill('Synthetic clinician');
+  const beforeIncompleteAttempt = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
+  const incompleteAttempt = await page.request.post(`${api}/gamma-knife/episodes/${episodeId}/actions/completion`, { data: { revision: beforeIncompleteAttempt.episode.revision, date: e2eTodayInTripoli(), immobilization: 'frame', fractions: 1, team: ['Synthetic clinician'], confirmed: false } });
+  expect(incompleteAttempt.status()).toBe(409);
+  const afterIncompleteAttempt = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
+  expect(afterIncompleteAttempt.episode.status).toBe('treatment');
+  expect(afterIncompleteAttempt.episode.data.treatment).toBeUndefined();
   await page.getByLabel('I confirm that treatment was clinically completed').check();
   await page.getByRole('button', { name: 'Record completed treatment' }).click();
-  await expect(page.getByText('Treatment report pending', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByText('Treatment report pending', { exact: true })).toBeVisible();
+  const reconciliation = page.getByRole('status').filter({ hasText: 'Treatment completion is recorded, but this RISpro booking is still marked scheduled.' });
+  await expect(reconciliation).toBeVisible();
+  await expect(reconciliation.getByRole('link', { name: 'Review booking in RISpro', exact: true })).toHaveAttribute('href', `/appointments?patientId=${patientId}`);
+  await page.getByRole('tab', { name: 'Follow-up', exact: true }).click();
+  await expect(page.getByText('Episode closure is available after treatment documentation is finalized.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close episode', exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Treatment', exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('treatment-report-pending.png'), fullPage: true });
   await page.getByRole('button', { name: 'Upload treatment report', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Documents', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('combobox', { name: 'Document category', exact: true })).toHaveValue('treatment_report');
   const file = { name: 'patient-instructions.pdf', mimeType: 'application/pdf', buffer: readFileSync('e2e/e2e-request.pdf') };
   await page.getByLabel('Document category').selectOption('patient_instructions');
+  await page.getByLabel('File (PDF, JPEG or PNG)').setInputFiles({ ...file, name: 'wrong-document.pdf' });
+  await page.screenshot({ path: testInfo.outputPath('document-selected-for-removal-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('document-selected-for-removal-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.getByRole('button', { name: 'Clear selected file', exact: true }).click();
+  await expect(page.getByText('No file selected', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Upload document', exact: true })).toBeDisabled();
   await page.getByLabel('File (PDF, JPEG or PNG)').setInputFiles(file);
   await page.getByRole('button', { name: 'Upload document', exact: true }).click();
   await expect(page.getByRole('link', { name: 'patient-instructions.pdf' })).toBeVisible();
@@ -112,7 +156,9 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByRole('tab', { name: 'Treatment', exact: true }).click();
   await page.getByRole('combobox', { name: 'Treatment report', exact: true }).selectOption({ label: 'treatment-report.pdf' });
   await page.getByRole('button', { name: 'Finalize treatment documentation', exact: true }).click();
-  await expect(page.getByText('Documentation finalized', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByText('Documentation finalized', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Follow-up', exact: true })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('tab', { name: 'Documents', exact: true }).click();
   await page.getByRole('button', { name: 'Create QR code', exact: true }).click();
   const publicLink = page.getByRole('link', { name: 'Open patient page' });
@@ -122,6 +168,13 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByLabel('Confirmed with patient').check();
   await page.getByRole('button', { name: 'Link appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled · Confirmed/)).toBeVisible();
+  await page.getByLabel('Clinical condition and symptoms').fill('Mistyped follow-up draft');
+  await page.screenshot({ path: testInfo.outputPath('followup-unsaved-draft-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('followup-unsaved-draft-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.getByRole('button', { name: 'Clear unsaved follow-up', exact: true }).click();
+  await expect(page.getByLabel('Clinical condition and symptoms')).toHaveValue('');
   await page.getByLabel('Clinical condition and symptoms').fill('Synthetic follow-up condition');
   await page.getByRole('button', { name: 'Save follow-up visit' }).click();
   await expect(page.getByText('Synthetic follow-up condition', { exact: true })).toBeVisible();
@@ -130,6 +183,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
     for (const tab of ['Clinical','MDT','Treatment','Documents','Follow-up']) {
       await page.getByRole('tab', { name: tab, exact: true }).click();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.locator('#gk-profile-tabs').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`profile-${tab}-${width}.png`), fullPage: true });
     }
   }
@@ -138,6 +192,13 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.screenshot({ path: testInfo.outputPath('patient-list-mobile.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.screenshot({ path: testInfo.outputPath('patient-list-desktop.png'), fullPage: true });
+  await page.getByRole('combobox', { name: 'Follow-up timing', exact: true }).selectOption('overdue');
+  await expect(page.getByText('No Gamma Knife episodes match these filters.', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Follow-up timing', exact: true }).selectOption('due');
+  const openNextTask = page.getByRole('link', { name: 'Open next task: E2E Gamma Knife Patient', exact: true });
+  await expect(openNextTask).toBeVisible();
+  await openNextTask.click();
+  await expect(page.getByRole('tab', { name: 'Follow-up', exact: true })).toHaveAttribute('aria-selected', 'true');
   const patientContext = await browser.newContext(); await patientContext.addInitScript(() => localStorage.setItem('rispro-language', 'en')); const patient = await patientContext.newPage();
   await patient.addInitScript(() => {
     const original = Response.prototype.blob;
@@ -173,6 +234,45 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   const revoke = await page.request.post(`${api}/gamma-knife/episodes/${episodeId}/actions/qr_revoke`, { data: { revision: current.episode.revision } }); expect(revoke.ok()).toBeTruthy();
   await patient.reload(); await expect(patient.getByText('This patient link is unavailable. Please contact the clinic.')).toBeVisible();
   await patientContext.close();
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
+  await page.getByRole('tab', { name: 'Follow-up', exact: true }).click();
+  await page.getByLabel(/Reason for ending this episode/).fill('Synthetic closure after completed follow-up');
+  await page.getByRole('button', { name: 'Close episode', exact: true }).click();
+  await expect(page.getByText('Current status: Closed')).toBeVisible();
+  await page.getByRole('link', { name: 'Patient list', exact: true }).click();
+  await page.getByRole('button', { name: 'Register referral' }).click();
+  await page.getByLabel('Find patient').fill('E2E Gamma Knife Patient');
+  await expect(page.getByRole('combobox', { name: 'Patient', exact: true }).locator(`option[value="${patientId}"]`)).toHaveCount(1);
+  await page.getByRole('combobox', { name: 'Patient', exact: true }).selectOption(String(patientId));
+  await expect(page.getByRole('status').filter({ hasText: 'Selected patient: E2E Gamma Knife Patient' })).toBeVisible();
+  await page.getByLabel('Provisional diagnosis').fill('Multiple brain metastases; four synthetic intracranial lesions');
+  await page.getByRole('button', { name: 'Create episode' }).click();
+  await expect(page).toHaveURL(/\/gamma-knife\/episodes\/\d+$/);
+  const multipleLesionEpisodeId = Number(new URL(page.url()).pathname.split('/').pop());
+  await expect(page.getByRole('heading', { name: 'E2E Gamma Knife Patient' })).toBeVisible();
+  await page.getByLabel('History', { exact: true }).fill('Prior Gamma Knife episode is available in the patient history.');
+  for (const field of ['Examination','Imaging information','Clinical assessment']) {
+    await page.getByRole('button', { name: `${field} *`, exact: true }).click();
+    await page.getByLabel(field, { exact: true }).fill(field === 'Imaging information' ? 'Four synthetic lesion identifiers: L1, L2, L3, and L4. No dose values.' : `Synthetic multiple-lesion ${field.toLowerCase()}`);
+  }
+  await page.getByRole('button', { name: 'Prior treatment', exact: true }).click();
+  await page.getByLabel('Prior treatment', { exact: true }).fill('Previous completed Gamma Knife episode; review its treatment record before this MDT.');
+  await page.getByRole('button', { name: 'Other: Additional information', exact: true }).click();
+  await page.getByLabel('Diagnosis-specific information', { exact: true }).fill('Four synthetic lesions documented separately as L1, L2, L3, and L4 for multidisciplinary review.');
+  await page.getByRole('button', { name: 'Submit finalized', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'MDT', exact: true })).toHaveAttribute('aria-selected', 'true');
+  expect(await page.locator(`a[href="/gamma-knife/episodes/${episodeId}"]`).count()).toBe(1);
+  await page.locator(`a[href="/gamma-knife/episodes/${episodeId}"]`).click();
+  await page.getByRole('tab', { name: 'Treatment', exact: true }).click();
+  await expect(page.getByRole('tabpanel').getByText(/1 fraction in completed course/)).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByText('Documentation finalized', { exact: true })).toBeVisible();
+  await page.goto(`/gamma-knife/episodes/${multipleLesionEpisodeId}`);
+  await page.getByRole('tab', { name: 'Clinical', exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.screenshot({ path: testInfo.outputPath('multiple-lesions-clinical-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('multiple-lesions-clinical-mobile.png'), fullPage: true });
   const unassignedContext = await browser.newContext(); const unassigned = await unassignedContext.newPage();
   await signInWithSession(unassigned, 'e2e_doctor_other'); await unassigned.goto('/gamma-knife'); await expect(unassigned.getByText('Gamma Knife assignment and permission required.')).toBeVisible(); await unassignedContext.close();
   expect(e2eTodayInTripoli()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -199,14 +299,14 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
     await page.screenshot({ path: testInfo.outputPath(`arabic-settings-${width}.png`), fullPage: true });
   }
   await page.getByRole('link', { name: 'قائمة المرضى', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'مريض غاما نايف التجريبي', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'مريض قاما نايف التجريبي', exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'تسجيل إحالة', exact: true }).click();
-  await page.getByLabel('البحث عن المريض', { exact: true }).fill('مريض تعريب غاما نايف');
+  await page.getByLabel('البحث عن المريض', { exact: true }).fill('مريض تعريب قاما نايف');
   await expect(page.getByRole('combobox', { name: 'المريض', exact: true }).locator(`option[value="${arabicPatientId}"]`)).toHaveCount(1);
   await page.getByRole('combobox', { name: 'المريض', exact: true }).selectOption(String(arabicPatientId));
   await page.getByLabel('التشخيص المبدئي', { exact: true }).fill('حالة تجريبية للتحقق من سير العمل');
   await page.getByRole('button', { name: 'إنشاء الحالة', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'مريض تعريب غاما نايف', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'مريض تعريب قاما نايف', exact: true })).toBeVisible();
   const episodeId = Number(page.url().split('/').pop());
   await page.getByRole('button', { name: 'الانتقال إلى الخطوة التالية', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'التقييم السريري', exact: true })).toHaveAttribute('aria-selected', 'true');
@@ -247,9 +347,10 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
   await page.getByRole('button', { name: 'اعتماد التقييم النهائي', exact: true }).click();
   await expect(page.getByText('حالة التقييم: نهائي')).toBeVisible();
   await page.getByRole('button', { name: 'الانتقال إلى الخطوة التالية', exact: true }).click();
+  await page.getByRole('button', { name: 'تصحيح قرار الفريق المسجل', exact: true }).click();
   await page.getByRole('combobox', { name: 'القرار', exact: true }).selectOption('approved');
   await page.getByLabel('سبب التصحيح', { exact: true }).fill('تمت مراجعة المعلومات الإضافية');
-  await page.getByRole('button', { name: 'تسجيل قرار الفريق', exact: true }).click();
+  await page.getByRole('button', { name: 'حفظ تصحيح قرار الفريق', exact: true }).click();
   await expect(page.getByText('الحالة الحالية: التحضير')).toBeVisible();
   await page.getByRole('button', { name: 'الانتقال إلى الخطوة التالية', exact: true }).click();
   for (const label of ['الموافقة على العلاج', 'التصوير المطلوب', 'الجاهزية السريرية']) await page.getByLabel(label, { exact: true }).check();
@@ -264,10 +365,21 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
   await expect(page.getByLabel('تأكيد الجاهزية للعلاج', { exact: true })).not.toBeChecked();
   await page.getByLabel('تأكيد الجاهزية للعلاج', { exact: true }).check();
   await page.getByRole('button', { name: 'حفظ التحضير', exact: true }).click();
+  await page.getByRole('combobox', { name: 'موعد العلاج', exact: true }).selectOption({ index: 1 });
+  await page.getByLabel('تم تأكيد الموعد مع المريض', { exact: true }).check();
+  await page.getByRole('button', { name: 'ربط الموعد بالحالة', exact: true }).click();
+  await expect(page.getByText(/محجوز · مؤكد/)).toBeVisible();
   await page.getByLabel('فريق العلاج (اسم في كل سطر)', { exact: true }).fill('طبيب تجريبي');
+  await page.locator('select[name="immobilization"]').selectOption('mask');
+  await page.locator('input[name="fractions"]').fill('5');
   await page.getByLabel('أؤكد أن العلاج قد اكتمل سريريًا', { exact: true }).check();
   await page.getByRole('button', { name: 'تسجيل إتمام العلاج', exact: true }).click();
-  await expect(page.getByText('العلاج مكتمل والتقرير قيد الانتظار', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByText('العلاج مكتمل والتقرير قيد الانتظار', { exact: true })).toBeVisible();
+  const recordedMaskCourse = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
+  expect(recordedMaskCourse.episode.data.treatment).toMatchObject({ immobilization: 'mask', fractions: 5, completed: true });
+  const arabicReconciliation = page.getByRole('status').filter({ hasText: 'تم تسجيل اكتمال العلاج، لكن موعد RISpro المرتبط لا يزال بحالة محجوز.' });
+  await expect(arabicReconciliation).toBeVisible();
+  await expect(arabicReconciliation.getByRole('link', { name: 'مراجعة الموعد في RISpro', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'رفع تقرير العلاج', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'فئة المستند', exact: true })).toHaveValue('treatment_report');
   await page.getByRole('combobox', { name: 'فئة المستند', exact: true }).selectOption('patient_instructions');
@@ -281,14 +393,21 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
   expect(patientUrl).toBeTruthy();
   await page.getByRole('tab', { name: 'المتابعة', exact: true }).click();
   await page.getByLabel('الحالة السريرية والأعراض', { exact: true }).fill('متابعة تجريبية باللغة العربية');
+  await page.locator('textarea[name="imaging"]').fill('نتيجة تصوير تجريبية: زيادة في حجم إحدى الآفات؛ يلزم التفريق بين تقدم المرض والتغيرات بعد العلاج.');
+  await page.locator('textarea[name="response"]').fill('اشتباه تقدم مقابل تغيرات علاجية؛ مراجعة الفريق مطلوبة.');
+  await page.locator('textarea[name="complications"]').fill('أعراض عصبية جديدة مسجلة للتقييم.');
+  await page.locator('textarea[name="severity"]').fill('متوسطة');
+  await page.locator('textarea[name="actions"]').fill('تم توثيق الحاجة إلى مراجعة سريرية إضافية.');
   await page.getByRole('button', { name: 'حفظ زيارة المتابعة', exact: true }).click();
   await expect(page.getByText('متابعة تجريبية باللغة العربية', { exact: true })).toBeVisible();
+  await expect(page.getByText('أعراض عصبية جديدة مسجلة للتقييم.')).toBeVisible();
   for (const width of [1440,390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const label of ['التقييم السريري', 'الفريق متعدد التخصصات', 'العلاج', 'المستندات', 'المتابعة']) {
       await page.getByRole('tab', { name: label, exact: true }).click();
       await expect(page.getByRole('tabpanel')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.locator('#gk-profile-tabs').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`arabic-profile-${width}-${label}.png`), fullPage: true });
     }
   }
@@ -298,12 +417,16 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('tab', { name: 'الفريق متعدد التخصصات', exact: true })).toBeFocused();
   await page.getByRole('link', { name: 'قائمة المرضى', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'مريض تعريب غاما نايف', exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath('arabic-patient-list-mobile.png'), fullPage: true });
+  await expect(page.getByRole('link', { name: 'مريض تعريب قاما نايف', exact: true })).toBeVisible();
+  for (const width of [1440,390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`arabic-patient-list-${width}.png`), fullPage: true });
+  }
   const patientContext = await browser.newContext(); await patientContext.addInitScript(() => localStorage.setItem('rispro-language', 'ar'));
   const patient = await patientContext.newPage(); await patient.goto(patientUrl!);
   await expect(patient.locator('main')).toHaveAttribute('dir', 'rtl');
-  await expect(patient.getByRole('heading', { name: 'صفحة مريض غاما نايف', exact: true })).toBeVisible();
+  await expect(patient.getByRole('heading', { name: 'صفحة مريض قاما نايف', exact: true })).toBeVisible();
   await expect(patient.getByText('لم يُؤكد موعد بعد.', { exact: true })).toBeVisible();
   await expect(patient.getByText('تعليمات تجريبية قبل العلاج', { exact: true })).toHaveCount(0);
   await expect(patient.getByRole('button', { name: 'تعليمات-المريض.pdf', exact: true })).toBeVisible();
@@ -336,7 +459,8 @@ test('assigned view-only staff can review the episode without misleading edit or
   const viewerPage = await viewerContext.newPage();
   const login = await viewerPage.request.post(`${api}/auth/login`, { data: { username: 'e2e_doctor', password: E2E_PASSWORD }, headers: { 'x-forwarded-for': 'gamma-readonly-journey' } }); expect(login.ok()).toBeTruthy();
   await viewerPage.goto(`/gamma-knife/episodes/${episode.id}`);
-  await expect(viewerPage.getByRole('heading', { name: 'مريض تعريب غاما نايف', exact: true })).toBeVisible();
+  await viewerPage.getByRole('tab').first().click();
+  await expect(viewerPage.getByRole('heading', { name: 'مريض تعريب قاما نايف', exact: true })).toBeVisible();
   await expect(viewerPage.getByRole('link', { name: 'الإعدادات', exact: true })).toHaveCount(0);
   await expect(viewerPage.getByText('يمكنك عرض السجل. يتطلب التعديل منح الصلاحية المناسبة.')).toBeVisible();
   await expect(viewerPage.getByRole('button', { name: 'اعتماد التقييم النهائي', exact: true })).toHaveCount(0);

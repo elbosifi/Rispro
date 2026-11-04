@@ -146,3 +146,67 @@ For implementation, follow [operating rules](../../agents/RISPRO_OPERATING_RULES
 Leave changes uncommitted and report exact Git status. No deployment is authorized. See the [Gamma Knife domain guide](../../domains/gamma-knife/README.md) for implemented behavior, setup, and validation commands. The additive migration and clinical history must be retained once populated; disabling assignments/QR access contains exposure without deleting clinical data.
 
 Excluded from V1: GammaPlan, planning/dose calculations, machine QA/physics, external referral portal, advanced analytics, and AI clinical decisions.
+
+## Deferred clinical workflow proposals for approval
+
+Status: proposed only. These changes were reviewed during the second usability pass and are not implemented. Clinical leads and the module/data owners must approve the clinical definitions, correction semantics, and transition rules before code or migrations are added.
+
+### 1. Individual treatment fractions and interruptions
+
+**Workflow.** After an MDT decision and readiness confirmation, create a treatment course linked to the episode. Record the planned course at the course level, then record each delivered fraction separately. If delivery stops or is postponed between fractions, record the interruption and reason against the course while keeping already delivered fractions intact. Resume the same course only after the responsible clinician and physicist follow the existing local process; RISpro must not infer readiness or authorize continuation. Mark a course complete only through an explicit authorized completion action after the team confirms delivery in GammaPlan.
+
+**Persistence.** Replace the single embedded treatment object with a `gamma_knife_treatment_courses` record and child `gamma_knife_treatment_fractions` records. A course would hold an immutable episode link, course sequence, immobilization, planned fraction count, course state, and start/completion metadata. A fraction would hold a stable ID, ordinal, delivery date, delivery state, and interruption/correction reason. Do not store dose prescriptions, plan approval, machine QA results, or a dose calculation. Course and fraction corrections must retain actor, timestamp, reason, and prior snapshots.
+
+**UI and safeguards.** Treatment shows distinct course status and a dated fraction list. A postponed appointment remains an appointment event; it must not be presented as a delivered or interrupted fraction. The course cannot become complete by editing a count alone. Enforce permission, revision, course-state, and audit checks in the backend. Keep GammaPlan authoritative for planning and delivery evidence.
+
+**Reuse vs new work.** Reuse the existing episode, treatment permission, Appointments V2 booking links, document store, and audit/history services. New course and fraction persistence plus state transitions are required; an appointment record cannot represent fractions.
+
+### 2. Return to MDT after treatment for progression or complications
+
+**Workflow.** A clinician records an abnormal surveillance finding and explicitly requests MDT reassessment with a reason and supporting evidence. The review is linked to the completed course. MDT records a separate decision for this reassessment. Surveillance review, a deferred review, and a new treatment course remain distinguishable. If a new course is selected, create a new course record; do not reset or overwrite the completed course or its report.
+
+**Persistence.** Add an episode-scoped `gamma_knife_reassessments` record linked to the relevant completed course, with reason, status, evidence/document references, requested-by/at, and review-by/at. Store reassessment MDT decisions as their own versioned records. The existing episode history alone is insufficient because the current `mdt` action is not available from follow-up and its JSON field represents one current decision.
+
+**UI and safeguards.** Follow-up offers a clear “request MDT reassessment” action only to authorized clinical staff. The MDT view identifies this as post-treatment review and displays the linked completed course and current surveillance findings. Require an explicit clinician action to submit; abnormal text must never trigger a transition automatically. Preserve all prior treatment completion and documentation states.
+
+**Reuse vs new work.** Reuse follow-up records, document links, assigned RISpro users, existing MDT permissions, and audit infrastructure. New reassessment persistence and a backend transition are required; the current episode status flow cannot safely express this handoff.
+
+### 3. Diagnosis-specific structured clinical documentation
+
+**Workflow.** Select a fixed, clinician-approved section set from the diagnosis category while retaining the general history, examination, imaging, and assessment fields. Example candidate sections for review are lesion count and lesion identifiers for brain metastases; laterality and hearing baseline for vestibular schwannoma; optic-apparatus relationship for pituitary lesions; and pain/function history for trigeminal neuralgia. Clinical leads must approve exact labels, options, units, requiredness, and when fields apply. Keep free text available for context not represented by those fields.
+
+**Persistence.** Add a schema version and typed diagnosis-specific values to each versioned clinical assessment. The existing JSON episode data and clinical-history snapshots may persist this fixed structure; a new table is not necessarily needed. Do not build a configurable form builder. A schema change must preserve the rendering of previous assessment versions.
+
+**UI and safeguards.** Show only the fixed section set applicable to the current diagnosis, identify required and optional items, and carry the same saved version into the MDT summary. Diagnosis-specific fields remain documentation; they do not determine suitability, approve a treatment, calculate a dose, or imply a GammaPlan plan exists. Validate the shape and limits on the server.
+
+**Reuse vs new work.** Reuse the existing clinical draft/autosave, revision conflict checks, assessment finalization, history snapshots, translation catalog, and MDT summary. New fixed clinical fields and versioned assessment serialization are required; the current “additional information” field is free text only.
+
+### 4. Prior treatment and retreatment linkage
+
+**Workflow.** When a patient returns, show previous episodes and completed courses as read-only history. A clinician explicitly links the new episode or course to the relevant prior course and, where locally approved, the relevant lesion or target identifier. The new case has its own assessment and MDT decision. The link documents clinical context and does not itself approve retreatment.
+
+**Persistence.** Add a `gamma_knife_episode_course_links` relation from the current episode/course to a prior completed course, with relation type, clinician-entered indication, target reference, actor, and timestamp. Support more than one prior course where needed. The current list of patient episodes and free-text `priorTreatment` are not sufficient to link a specific prior treatment or lesion reliably.
+
+**UI and safeguards.** Keep past treatment details visibly separate from the current episode and label them historical. Require a deliberate selection of the prior course and confirmation that it is the intended record. Do not copy old treatment values into the new course, compute cumulative dose, or change prior course completion. Prevent cross-patient links in the backend and retain edits to the relationship in audit history.
+
+**Reuse vs new work.** Reuse the existing patient identity, episode list, permissions, history, and documents. A stable course ID and an audited relation are new persistence. A read-only prior-episode link can be shown now; a clinically meaningful retreatment link cannot be inferred from it.
+
+### 5. Investigation ownership and outstanding-task tracking
+
+**Workflow.** At MDT, split requested investigations into individual items and assign each to an existing RISpro user or responsible role. The coordinator sees open items, owner, due date if used locally, and receipt state. Receiving evidence links the existing document and records who received it. Once all requested items are reviewed, the case returns to clinical review for an updated assessment and another MDT discussion.
+
+**Persistence.** Add `gamma_knife_investigation_tasks` rows linked to the episode and originating MDT decision. Store request text, owner user ID, optional due date, status (`requested`, `received`, `cancelled`), evidence document ID, and requested/received actor and timestamps. The existing boolean and free-text request cannot represent multiple independently owned items.
+
+**UI and safeguards.** List each open item in the patient profile and make it visible in the existing worklist’s next-action summary. Allow authorized reassignment or cancellation with a reason. Receipt does not finalize the clinical assessment or make an MDT decision. Use existing document permission, revision, and audit checks; do not add a workflow engine or notification system.
+
+**Reuse vs new work.** Reuse RISpro users, current document storage, worklist, MDT permission, and audit services. New per-item persistence and receipt/reassignment actions are required. Appointments V2 can continue to schedule any resulting visit; it is not an investigation task tracker.
+
+### Cross-cutting correction and deletion policy
+
+The current module already preserves previous clinical assessment and MDT snapshots when corrections are made with a reason. Appointment replacement has a reason, and replacing a finalized treatment report has a reason. The usability pass makes those correction paths easier to recognize and prepopulates the recorded MDT values. Follow-up visits are append-only; treatment is one course-level record; Gamma Knife document associations have no module-level delete or supersede action. A wrong patient cannot safely be reassigned by editing the episode in place.
+
+For clinical records, do not hard-delete submitted assessments, MDT decisions, delivered fractions, completed courses, follow-up observations, or uploaded documents. Propose a stable record ID and an audited “correct” or “entered in error” action with mandatory reason, actor, timestamp, retained prior snapshot, and a visible link to any replacement. Superseded/entered-in-error records should leave the current summary while remaining available in history. A wrong-patient episode should use an explicitly reviewed error/void process and a correctly registered replacement episode; it must not rewrite patient identity silently. Unsubmitted drafts may be cleared only if the backend validation and retention rules explicitly permit it.
+
+New follow-up correction, treatment-record correction, investigation cancellation/reassignment, document supersession, and entered-in-error episode behavior require a domain review and backend persistence/transition work. The current improvement does not introduce generic Edit/Delete buttons that would imply these records can be safely erased.
+
+All five proposals must preserve existing authorization and audit checks. No proposal permits RISpro to approve a treatment plan, calculate a clinical dose prescription, replace machine QA, or make autonomous suitability decisions.
