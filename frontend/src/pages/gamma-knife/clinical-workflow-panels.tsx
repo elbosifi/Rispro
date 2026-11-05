@@ -13,10 +13,11 @@ export function TreatmentCourses({ profile, busy, canTreat, run }: { profile: Pr
   const { tr } = useGammaKnifeText();
   const { episode } = profile;
   const last = profile.courses.at(-1);
-  const eligibleReassessment = profile.reassessments.find(item => item.status === 'decided' && item.decision?.decision === 'approved' && !profile.courses.some(course => course.reassessmentId === item.id));
-  const canCreateInitial = !profile.courses.length && episode.data.mdt?.decision === 'approved' && ['preparation','treatment'].includes(episode.status);
-  const canCreateRepeat = Boolean(last?.status === 'completed' && eligibleReassessment);
-  const canCreate = canTreat && episode.active && !profile.courses.some(course => ['planned','in_progress','interrupted'].includes(course.status)) && (canCreateInitial || canCreateRepeat);
+  const eligibleReassessment = profile.reassessments.find(item => item.status === 'decided' && item.decision?.decision === 'approved' && !profile.courses.some(course => course.reassessmentId === item.id && course.status !== 'cancelled'));
+  const canCreateInitial = (!profile.courses.length || last?.status === 'cancelled' && !last.priorCourseId) && episode.data.mdt?.decision === 'approved' && ['preparation','treatment'].includes(episode.status);
+  const replacementReassessment = last?.status === 'cancelled' && last.priorCourseId && last.reassessmentId ? profile.reassessments.find(item => item.id === last.reassessmentId && item.status === 'decided' && item.decision?.decision === 'approved') : null;
+  const canCreateRepeat = Boolean(last?.status === 'completed' && eligibleReassessment || replacementReassessment);
+  const canCreate = canTreat && episode.active && !episode.data.referralReviewRequired && !episode.data.mdtReviewRequired && !profile.courses.some(course => ['planned','in_progress','interrupted'].includes(course.status)) && (canCreateInitial || canCreateRepeat);
   return <section className="space-y-4 border-t border-border pt-4">
     <h3 className="font-semibold">{tr('Treatment courses')}</h3>
     <HistoricalTreatmentReferences profile={profile} busy={busy} run={run}/>
@@ -24,9 +25,12 @@ export function TreatmentCourses({ profile, busy, canTreat, run }: { profile: Pr
     {profile.courses.map(course => <TreatmentCourseCard key={course.id} course={course} courses={profile.courses} profile={profile} busy={busy} canTreat={canTreat} run={run}/>) }
     {canCreate && <form className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-2" onSubmit={event => {
       const form = values(event);
-      void run(`/episodes/${episode.id}/courses`, { immobilization: form.immobilization, plannedFractionCount: Number(form.plannedFractionCount), gammaPlanReference: form.gammaPlanReference, targetReferences: splitLines(form.targetReferences ?? ''), ...(canCreateRepeat && last && eligibleReassessment ? { priorCourseId: last.id, reassessmentId: eligibleReassessment.id } : {}) });
+      const reassessment = replacementReassessment ?? eligibleReassessment;
+      const priorCourseId = last?.status === 'cancelled' ? last.priorCourseId : last?.id;
+      void run(`/episodes/${episode.id}/courses`, { immobilization: form.immobilization, plannedFractionCount: Number(form.plannedFractionCount), gammaPlanReference: form.gammaPlanReference, targetReferences: splitLines(form.targetReferences ?? ''), ...(canCreateRepeat && priorCourseId && reassessment ? { priorCourseId, reassessmentId: reassessment.id } : {}) });
     }}>
-      <h4 className="font-medium sm:col-span-2">{tr('Record a planned treatment course')}</h4>
+      <h4 className="font-medium sm:col-span-2">{tr(last?.status === 'cancelled' ? 'Record a replacement treatment course' : 'Record a planned treatment course')}</h4>
+      {last?.status === 'cancelled' && <p className="text-sm sm:col-span-2">{tr('The cancelled undelivered plan stays in the audit history. This replacement gets a new course number.')}</p>}
       {canCreateRepeat && <p className="text-sm sm:col-span-2">{tr('This repeat course is linked to completed course')} #{last?.courseNumber} {tr('and an approved post-treatment reassessment. Earlier course records remain available.')}</p>}
       <label className="block text-sm">{tr('Frame / mask')}<select className="input-premium w-full" name="immobilization" required defaultValue=""><option value="" disabled>{tr('Choose frame or mask')}</option><option value="frame">{tr('Frame')}</option><option value="mask">{tr('Mask')}</option></select></label>
       <label className="block text-sm">{tr('Planned fraction count')}<Input type="number" min={1} max={100} name="plannedFractionCount" required/></label>

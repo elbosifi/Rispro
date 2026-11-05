@@ -70,18 +70,23 @@ export interface CreateBookingIdentityVerificationOptions {
   expectedIdentityFingerprint?: string | null;
 }
 
+export type CreateBookingTransactionHook = (client: PoolClient, result: CreateBookingResult) => Promise<void>;
+
 export async function createBooking(
   payload: CreateBookingPayload,
   userId: number,
   userRole: Role | undefined,
   policySetKey: string = "default",
   approvedOverrideContext?: AuthorizedOverrideContext,
-  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {}
+  identityVerificationOptions: CreateBookingIdentityVerificationOptions = {},
+  transactionalAfterBooking?: CreateBookingTransactionHook
 ): Promise<CreateBookingResult> {
   let result: CreateBookingResult;
   try {
     result = await withTransaction(async (client) => {
-      return createBookingInternal(client, payload, userId, userRole, policySetKey, approvedOverrideContext, identityVerificationOptions);
+      const created = await createBookingInternal(client, payload, userId, userRole, policySetKey, approvedOverrideContext, identityVerificationOptions);
+      await transactionalAfterBooking?.(client, created);
+      return created;
     }, { isolationLevel: "serializable", operationName: "create_booking" });
   } catch (error) {
     const details = error instanceof HttpError && error.details && typeof error.details === "object" ? error.details as { code?: string } : null;

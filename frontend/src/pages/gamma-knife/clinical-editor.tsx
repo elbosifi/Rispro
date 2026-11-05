@@ -53,7 +53,8 @@ export function ClinicalEditor({ episode, enabled, diagnosisDetails, onSaved, on
         setBusy(true);
         setError('');
         try {
-            const result = await action({ ...episode, revision: revision.current }, status ? 'submit' : 'clinical', { clinical: answers, status, reason });
+            const clinicalAnswers = { ...answers, structuredDetails: answers.structuredDetails ?? emptyStructuredDetails(episode.diagnosisCategory) };
+            const result = await action({ ...episode, revision: revision.current }, status ? 'submit' : 'clinical', { clinical: clinicalAnswers, status, reason });
             revision.current = result.episode.revision;
             if (sequence.current === savedSequence)
                 setDirty(false);

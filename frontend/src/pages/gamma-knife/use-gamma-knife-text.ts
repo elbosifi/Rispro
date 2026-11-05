@@ -2,14 +2,14 @@ import { useLanguage } from '@/providers/language-provider';
 import { gammaKnifeSourceKeys } from '@/lib/i18n/gamma-knife';
 import { chooseLocalized, type TranslationKey } from '@/lib/i18n';
 
-const permissionLabels: Record<string, string> = { access: 'Module access', referral: 'Register referrals', clinical: 'Clinical assessment and follow-up', mdt: 'Record MDT decisions', treatment: 'Document treatment', scheduling: 'Link and confirm appointments', documents: 'Documents and patient QR' };
+const permissionLabels: Record<string, string> = { access: 'Module access', referral: 'Register referrals', clinical: 'Clinical assessment and follow-up', mdt: 'Record MDT decisions', treatment: 'Document treatment', scheduling: 'Link and confirm appointments', documents: 'Documents and patient QR', episode_correction: 'Episode correction and reversal', identity_review: 'Review identity correction requests' };
 const categoryLabels: Record<string, string> = { referral: 'Referral', investigation: 'Requested investigations', consent: 'Consent', treatment_report: 'Treatment report', patient_instructions: 'Preparation instructions', other: 'Other' };
-const statusLabels: Record<string, string> = { draft: 'Draft', provisional: 'Provisional', finalized: 'Finalized', approved: 'Approved', additional_information: 'Additional information required', deferred: 'Deferred', not_suitable: 'Not suitable', scheduled: 'Scheduled', cancelled: 'Cancelled', completed: 'Completed', planned: 'Planned', in_progress: 'In progress', interrupted: 'Interrupted', requested: 'Requested', awaiting_information: 'Awaiting information', decided: 'Decision recorded', received: 'Received', delivered: 'Delivered', not_delivered: 'Not delivered', internal: 'Internal only', routine: 'Routine patient document', sensitive: 'Sensitive — verification required', frame: 'Frame', mask: 'Mask' };
+const statusLabels: Record<string, string> = { draft: 'Draft', provisional: 'Provisional', finalized: 'Finalized', approved: 'Approved', additional_information: 'Additional information required', deferred: 'Deferred', not_suitable: 'Not suitable', scheduled: 'Scheduled', arrived: 'Arrived', waiting: 'Waiting', awaiting_booking: 'Awaiting booking', booked: 'Booked', due_soon: 'Due soon', overdue: 'Overdue', open: 'Open', missing_report: 'Missing report', cancelled: 'Cancelled', completed: 'Completed', planned: 'Planned', in_progress: 'In progress', interrupted: 'Interrupted', requested: 'Requested', awaiting_information: 'Awaiting information', decided: 'Decision recorded', received: 'Received', delivered: 'Delivered', not_delivered: 'Not delivered', internal: 'Internal only', routine: 'Routine patient document', sensitive: 'Sensitive — verification required', frame: 'Frame', mask: 'Mask' };
 
 export function useGammaKnifeText() {
   const context = useLanguage();
   const tr = (source: string): string => { const key = gammaKnifeSourceKeys[source]; return key ? context.t(key) : source; };
-  const permission = (value: string) => context.isArabic ? tr(`permission.${value}`) : permissionLabels[value] ?? value;
+  const permission = (value: string) => context.isArabic ? tr(value === 'episode_correction' ? 'Episode correction and reversal' : value === 'identity_review' ? 'Review identity correction requests' : `permission.${value}`) : permissionLabels[value] ?? value;
   const category = (value: string) => tr(categoryLabels[value] ?? value);
   const status = (value: string) => tr(statusLabels[value] ?? value);
   const errorText = (message: string) => {

@@ -7,21 +7,27 @@ import { HttpError } from '../../utils/http-error.js';
 import { getTripoliToday } from '../../utils/date.js';
 import { logAuditEntry } from '../../services/audit-service.js';
 import { uploadDocument, getDocumentById, readDocumentContent, type DocumentUploadPayload } from '../../services/document-service.js';
+import { getPatientById, updatePatientContactDetails } from '../../services/patient-service.js';
+import { isPatientIdentityVerificationRequired, maskPatientIdentifier, resolvePatientIdentityRisk, resolvePatientIdentityVerificationMode, verifyPatientIdentityEvidence } from '../../services/patient-selection-safety-service.js';
+import { createBooking } from '../appointments-v2/booking/services/create-booking.service.js';
+import { rescheduleBooking } from '../appointments-v2/booking/services/reschedule-booking.service.js';
+import type { CreateBookingPayload } from '../appointments-v2/booking/models/booking.js';
 import type { AuthenticatedUserContext } from '../../types/http.js';
-import { CATEGORIES, PERMISSIONS, STATUS_LABELS, nextAction, type Config, type Episode, type EpisodeDocument, type Investigation, type Permission, type Reassessment, type Followup, type Treatment, type TreatmentCourse, type TreatmentFraction } from './gamma-knife-types.js';
-import { actionPermission, category, clinical, config as validateConfig, date, id, record, requireStage, strings, text } from './gamma-knife-validation.js';
+import { CATEGORIES, PERMISSIONS, STATUS_LABELS, nextAction, type Config, type Episode, type EpisodeDocument, type Investigation, type OperationsTask, type PatientCommunication, type Permission, type ReadinessItem, type Reassessment, type Followup, type Treatment, type TreatmentCourse, type TreatmentFraction } from './gamma-knife-types.js';
+import { actionPermission, category, clinical, config as validateConfig, date, id, mriPrimaryScreening, record, referralCorrection, requireStage, strings, text } from './gamma-knife-validation.js';
 import { historicalTreatments } from './historical-treatment-service.js';
 
 type Db = PoolClient | typeof pool;
 export type Actor = AuthenticatedUserContext;
-const SELECT = `select e.id, e.patient_id as "patientId", e.diagnosis, e.diagnosis_category as "diagnosisCategory", e.status, e.active, e.revision, e.data,
+const SELECT = `select e.id, e.patient_id as "patientId", e.diagnosis, e.diagnosis_category as "diagnosisCategory", e.status, e.active,
+  e.closure_classification as "closureClassification",e.replacement_episode_id as "replacementEpisodeId",e.revision,e.data,
   coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName", p.arabic_full_name as "patientArabicName", p.english_full_name as "patientEnglishName", p.mrn, e.updated_at as "updatedAt", (e.qr_hash is not null) as "qrActive",
   (select b.booking_date::text from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint
     and b.patient_id=e.patient_id and b.status='scheduled' and b.voided_at is null
     and not exists(select 1 from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v where (v->>'date')::date >= b.booking_date)
   ) as "followupDate"
   from gamma_knife_episodes e join patients p on p.id=e.patient_id`;
-function episodeRow(row: Episode): Episode { return { ...row, id: Number(row.id), patientId: Number(row.patientId) }; }
+function episodeRow(row: Episode): Episode { return { ...row, id: Number(row.id), patientId: Number(row.patientId), replacementEpisodeId: row.replacementEpisodeId == null ? null : Number(row.replacementEpisodeId) }; }
 export function tokenHash(token: string): string { return createHash('sha256').update(token).digest('hex'); }
 
 export async function permissions(actor: Actor, db: Db = pool): Promise<Permission[]> {
@@ -98,7 +104,7 @@ export async function findEpisode(episodeId: unknown, db: Db = pool, lock = fals
   return episodeRow(result.rows[0]);
 }
 async function history(client: PoolClient, episode: Episode, actor: Actor, action: string, reason = '', details: Record<string, unknown> = {}) {
-  await client.query('insert into gamma_knife_history(episode_id,revision,action,snapshot,actor_id) values($1,$2,$3,$4::jsonb,$5)', [episode.id, episode.revision, action, JSON.stringify({ diagnosis: episode.diagnosis, status: episode.status, active: episode.active, qrActive: episode.qrActive, data: episode.data, reason, details }), actor.sub]);
+  await client.query('insert into gamma_knife_history(episode_id,revision,action,snapshot,actor_id) values($1,$2,$3,$4::jsonb,$5)', [episode.id, episode.revision, action, JSON.stringify({ diagnosis: episode.diagnosis, diagnosisCategory: episode.diagnosisCategory, status: episode.status, active: episode.active, closureClassification: episode.closureClassification ?? null, replacementEpisodeId: episode.replacementEpisodeId ?? null, qrActive: episode.qrActive, data: episode.data, reason, details }), actor.sub]);
   await logAuditEntry({ entityType: 'gamma_knife_episode', entityId: episode.id, actionType: action, changedByUserId: actor.sub, newValues: { revision: episode.revision, status: episode.status } }, client);
 }
 function checkEpisodeRevision(episode: Episode, value: unknown) {
@@ -106,7 +112,7 @@ function checkEpisodeRevision(episode: Episode, value: unknown) {
 }
 async function episodeWorkflowHistory(client: PoolClient, episode: Episode, actor: Actor, action: string, reason: string, details: Record<string, unknown> = {}) {
   episode.revision++;
-  await client.query('update gamma_knife_episodes set status=$2,active=$3,data=$4::jsonb,revision=$5,updated_at=now() where id=$1', [episode.id, episode.status, episode.active, JSON.stringify(episode.data), episode.revision]);
+  await client.query('update gamma_knife_episodes set status=$2,active=$3,closure_classification=$4,replacement_episode_id=$5,data=$6::jsonb,revision=$7,updated_at=now() where id=$1', [episode.id, episode.status, episode.active, episode.closureClassification ?? null, episode.replacementEpisodeId ?? null, JSON.stringify(episode.data), episode.revision]);
   await history(client, episode, actor, action, reason, details);
 }
 async function treatmentHistory(client: PoolClient, courseId: number, actor: Actor, action: string, snapshot: unknown, reason = '', fractionId: number | null = null) {
@@ -129,16 +135,268 @@ export async function createEpisode(actor: Actor, input: unknown) {
       const config = await readConfig(client); const diagnosisCategory = text(body.diagnosisCategory, 'Diagnosis category', true, 150);
       const definition = config.diagnoses.find(d => d.name === diagnosisCategory);
       if (!definition) throw new HttpError(400, 'Select a supported diagnosis category.');
-      const patient = await client.query("select id from patients where id=$1 and coalesce(nullif(trim(phone_1),''),nullif(trim(phone_2),''),'') <> '' for key share", [id(body.patientId)]);
+      const patient = await client.query<{ id: string; mrn: string; arabic_full_name: string; english_full_name: string | null }>("select id,mrn,arabic_full_name,english_full_name from patients where id=$1 and coalesce(nullif(trim(phone_1),''),nullif(trim(phone_2),''),'') <> '' for key share", [id(body.patientId)]);
       if (!patient.rows.length) throw new HttpError(400, 'An existing patient with contact information is required.');
-      const inserted = await client.query<{ id: number }>('insert into gamma_knife_episodes(patient_id,diagnosis,diagnosis_category,data,created_by) values($1,$2,$3,$4::jsonb,$5) returning id', [id(body.patientId), text(body.diagnosis, 'Provisional diagnosis', true, 1000), diagnosisCategory, JSON.stringify({ checklist: definition.checklist }), actor.sub]);
+      const replacementForEpisodeId = body.replacementForEpisodeId == null || body.replacementForEpisodeId === '' ? null : id(body.replacementForEpisodeId);
+      let original: Episode | null = null;
+      if (replacementForEpisodeId) {
+        original = await findEpisode(replacementForEpisodeId, client, true);
+        if (original.active || original.closureClassification !== 'entered_in_error' || original.replacementEpisodeId) throw new HttpError(409, 'A replacement can only be linked to an entered-in-error episode that has no replacement yet.');
+        const attributionCorrection = await client.query<{ corrected_patient_id: number }>('select corrected_patient_id from gamma_knife_patient_attribution_corrections where episode_id=$1', [original.id]);
+        if (attributionCorrection.rows[0] && Number(attributionCorrection.rows[0].corrected_patient_id) !== Number(body.patientId)) throw new HttpError(409, 'The replacement must use the patient recorded in the authorized wrong-patient correction.');
+        const confirmedMrn = text(body.confirmationPatientMrn, 'Confirmed patient MRN', true, 80);
+        const confirmedName = text(body.confirmationPatientName, 'Confirmed patient name', true, 250).toLocaleLowerCase();
+        const selectedPatient = patient.rows[0]!;
+        const validNames = [selectedPatient.arabic_full_name, selectedPatient.english_full_name].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase());
+        if (confirmedMrn !== selectedPatient.mrn || !validNames.includes(confirmedName)) throw new HttpError(409, 'Confirm the selected patient by entering the same MRN and registered name shown above.');
+      }
+      const referral = {
+        details: text(body.referralDetails, 'Referral details', false, 4000),
+        administrativeNotes: text(body.administrativeNotes, 'Administrative notes', false, 4000),
+        source: text(body.referralSource, 'Referral source', false, 250),
+        referringPhysician: text(body.referringPhysician, 'Referring physician', false, 250),
+      };
+      const inserted = await client.query<{ id: number }>('insert into gamma_knife_episodes(patient_id,diagnosis,diagnosis_category,data,created_by) values($1,$2,$3,$4::jsonb,$5) returning id', [id(body.patientId), text(body.diagnosis, 'Provisional diagnosis', true, 1000), diagnosisCategory, JSON.stringify({ checklist: definition.checklist, referral }), actor.sub]);
+      await client.query(`insert into gamma_knife_readiness_items(episode_id,item_key,label,required,created_by_user_id,updated_by_user_id)
+        values($1,'identity_verification','Patient identity verification',true,$2,$2),($1,'consent_documentation','Consent documentation',true,$2,$2),($1,'required_imaging','Required MRI/CT imaging',true,$2,$2)`, [inserted.rows[0]!.id, actor.sub]);
       const episode = await findEpisode(inserted.rows[0]!.id, client);
-      await history(client, episode, actor, 'referral'); return episode;
+      await history(client, episode, actor, replacementForEpisodeId ? 'referral_replacement_created' : 'referral', '', replacementForEpisodeId ? { replacementForEpisodeId } : {});
+      if (original) {
+        original.replacementEpisodeId = episode.id;
+        await episodeWorkflowHistory(client, original, actor, 'replacement_linked', 'Wrong-patient or incorrect referral replaced after identifier confirmation.', { replacementEpisodeId: episode.id, patientId: episode.patientId, mrn: selectedPatientMrn(patient.rows[0]!) });
+      }
+      return episode;
     });
   } catch (error) {
     if ((error as { code?: string; constraint?: string }).constraint === 'gamma_knife_one_active_episode') throw new HttpError(409, 'This patient already has an active Gamma Knife episode.');
     throw error;
   }
+}
+function selectedPatientMrn(patient: { mrn: string }): string { return patient.mrn; }
+
+export async function editReferral(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const correction = referralCorrection(body);
+  return transaction(async client => {
+    await authorize(actor, 'referral', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    const closedCorrection = !episode.active;
+    if (closedCorrection) {
+      if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'A closed episode requires an authorized administrator to correct referral details.');
+      await authorize(actor, 'episode_correction', client);
+    }
+    const config = await readConfig(client);
+    if (!config.diagnoses.some(item => item.name === correction.diagnosisCategory)) throw new HttpError(400, 'Select a supported diagnosis category.');
+    const previous = { diagnosis: episode.diagnosis, diagnosisCategory: episode.diagnosisCategory, referral: episode.data.referral ?? { details: '', administrativeNotes: '', source: '', referringPhysician: '' } };
+    const changedDiagnosis = correction.diagnosis !== episode.diagnosis;
+    const changedCategory = correction.diagnosisCategory !== episode.diagnosisCategory;
+    if (episode.active && (changedDiagnosis || changedCategory)) {
+      const courseEvidence = await client.query("select 1 from gamma_knife_treatment_courses where episode_id=$1 and status <> 'cancelled' limit 1", [episode.id]);
+      if (courseEvidence.rows.length) throw new HttpError(409, 'Cancel or resolve the current treatment plan before changing the clinical referral diagnosis.');
+      if (episode.data.clinical || episode.data.mdt) {
+        episode.data.referralReviewRequired = true;
+        if (episode.data.mdt) episode.data.mdtReviewRequired = true;
+        episode.status = 'clinical_review';
+      }
+    }
+    episode.diagnosis = correction.diagnosis;
+    episode.diagnosisCategory = correction.diagnosisCategory;
+    episode.data.referral = correction.referral;
+    episode.revision++;
+    await client.query('update gamma_knife_episodes set diagnosis=$2,diagnosis_category=$3,status=$4,data=$5::jsonb,revision=$6,updated_at=now() where id=$1', [episode.id, episode.diagnosis, episode.diagnosisCategory, episode.status, JSON.stringify(episode.data), episode.revision]);
+    await history(client, episode, actor, 'referral_corrected', correction.reason, { before: previous, after: { diagnosis: episode.diagnosis, diagnosisCategory: episode.diagnosisCategory, referral: episode.data.referral }, clinicalReviewRequired: Boolean(episode.data.referralReviewRequired), mdtReviewRequired: Boolean(episode.data.mdtReviewRequired) });
+    return { episode };
+  });
+}
+
+async function hasDeliveredTreatment(client: PoolClient, episodeId: number): Promise<boolean> {
+  const result = await client.query(`select 1 from gamma_knife_treatment_courses c
+    left join gamma_knife_treatment_fractions f on f.course_id=c.id and f.status='delivered'
+    where c.episode_id=$1 and (c.status='completed' or f.id is not null) limit 1`, [episodeId]);
+  return result.rows.length > 0;
+}
+
+async function hasSignificantEpisodeEvidence(client: PoolClient, episode: Episode): Promise<boolean> {
+  const clinicalContent = episode.data.clinical && Object.values(episode.data.clinical).some(value => {
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'boolean') return value;
+    return value != null;
+  });
+  if (clinicalContent || episode.data.mdt || episode.data.treatment?.completed || episode.data.assessmentStatus === 'finalized') return true;
+  const evidence = await client.query(`select 1 from gamma_knife_treatment_courses where episode_id=$1
+    union all select 1 from gamma_knife_investigations where episode_id=$1
+    union all select 1 from gamma_knife_documents where episode_id=$1 and removed_at is null and category in ('consent','investigation','treatment_report')
+    limit 1`, [episode.id]);
+  return evidence.rows.length > 0;
+}
+
+export async function withdrawEpisode(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const reason = text(body.reason, 'Withdrawal reason', true, 1000);
+  if (body.confirmed !== true) throw new HttpError(400, 'Confirm that this genuine referral is being withdrawn.');
+  return transaction(async client => {
+    await authorize(actor, 'referral', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    if (!episode.active) throw new HttpError(409, 'This episode is already closed.');
+    if (episode.data.mdt?.decision === 'not_suitable') throw new HttpError(409, 'Not suitable is an MDT outcome and must remain separate from referral withdrawal.');
+    if (await hasDeliveredTreatment(client, episode.id)) throw new HttpError(409, 'Delivered or completed treatment cannot be withdrawn through the ordinary referral workflow. Use the authorized clinical correction process.');
+    if (await hasSignificantEpisodeEvidence(client, episode)) {
+      if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'This episode contains clinical evidence and requires an authorized administrator or clinician to resolve.');
+      await authorize(actor, 'episode_correction', client);
+    }
+    episode.active = false;
+    episode.status = 'closed';
+    episode.closureClassification = 'withdrawn';
+    episode.data.closureReason = reason;
+    episode.qrActive = false;
+    await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
+    await episodeWorkflowHistory(client, episode, actor, 'referral_withdrawn', reason, { classification: 'withdrawn' });
+    return { episode };
+  });
+}
+
+export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const reason = text(body.reason, 'Entered-in-error reason', true, 1000);
+  if (body.confirmed !== true) throw new HttpError(400, 'Confirm that this episode was registered in error.');
+  return transaction(async client => {
+    await authorize(actor, 'episode_correction', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    if (!episode.active) throw new HttpError(409, 'This episode is already closed.');
+    const significant = await hasSignificantEpisodeEvidence(client, episode);
+    const delivered = await hasDeliveredTreatment(client, episode.id);
+    let attributionDetails: Record<string, unknown> = {};
+    if (significant || delivered) {
+      if (!['doctor','supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'This episode contains clinical evidence and requires an authorized clinician or administrator to resolve.');
+      if (body.correctedPatientId == null || String(body.correctedPatientId).trim() === '') throw new HttpError(409, 'Select and confirm the correct patient before resolving an episode with clinical evidence.');
+      const correctedPatientId = id(body.correctedPatientId);
+      const confirmedMrn = text(body.confirmationPatientMrn, 'Confirmed patient MRN', true, 80);
+      const confirmedName = text(body.confirmationPatientName, 'Confirmed patient name', true, 250).toLocaleLowerCase();
+      const patient = await client.query<{ id: number; mrn: string; arabic_full_name: string; english_full_name: string | null }>('select id,mrn,arabic_full_name,english_full_name from patients where id=$1 for key share', [correctedPatientId]);
+      const selected = patient.rows[0];
+      const validNames = selected ? [selected.arabic_full_name,selected.english_full_name].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase()) : [];
+      if (!selected || selected.mrn !== confirmedMrn || !validNames.includes(confirmedName)) throw new HttpError(409, 'Confirm the corrected patient by entering the same MRN and registered name shown for that patient.');
+      const correctedName = selected.english_full_name || selected.arabic_full_name;
+      if (correctedPatientId !== episode.patientId) {
+        const saved = await client.query(`insert into gamma_knife_patient_attribution_corrections(episode_id,original_patient_id,corrected_patient_id,confirmed_mrn,confirmed_name,reason,authorized_by_user_id)
+          values($1,$2,$3,$4,$5,$6,$7) returning id`, [episode.id,episode.patientId,correctedPatientId,selected.mrn,correctedName,reason,actor.sub]);
+        episode.data.patientAttributionCorrectionId = Number(saved.rows[0]!.id);
+        attributionDetails = { patientAttributionCorrectionId: Number(saved.rows[0]!.id), originalPatientId: episode.patientId, correctedPatientId, correctedPatientMrn: selected.mrn, correctedPatientName: correctedName, clinicalRecordAttributionPreserved: true };
+      } else attributionDetails = { duplicateEpisodeConfirmedPatientId: episode.patientId, confirmedPatientMrn: selected.mrn, clinicalRecordAttributionPreserved: true };
+    }
+    episode.active = false;
+    episode.status = 'closed';
+    episode.closureClassification = 'entered_in_error';
+    episode.data.closureReason = reason;
+    episode.qrActive = false;
+    await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
+    await episodeWorkflowHistory(client, episode, actor, 'episode_entered_in_error', reason, { classification: 'entered_in_error', ...attributionDetails });
+    return { episode };
+  });
+}
+
+export async function reverseEpisodeClosure(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const reason = text(body.reason, 'Correction reason', true, 1000);
+  if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'An authorized RISpro administrator is required to reverse an episode closure.');
+  return transaction(async client => {
+    await authorize(actor, 'episode_correction', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    if (episode.active || !['entered_in_error','withdrawn'].includes(episode.closureClassification ?? '')) throw new HttpError(409, 'Only an episode closed as withdrawn or entered in error can be reinstated through this workflow.');
+    if (episode.replacementEpisodeId) throw new HttpError(409, 'This episode already has a linked replacement. Review both episodes through the authorized correction process before reinstating either one.');
+    const attributionCorrection = await client.query('select 1 from gamma_knife_patient_attribution_corrections where episode_id=$1', [episode.id]);
+    if (attributionCorrection.rows.length) throw new HttpError(409, 'This episode has an authorized wrong-patient correction. Resolve the patient attribution through the correction process before reversing closure.');
+    const before = { status: episode.status, closureClassification: episode.closureClassification, closureReason: episode.data.closureReason };
+    episode.active = true;
+    episode.closureClassification = null;
+    episode.status = episode.data.clinical ? 'clinical_review' : 'referrals';
+    delete episode.data.closureReason;
+    episode.data.referralReviewRequired = Boolean(episode.data.clinical);
+    episode.data.mdtReviewRequired = Boolean(episode.data.mdt);
+    await episodeWorkflowHistory(client, episode, actor, 'episode_closure_reversed', reason, { before, after: { status: episode.status, active: true } });
+    return { episode };
+  });
+}
+
+export async function updateEpisodePatientContact(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const reason = text(body.reason, 'Contact correction reason', true, 1000);
+  return transaction(async client => {
+    await authorize(actor, 'referral', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    const previous = await getPatientById(episode.patientId, client);
+    const updated = await updatePatientContactDetails(episode.patientId, { phone1: body.phone1, phone2: body.phone2, address: body.address }, actor.sub, client);
+    await episodeWorkflowHistory(client, episode, actor, 'patient_contact_corrected', reason, { before: { phone1: previous.phone_1, phone2: previous.phone_2, address: previous.address }, after: { phone1: updated.phone_1, phone2: updated.phone_2, address: updated.address } });
+    return { episode, patientDemographics: { id: Number(updated.id), mrn: updated.mrn, arabicFullName: updated.arabic_full_name, englishFullName: updated.english_full_name, nationalId: updated.national_id, identifierType: updated.identifier_type, identifierValue: updated.identifier_value, identifiers: updated.identifiers ?? [], ageYears: updated.age_years, demographicsEstimated: updated.demographics_estimated, sex: updated.sex, dateOfBirth: updated.estimated_date_of_birth, phone1: updated.phone_1, phone2: updated.phone_2, address: updated.address } };
+  });
+}
+
+const SENSITIVE_PATIENT_FIELDS: Record<string, { label: string; max: number }> = {
+  arabicFullName: { label: 'Arabic full name', max: 200 }, englishFullName: { label: 'English full name', max: 200 },
+  nationalId: { label: 'National ID', max: 50 }, identifierType: { label: 'Identifier type', max: 40 }, identifierValue: { label: 'Identifier value', max: 100 },
+  sex: { label: 'Sex', max: 20 }, dateOfBirth: { label: 'Date of birth', max: 20 },
+};
+
+export async function requestPatientIdentityCorrection(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input); const fields = record(body.requestedFields); const reason = text(body.reason, 'Correction request reason', true, 1000);
+  const requestedFields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    const definition = SENSITIVE_PATIENT_FIELDS[key];
+    if (!definition) throw new HttpError(400, 'Choose only sensitive identity fields supported by the patient record.');
+    requestedFields[key] = text(value, definition.label, true, definition.max);
+  }
+  if (!Object.keys(requestedFields).length) throw new HttpError(400, 'Select at least one identity field to correct.');
+  if (requestedFields.dateOfBirth) requestedFields.dateOfBirth = date(requestedFields.dateOfBirth);
+  return transaction(async client => {
+    await authorize(actor, 'referral', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    const inserted = await client.query(`insert into gamma_knife_patient_identity_correction_requests(episode_id,patient_id,requested_fields,reason,requested_by_user_id)
+      values($1,$2,$3::jsonb,$4,$5) returning id,episode_id as "episodeId",patient_id as "patientId",requested_fields as "requestedFields",reason,status,created_at as "createdAt"`, [episode.id, episode.patientId, JSON.stringify(requestedFields), reason, actor.sub]);
+    await episodeWorkflowHistory(client, episode, actor, 'patient_identity_correction_requested', reason, { correctionRequestId: Number(inserted.rows[0]!.id), fields: Object.keys(requestedFields) });
+    return { request: { ...inserted.rows[0], id: Number(inserted.rows[0]!.id), episodeId: Number(inserted.rows[0]!.episodeId), patientId: Number(inserted.rows[0]!.patientId) }, episode };
+  });
+}
+
+export async function decidePatientIdentityCorrection(actor: Actor, episodeId: unknown, requestId: unknown, input: unknown) {
+  const body = record(input); const decision = String(body.decision);
+  if (decision !== 'approved' && decision !== 'rejected') throw new HttpError(400, 'Choose approve or reject.');
+  const reason = text(body.reason, 'Decision reason', true, 1000);
+  if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'An authorized identity-management administrator is required.');
+  return transaction(async client => {
+    await authorize(actor, 'identity_review', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    const request = await client.query('select id,status,requested_fields,reason from gamma_knife_patient_identity_correction_requests where id=$1 and episode_id=$2 for update', [id(requestId), episode.id]);
+    if (!request.rows.length) throw new HttpError(404, 'Identity correction request not found.');
+    if (request.rows[0]!.status !== 'pending') throw new HttpError(409, 'This identity correction request has already been reviewed.');
+    const updated = await client.query(`update gamma_knife_patient_identity_correction_requests set status=$2,decided_by_user_id=$3,decision_reason=$4,decided_at=now()
+      where id=$1 returning id,status,decision_reason as "decisionReason",decided_at as "decidedAt"`, [id(requestId), decision, actor.sub, reason]);
+    await episodeWorkflowHistory(client, episode, actor, `patient_identity_correction_${decision}`, reason, { correctionRequestId: id(requestId), requestedFields: request.rows[0]!.requested_fields });
+    return { request: { ...updated.rows[0], id: Number(updated.rows[0]!.id) }, episode };
+  });
+}
+
+export async function addPostClosureCorrection(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input); const kind = String(body.kind);
+  if (kind !== 'clinical_addendum' && kind !== 'administrative_correction') throw new HttpError(400, 'Choose a clinical addendum or administrative correction.');
+  const affectedRecord = text(body.affectedRecord, 'Affected record', true, 250);
+  const reason = text(body.reason, 'Correction reason', true, 1000);
+  const previousContent = record(body.previousContent); const correctedContent = record(body.correctedContent);
+  return transaction(async client => {
+    await authorize(actor, kind === 'clinical_addendum' ? 'clinical' : 'episode_correction', client);
+    if (kind === 'administrative_correction' && !['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'An authorized administrator is required for post-closure administrative corrections.');
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    if (episode.active) throw new HttpError(409, 'Post-closure corrections are available only after the episode is closed.');
+    const inserted = await client.query(`insert into gamma_knife_post_closure_corrections(episode_id,kind,affected_record,reason,previous_content,corrected_content,created_by_user_id)
+      values($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) returning id`, [episode.id, kind, affectedRecord, reason, JSON.stringify(previousContent), JSON.stringify(correctedContent), actor.sub]);
+    await episodeWorkflowHistory(client, episode, actor, 'post_closure_correction_added', reason, { correctionId: Number(inserted.rows[0]!.id), kind, affectedRecord, previousContent, correctedContent });
+    return { id: Number(inserted.rows[0]!.id), episode };
+  });
 }
 export async function documentsForEpisode(episodeId: number, db: Db = pool): Promise<EpisodeDocument[]> {
   const config = await readConfig(db);
@@ -164,18 +422,24 @@ async function workflowRecords(episodeId: number, db: Db = pool) {
     where r.episode_id=$1 order by r.requested_at,r.id`, [episodeId]);
   const reassessmentDecisions = await db.query(`select d.reassessment_id as "reassessmentId",d.decision,d.assessment,d.notes,d.consultants,d.reason,d.revision,d.created_at as "createdAt"
     from gamma_knife_reassessment_decisions d join gamma_knife_reassessments r on r.id=d.reassessment_id where r.episode_id=$1 order by d.revision,d.id`, [episodeId]);
-  const investigations = await db.query(`select i.id,i.episode_id as "episodeId",reassessment_id as "reassessmentId",requested_text as "requestedText",
-    responsible_user_id as "responsibleUserId",responsible_name_snapshot as "responsibleName",due_date::text as "dueDate",i.status,
+    const investigations = await db.query(`select i.id,i.episode_id as "episodeId",reassessment_id as "reassessmentId",requested_text as "requestedText",
+      responsible_user_id as "responsibleUserId",responsible_name_snapshot as "responsibleName",due_date::text as "dueDate",i.priority,i.status,
     evidence_document_id as "evidenceDocumentId",received_note as "receivedNote",i.created_at as "createdAt"
     from gamma_knife_investigations i where i.episode_id=$1 order by (i.status='requested') desc,i.due_date nulls last,i.created_at,i.id`, [episodeId]);
   const investigationHistoryRows = await db.query(`select h.investigation_id as "investigationId",h.action,h.reason,h.snapshot,u.full_name as actor,h.created_at as "createdAt"
     from gamma_knife_investigation_history h join gamma_knife_investigations i on i.id=h.investigation_id join users u on u.id=h.actor_id
     where i.episode_id=$1 order by h.created_at,h.id`, [episodeId]);
+  const readinessItems = await db.query(`select r.id,r.episode_id as "episodeId",r.item_key as "itemKey",r.label,r.required,r.status,r.responsible_user_id as "responsibleUserId",owner.full_name as "responsibleName",r.due_date::text as "dueDate",r.priority,r.notes,r.completed_at as "completedAt",completed.full_name as "completedBy"
+    from gamma_knife_readiness_items r left join users owner on owner.id=r.responsible_user_id left join users completed on completed.id=r.completed_by_user_id where r.episode_id=$1 order by r.required desc,r.due_date nulls last,r.id`, [episodeId]);
+  const communications = await db.query(`select c.id,c.episode_id as "episodeId",c.kind,c.outcome,c.notes,c.next_action as "nextAction",c.next_action_date::text as "nextActionDate",u.full_name as "createdBy",c.created_at as "createdAt"
+    from gamma_knife_patient_communications c join users u on u.id=c.created_by_user_id where c.episode_id=$1 order by c.created_at desc,c.id desc`, [episodeId]);
   const courseRows = courses.rows.map(row => ({ ...row, id: Number(row.id), episodeId: Number(row.episodeId), courseNumber: Number(row.courseNumber), priorCourseId: row.priorCourseId == null ? null : Number(row.priorCourseId), reassessmentId: row.reassessmentId == null ? null : Number(row.reassessmentId), plannedFractionCount: Number(row.plannedFractionCount), fractions: fractions.rows.filter(f => Number(f.courseId) === Number(row.id)).map(f => ({ ...f, id: Number(f.id), createdBy: Number(f.createdBy) })), history: courseHistory.rows.filter(h => Number(h.courseId) === Number(row.id)).map(h => ({ action: h.action, reason: h.reason, snapshot: h.snapshot, actor: h.actor, createdAt: h.createdAt })) } as TreatmentCourse));
   return {
     courses: courseRows,
     reassessments: reassessments.rows.map(row => ({ id: Number(row.id), episodeId: Number(row.episodeId), courseId: Number(row.courseId), reason: row.reason, reasonDetail: row.reasonDetail, status: row.status, decision: row.decision ? { decision: row.decision, assessment: row.assessment, notes: row.notes, consultants: row.consultants, reason: row.decisionReason, revision: Number(row.revision), createdAt: row.decisionAt } : null, decisionHistory: reassessmentDecisions.rows.filter(item => Number(item.reassessmentId) === Number(row.id)).map(item => ({ decision: item.decision, assessment: item.assessment, notes: item.notes, consultants: item.consultants, reason: item.reason, revision: Number(item.revision), createdAt: item.createdAt })) } as Reassessment)),
     investigations: investigations.rows.map(row => ({ ...row, id: Number(row.id), episodeId: Number(row.episodeId), reassessmentId: row.reassessmentId == null ? null : Number(row.reassessmentId), responsibleUserId: row.responsibleUserId == null ? null : Number(row.responsibleUserId), evidenceDocumentId: row.evidenceDocumentId == null ? null : Number(row.evidenceDocumentId), history: investigationHistoryRows.rows.filter(h => Number(h.investigationId) === Number(row.id)).map(h => ({ action: h.action, reason: h.reason, snapshot: h.snapshot, actor: h.actor, createdAt: h.createdAt })) } as Investigation)),
+    readinessItems: readinessItems.rows.map(row => ({ ...row, id: Number(row.id), episodeId: Number(row.episodeId), responsibleUserId: row.responsibleUserId == null ? null : Number(row.responsibleUserId) } as ReadinessItem)),
+    communications: communications.rows.map(row => ({ ...row, id: Number(row.id), episodeId: Number(row.episodeId) } as PatientCommunication)),
   };
 }
 export async function profile(actor: Actor, episodeId: unknown) {
@@ -190,16 +454,289 @@ export async function profile(actor: Actor, episodeId: unknown) {
     order by booking_date desc,id desc limit 100`, [episode.patientId, linkedBookingIds, examTypeIds]);
   const workflow = await workflowRecords(episode.id);
   const historicalTreatment = await historicalTreatments(episode.id);
+  const patient = await getPatientById(episode.patientId);
+  const correctionRequests = await pool.query(`select r.id,r.episode_id as "episodeId",r.patient_id as "patientId",r.requested_fields as "requestedFields",r.reason,r.status,
+    requester.full_name as "requestedBy",r.created_at as "createdAt",decider.full_name as "decidedBy",r.decision_reason as "decisionReason",r.decided_at as "decidedAt"
+    from gamma_knife_patient_identity_correction_requests r join users requester on requester.id=r.requested_by_user_id left join users decider on decider.id=r.decided_by_user_id
+    where r.episode_id=$1 order by r.created_at desc,r.id desc`, [episode.id]);
+  const postClosureCorrections = await pool.query(`select c.id,c.kind,c.affected_record as "affectedRecord",c.reason,c.previous_content as "previousContent",c.corrected_content as "correctedContent",u.full_name as author,c.created_at as "createdAt"
+    from gamma_knife_post_closure_corrections c join users u on u.id=c.created_by_user_id where c.episode_id=$1 order by c.created_at desc,c.id desc`, [episode.id]);
   const reassessmentReady = workflow.reassessments.some(item => item.status === 'requested');
   const granted = await permissions(actor);
-  return { episode, history: revisions.rows.filter(h => granted.includes('documents') || !String(h.action).startsWith('document_')), episodes: past.rows.map(e => ({ ...e, id: Number(e.id) })), documents: granted.includes('documents') ? await documentsForEpisode(episode.id) : [], appointments: appointments.rows.map(a => ({ ...a, id: Number(a.id), examTypeId: Number(a.examTypeId) })), ...workflow, historicalTreatment, config, permissions: granted, canAccessCore: hasModuleAccess(await resolveModuleAccess(actor.sub), 'core'), nextAction: reassessmentReady ? 'Record MDT decision for post-treatment reassessment' : nextAction(episode) };
+  return { episode, patientDemographics: { id: Number(patient.id), mrn: patient.mrn, arabicFullName: patient.arabic_full_name, englishFullName: patient.english_full_name, nationalId: patient.national_id, identifierType: patient.identifier_type, identifierValue: patient.identifier_value, identifiers: patient.identifiers ?? [], ageYears: patient.age_years, demographicsEstimated: patient.demographics_estimated, sex: patient.sex, dateOfBirth: patient.estimated_date_of_birth, phone1: patient.phone_1, phone2: patient.phone_2, address: patient.address }, correctionRequests: correctionRequests.rows.map(row => ({ ...row, id: Number(row.id), episodeId: Number(row.episodeId), patientId: Number(row.patientId) })), postClosureCorrections: postClosureCorrections.rows.map(row => ({ ...row, id: Number(row.id) })), history: revisions.rows.filter(h => granted.includes('documents') || !String(h.action).startsWith('document_')), episodes: past.rows.map(e => ({ ...e, id: Number(e.id) })), documents: granted.includes('documents') ? await documentsForEpisode(episode.id) : [], appointments: appointments.rows.map(a => ({ ...a, id: Number(a.id), examTypeId: Number(a.examTypeId) })), ...workflow, historicalTreatment, config, permissions: granted, canAccessCore: hasModuleAccess(await resolveModuleAccess(actor.sub), 'core'), nextAction: reassessmentReady ? 'Record MDT decision for post-treatment reassessment' : nextAction(episode) };
 }
 export async function investigationAssignees(actor: Actor) {
   await authorize(actor);
+  const granted = await permissions(actor);
+  if (!granted.some(permission => ['clinical','mdt','documents','scheduling'].includes(permission))) throw new HttpError(403, 'Gamma Knife workflow permission required.');
   const result = await pool.query(`select id,full_name as name from users where is_active=true and gamma_knife_permissions @> array['access']::text[]
-    and gamma_knife_permissions && array['clinical','mdt','documents']::text[] order by full_name,id`);
+    and gamma_knife_permissions && array['clinical','mdt','documents','scheduling']::text[] order by full_name,id`);
   return result.rows.map(row => ({ ...row, id: Number(row.id) }));
 }
+
+function operationalPriority(value: unknown): 'low' | 'normal' | 'high' | 'urgent' {
+  if (!['low','normal','high','urgent'].includes(String(value))) throw new HttpError(400, 'Choose a valid task priority.');
+  return String(value) as 'low' | 'normal' | 'high' | 'urgent';
+}
+
+async function validateOperationalOwner(client: PoolClient, value: unknown): Promise<number | null> {
+  if (value == null || String(value).trim() === '') return null;
+  const ownerId = id(value);
+  const found = await client.query("select 1 from users where id=$1 and is_active=true and gamma_knife_permissions @> array['access']::text[]", [ownerId]);
+  if (!found.rows.length) throw new HttpError(400, 'Choose an active Gamma Knife team member as the task owner.');
+  return ownerId;
+}
+
+export async function createReadinessItem(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input); const label = text(body.label, 'Checklist item', true, 250);
+  const dueDate = body.dueDate == null || String(body.dueDate).trim() === '' ? null : date(body.dueDate);
+  const priority = operationalPriority(body.priority ?? 'normal');
+  return transaction(async client => {
+    await authorize(actor, 'scheduling', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    if (!episode.active) throw new HttpError(409, 'A closed episode cannot receive an operational readiness item.');
+    const ownerId = await validateOperationalOwner(client, body.responsibleUserId);
+    const key = `custom_${randomBytes(10).toString('hex')}`;
+    const inserted = await client.query(`insert into gamma_knife_readiness_items(episode_id,item_key,label,required,responsible_user_id,due_date,priority,notes,created_by_user_id,updated_by_user_id)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) returning id`, [episode.id, key, label, body.required !== false, ownerId, dueDate, priority, text(body.notes, 'Checklist note', false, 2000), actor.sub]);
+    if (body.required !== false && episode.data.preparation?.ready) { episode.data.preparation.ready = false; episode.status = 'preparation'; }
+    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_created', '', { itemId: Number(inserted.rows[0]!.id), label, required: body.required !== false });
+    return { id: Number(inserted.rows[0]!.id), episode };
+  });
+}
+
+export async function updateReadinessItem(actor: Actor, episodeId: unknown, itemId: unknown, input: unknown) {
+  const body = record(input); const status = String(body.status);
+  if (!['pending','in_progress','completed'].includes(status)) throw new HttpError(400, 'Choose a valid checklist status.');
+  const dueDate = body.dueDate == null || String(body.dueDate).trim() === '' ? null : date(body.dueDate);
+  const priority = operationalPriority(body.priority ?? 'normal');
+  return transaction(async client => {
+    await authorize(actor, 'scheduling', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    if (!episode.active) throw new HttpError(409, 'A closed episode cannot change operational readiness.');
+    const beforeResult = await client.query('select * from gamma_knife_readiness_items where id=$1 and episode_id=$2 for update', [id(itemId), episode.id]);
+    if (!beforeResult.rows.length) throw new HttpError(404, 'Readiness item not found.');
+    const before = beforeResult.rows[0] as Record<string, unknown>;
+    const required = body.required === undefined ? before.required === true : body.required === true;
+    const ownerId = body.responsibleUserId === undefined ? (before.responsible_user_id == null ? null : Number(before.responsible_user_id)) : await validateOperationalOwner(client, body.responsibleUserId);
+    const updated = await client.query(`update gamma_knife_readiness_items set required=$2,status=$3,responsible_user_id=$4,due_date=$5,priority=$6,notes=$7,
+      completed_at=case when $3='completed' then coalesce(completed_at,now()) else null end,
+      completed_by_user_id=case when $3='completed' then coalesce(completed_by_user_id,$8) else null end,
+      updated_by_user_id=$8,updated_at=now() where id=$1 returning *`, [id(itemId), required, status, ownerId, dueDate, priority, text(body.notes, 'Checklist note', false, 2000), actor.sub]);
+    if (required && status !== 'completed' && episode.data.preparation?.ready) { episode.data.preparation.ready = false; episode.status = 'preparation'; }
+    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_updated', text(body.reason, 'Update reason', false, 1000), { before, after: updated.rows[0] });
+    return { episode, itemId: Number(itemId) };
+  });
+}
+
+export async function recordPatientCommunication(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input); const kind = String(body.kind);
+  const allowed = ['telephone_attempt','successful_contact','appointment_confirmed','unreachable','postponement_requested','treatment_declined','followup_reminder'];
+  if (!allowed.includes(kind)) throw new HttpError(400, 'Choose a valid patient communication outcome.');
+  const outcome = text(body.outcome, 'Communication outcome', true, 250);
+  const notes = text(body.notes, 'Communication notes', false, 4000);
+  const nextAction = text(body.nextAction, 'Next action', false, 250);
+  const nextActionDate = body.nextActionDate == null || String(body.nextActionDate).trim() === '' ? null : date(body.nextActionDate);
+  return transaction(async client => {
+    await authorize(actor, 'scheduling', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    const inserted = await client.query(`insert into gamma_knife_patient_communications(episode_id,kind,outcome,notes,next_action,next_action_date,created_by_user_id)
+      values($1,$2,$3,$4,nullif($5,''),$6,$7) returning id,created_at as "createdAt"`, [episode.id, kind, outcome, notes, nextAction, nextActionDate, actor.sub]);
+    await episodeWorkflowHistory(client, episode, actor, 'patient_communication_recorded', outcome, { communicationId: Number(inserted.rows[0]!.id), kind, notes, nextAction, nextActionDate });
+    return { episode, communicationId: Number(inserted.rows[0]!.id), createdAt: inserted.rows[0]!.createdAt };
+  });
+}
+
+export async function assignOperationalTask(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input); const taskKey = text(body.taskKey, 'Task', true, 120);
+  const fixedTaskKeys = ['treatment','upcoming_treatment','clinical_assessment','mdt_decision','treatment_scheduling','followup_booking','followup','entered_in_error'];
+  const dynamicTask = /^(investigation|readiness|treatment_report|interrupted_course|missing_report|identity_correction|scheduling_conflict):(\d+)$/.exec(taskKey);
+  if (!fixedTaskKeys.includes(taskKey) && !dynamicTask) throw new HttpError(400, 'Choose a current Gamma Knife operational task.');
+  const dueDate = body.dueDate == null || String(body.dueDate).trim() === '' ? null : date(body.dueDate);
+  const priority = operationalPriority(body.priority ?? 'normal');
+  return transaction(async client => {
+    await authorize(actor, 'scheduling', client);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    if (dynamicTask) {
+      const table = dynamicTask[1] === 'investigation' ? 'gamma_knife_investigations' : dynamicTask[1] === 'readiness' ? 'gamma_knife_readiness_items' : dynamicTask[1] === 'treatment_report' || dynamicTask[1] === 'interrupted_course' || dynamicTask[1] === 'missing_report' ? 'gamma_knife_treatment_courses' : dynamicTask[1] === 'identity_correction' ? 'gamma_knife_patient_identity_correction_requests' : null;
+      const key = dynamicTask[1] === 'scheduling_conflict' ? 'appointments_v2.bookings' : table;
+      const idColumn = dynamicTask[1] === 'scheduling_conflict' ? 'id' : dynamicTask[1] === 'investigation' || dynamicTask[1] === 'readiness' || dynamicTask[1] === 'identity_correction' ? 'id' : 'id';
+      const found = key === 'appointments_v2.bookings'
+        ? await client.query('select 1 from appointments_v2.bookings b where b.id=$1 and b.patient_id=$2', [Number(dynamicTask[2]), episode.patientId])
+        : key ? await client.query(`select 1 from ${key} where ${idColumn}=$1 and episode_id=$2`, [Number(dynamicTask[2]), episode.id]) : { rows: [] };
+      if (!found.rows.length) throw new HttpError(404, 'This operational task no longer exists.');
+    }
+    const ownerId = await validateOperationalOwner(client, body.ownerUserId);
+    const saved = await client.query(`insert into gamma_knife_operation_task_assignments(episode_id,task_key,owner_user_id,due_date,priority,updated_by_user_id)
+      values($1,$2,$3,$4,$5,$6) on conflict(episode_id,task_key) do update set owner_user_id=excluded.owner_user_id,due_date=excluded.due_date,priority=excluded.priority,updated_by_user_id=excluded.updated_by_user_id,updated_at=now()
+      returning id`, [episode.id, taskKey, ownerId, dueDate, priority, actor.sub]);
+    await episodeWorkflowHistory(client, episode, actor, 'operation_task_assigned', text(body.reason, 'Task assignment reason', false, 1000), { taskKey, ownerId, dueDate, priority });
+    return { episode, assignmentId: Number(saved.rows[0]!.id) };
+  });
+}
+
+export async function operationsDashboard(actor: Actor, input: { limit?: unknown; offset?: unknown } = {}) {
+  await authorize(actor, 'scheduling');
+  const todayDate = getTripoliToday();
+  const dashboardConfig = await readConfig();
+  const limit = Math.max(1, Math.min(100, Number.isInteger(Number(input.limit)) ? Number(input.limit) : 25));
+  const offset = Math.max(0, Math.min(100_000, Number.isInteger(Number(input.offset)) ? Number(input.offset) : 0));
+  const countResult = await pool.query(`select
+    (select count(*) from gamma_knife_episodes e join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint where e.active and b.booking_date=$1::date and b.status in ('scheduled','arrived','waiting') and b.voided_at is null) as "scheduledToday",
+    (select count(*) from gamma_knife_episodes e where e.active and ((e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))) or (e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))))) as "awaitingScheduling",
+    (select count(*) from gamma_knife_episodes e where e.active and e.status in ('preparation','treatment') and ((e.data->'preparation'->>'ready') is distinct from 'true' or exists(select 1 from gamma_knife_readiness_items r where r.episode_id=e.id and r.required and r.status<>'completed'))) as "notReady",
+    (select count(*) from gamma_knife_episodes e where e.active and (e.status='mdt' or e.data->>'mdtReviewRequired'='true')) as "pendingMdt",
+    (select count(*) from gamma_knife_investigations i join gamma_knife_episodes e on e.id=i.episode_id where e.active and i.status='requested') as "outstandingInvestigations",
+    (select count(*) from gamma_knife_treatment_courses where status='completed' and not documentation_finalized) as "unfinalizedTreatmentReports",
+    (select count(*) from gamma_knife_episodes e where e.active and e.status='followup' and not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.booking_date>=$1::date and b.status='scheduled' and b.voided_at is null) and coalesce((select max((v->>'date')::date) from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v),e.created_at::date)+$2::int<$1::date) as "overdueFollowups",
+    (select count(*) from gamma_knife_patient_identity_correction_requests where status='pending') as "pendingCorrectionRequests"`, [todayDate, dashboardConfig.reminderDays]);
+  const today = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",null::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'treatment'::text as "taskKey",'Today''s treatment'::text as task,null::text as owner,null::text as "dueDate",'normal'::text as priority,b.status as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime",coalesce((e.data->'preparation'->>'ready')='true',false) as ready,
+    case when coalesce((e.data->'treatmentAppointment'->>'confirmed')::boolean,false)=false then 'Confirm appointment with patient' when coalesce((e.data->'preparation'->>'ready')::boolean,false)=false then 'Review preparation checklist' else 'Review treatment case' end as "nextAction"
+    from gamma_knife_episodes e join patients p on p.id=e.patient_id join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint
+    where e.active and b.booking_date=$1::date and b.status in ('scheduled','arrived','waiting') and b.voided_at is null order by b.booking_time nulls last,p.mrn,e.id limit $2 offset $3`, [todayDate, limit, offset]);
+  const upcoming = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",null::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'upcoming_treatment'::text as "taskKey",'Upcoming treatment'::text as task,null::text as owner,b.booking_date::text as "dueDate",'normal'::text as priority,b.status as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime",coalesce((e.data->'preparation'->>'ready')='true',false) as ready,
+    case when coalesce((e.data->'treatmentAppointment'->>'confirmed')::boolean,false)=false then 'Confirm appointment with patient' when coalesce((e.data->'preparation'->>'ready')::boolean,false)=false then 'Review preparation checklist' else 'Review treatment case' end as "nextAction"
+    from gamma_knife_episodes e join patients p on p.id=e.patient_id join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint
+    where e.active and b.booking_date>$1::date and b.booking_date<=$1::date+14 and b.status='scheduled' and b.voided_at is null order by b.booking_date,b.booking_time nulls last,p.mrn,e.id limit $2 offset $3`, [todayDate, limit, offset]);
+  const awaiting = await pool.query<OperationsTask>(`with tasks as (
+    select e.id as episode_id,'clinical_assessment'::text as task_key,'Pending clinical assessment'::text as task,e.status::text as status,null::bigint as owner_id,null::date as due_date,'normal'::text as priority from gamma_knife_episodes e where e.active and e.status in ('referrals','clinical_review')
+    union all select e.id,'mdt_decision','Awaiting MDT decision',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and (e.status='mdt' or e.data->>'mdtReviewRequired'='true')
+    union all select e.id,'investigation:'||i.id::text,'Outstanding investigation: '||i.requested_text,i.status,i.responsible_user_id,i.due_date,i.priority from gamma_knife_investigations i join gamma_knife_episodes e on e.id=i.episode_id where e.active and i.status='requested'
+    union all select e.id,'readiness:'||r.id::text,r.label,r.status,r.responsible_user_id,r.due_date,r.priority from gamma_knife_readiness_items r join gamma_knife_episodes e on e.id=r.episode_id where e.active and r.required and r.status<>'completed'
+    union all select e.id,'treatment_scheduling','Allocate treatment appointment',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
+    union all select e.id,'treatment_report:'||c.id::text,'Finalize treatment report',c.status,null::bigint,null::date,'high' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
+    union all select e.id,'followup_booking','Allocate follow-up appointment',e.status,null::bigint,null::date,'normal' from gamma_knife_episodes e where e.active and e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
+  ) select t.episode_id as "episodeId",e.revision as "episodeRevision",coalesce(a.owner_user_id,t.owner_id)::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,t.task_key as "taskKey",t.task,coalesce(owner.full_name,assignee.full_name) as owner,coalesce(a.due_date,t.due_date)::text as "dueDate",coalesce(a.priority,t.priority) as priority,t.status
+    from tasks t join gamma_knife_episodes e on e.id=t.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=t.task_key left join users owner on owner.id=t.owner_id left join users assignee on assignee.id=a.owner_user_id
+    order by case coalesce(a.priority,t.priority) when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end,coalesce(a.due_date,t.due_date) nulls last,e.updated_at,e.id limit $1 offset $2`, [limit, offset]);
+  const followup = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'followup'::text as "taskKey",
+      case when b.id is not null and b.booking_date >= $1::date then 'Booked follow-up' when coalesce(b.booking_date,due.next_due)<$1::date then 'Overdue follow-up' when b.id is null and due.next_due<=$1::date+$2::int then 'Follow-up due soon' when b.id is null then 'Follow-up awaiting booking' else 'Follow-up due soon' end as task,
+      owner.full_name as owner,coalesce(b.booking_date,due.next_due)::text as "dueDate",coalesce(a.priority,'normal') as priority,case when b.id is not null and b.booking_date >= $1::date then 'booked' when coalesce(b.booking_date,due.next_due)<$1::date then 'overdue' when b.id is null and due.next_due<=$1::date+$2::int then 'due_soon' else 'awaiting_booking' end as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime"
+    from gamma_knife_episodes e join patients p on p.id=e.patient_id left join appointments_v2.bookings b on b.id=(e.data->'followupAppointment'->>'bookingId')::bigint left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key='followup_booking' left join users owner on owner.id=a.owner_user_id
+    cross join lateral (select coalesce((select max((v->>'date')::date) from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v),e.created_at::date)+$2::int as next_due) due
+    where e.active and e.status='followup' order by coalesce(b.booking_date,due.next_due),e.updated_at,e.id limit $3 offset $4`, [todayDate, dashboardConfig.reminderDays, limit, offset]);
+  const exceptions = await pool.query<OperationsTask>(`with exception_rows as (
+    select e.id as episode_id,'entered_in_error'::text as task_key,'Entered-in-error referral needs resolution'::text as task,'open'::text as status from gamma_knife_episodes e where e.closure_classification='entered_in_error' and e.replacement_episode_id is null
+    union all select e.id,'interrupted_course:'||c.id::text,'Treatment course interrupted','interrupted' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='interrupted'
+    union all select e.id,'missing_report:'||c.id::text,'Completed treatment is missing finalized documentation','missing_report' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
+    union all select e.id,'identity_correction:'||r.id::text,'Identity correction request awaiting review',r.status from gamma_knife_patient_identity_correction_requests r join gamma_knife_episodes e on e.id=r.episode_id where r.status='pending'
+    union all select distinct e.id,'scheduling_conflict:'||other.id::text,'Same patient has overlapping appointments','conflict' from gamma_knife_episodes e cross join lateral (values((e.data->'treatmentAppointment'->>'bookingId')::bigint),((e.data->'followupAppointment'->>'bookingId')::bigint)) linked(booking_id) join appointments_v2.bookings b on b.id=linked.booking_id join appointments_v2.bookings other on other.patient_id=e.patient_id and other.id<>b.id and other.booking_date=b.booking_date and b.booking_time is not null and other.booking_time=b.booking_time and other.status='scheduled' and other.voided_at is null where e.active and b.status='scheduled' and b.voided_at is null
+  ) select x.episode_id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,x.task_key as "taskKey",x.task,owner.full_name as owner,a.due_date::text as "dueDate",coalesce(a.priority,'high') as priority,x.status
+    from exception_rows x join gamma_knife_episodes e on e.id=x.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=x.task_key left join users owner on owner.id=a.owner_user_id order by coalesce(a.due_date,$1::date),e.id limit $2 offset $3`, [todayDate, limit, offset]);
+  const counts = countResult.rows[0] as Record<string, unknown>;
+  return { counts: Object.fromEntries(Object.entries(counts).map(([key,value]) => [key, Number(value)])), pagination: { limit, offset }, queues: { todayTreatments: today.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), upcomingTreatments: upcoming.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), awaitingAction: awaiting.rows.map(row => ({ ...row, episodeId: Number(row.episodeId) })), followUp: followup.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), exceptions: exceptions.rows.map(row => ({ ...row, episodeId: Number(row.episodeId) })) } };
+}
+export async function scheduleIdentityRisk(actor: Actor, episodeId: unknown, requestedPurpose: unknown) {
+  await authorize(actor, 'scheduling');
+  const purpose = requestedPurpose === 'followup' ? 'followup' : requestedPurpose === 'treatment' ? 'treatment' : null;
+  if (!purpose) throw new HttpError(400, 'Choose a valid appointment purpose.');
+  const episode = await findEpisode(episodeId);
+  const [{ examTypeId, modalityId }, risk, mode] = await Promise.all([
+    appointmentPurposeSettings(pool, purpose),
+    resolvePatientIdentityRisk(episode.patientId),
+    resolvePatientIdentityVerificationMode(),
+  ]);
+  const modality = await pool.query<{ safety_warning_enabled: boolean; safety_warning_en: string | null; safety_warning_ar: string | null; safety_workflow_type: string | null }>(
+    'select safety_warning_enabled,safety_warning_en,safety_warning_ar,safety_workflow_type from modalities where id=$1', [modalityId]);
+  const safety = modality.rows[0];
+  return {
+    required: isPatientIdentityVerificationRequired(risk, mode), method: 'primary_identifier', maskedIdentifier: maskPatientIdentifier(risk.patient.primaryIdentifierValue),
+    appointmentPurpose: purpose, examTypeId, modalityId,
+    safety: { enabled: Boolean(safety?.safety_warning_enabled), warningEn: safety?.safety_warning_en ?? null, warningAr: safety?.safety_warning_ar ?? null, workflowType: safety?.safety_workflow_type ?? null },
+  };
+}
+
+export async function verifyScheduleIdentity(actor: Actor, episodeId: unknown, input: unknown) {
+  await authorize(actor, 'scheduling');
+  const body = record(input);
+  const episode = await findEpisode(episodeId);
+  const verified = await verifyPatientIdentityEvidence({ patientId: episode.patientId, userId: Number(actor.sub), method: 'primary_identifier', evidence: text(body.evidence, 'Primary identifier', true, 120) });
+  return { proof: verified.proof, verifiedAt: verified.assertion.verifiedAt };
+}
+
+function assertSchedulePurposeStage(episode: Episode, purpose: 'treatment' | 'followup') {
+  requireStage(episode, purpose === 'treatment' ? ['preparation', 'treatment'] : ['followup']);
+  if (purpose === 'treatment' && (episode.data.referralReviewRequired || episode.data.mdtReviewRequired)) throw new HttpError(409, 'Complete the required clinical and MDT review of the corrected referral before scheduling treatment.');
+}
+
+async function appointmentPurposeSettings(client: Db, purpose: 'treatment' | 'followup') {
+  const config = await readConfig(client);
+  const examTypeId = purpose === 'treatment' ? config.treatmentExamTypeId : config.followupExamTypeId;
+  if (!examTypeId) throw new HttpError(409, 'Configure the RISpro exam type for this appointment purpose first.');
+  const exam = await client.query<{ id: number; modality_id: number }>('select id,modality_id from exam_types where id=$1 and is_active=true', [examTypeId]);
+  if (!exam.rows[0]) throw new HttpError(409, 'The configured Gamma Knife appointment type is unavailable.');
+  return { examTypeId: Number(exam.rows[0].id), modalityId: Number(exam.rows[0].modality_id) };
+}
+
+export async function scheduleEpisodeAppointment(actor: Actor, episodeId: unknown, input: unknown) {
+  await authorize(actor, 'scheduling');
+  const body = record(input); const purpose = body.purpose;
+  if (purpose !== 'treatment' && purpose !== 'followup') throw new HttpError(400, 'Choose a valid appointment purpose.');
+  const bookingDate = date(body.bookingDate); const bookingTime = body.bookingTime == null || body.bookingTime === '' ? null : text(body.bookingTime, 'Appointment time', true, 20);
+  const initial = await findEpisode(episodeId);
+  if (!initial.active) throw new HttpError(409, 'A closed episode cannot receive a new appointment.');
+  assertSchedulePurposeStage(initial, purpose);
+  const { examTypeId, modalityId } = await appointmentPurposeSettings(pool, purpose);
+  const payload: CreateBookingPayload = {
+    patientId: initial.patientId, modalityId, examTypeId, bookingDate, bookingTime,
+    notes: `Gamma Knife ${purpose} appointment`,
+    patientIdentityVerificationProof: body.patientIdentityVerificationProof == null ? null : text(body.patientIdentityVerificationProof, 'Identity verification', true, 5000),
+    patientIdentitySelectionSource: 'search',
+    modalitySafetyAcknowledged: body.modalitySafetyAcknowledged === true,
+    mriPrimaryScreening: mriPrimaryScreening(body.mriPrimaryScreening),
+    capacityResolutionMode: 'standard',
+    override: body.override as CreateBookingPayload['override'],
+  };
+  const result = await createBooking(payload, Number(actor.sub), actor.role, typeof body.policySetKey === 'string' ? body.policySetKey : 'default', undefined,
+    { requirePatientIdentityVerification: true, selectionSource: 'search' },
+    async (client, created) => {
+      await authorize(actor, 'scheduling', client);
+      const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+      if (!episode.active) throw new HttpError(409, 'A closed episode cannot receive a new appointment.');
+      assertSchedulePurposeStage(episode, purpose);
+      const key = purpose === 'treatment' ? 'treatmentAppointment' : 'followupAppointment';
+      const existingId = episode.data[key]?.bookingId;
+      if (existingId) {
+        const existing = await client.query("select 1 from appointments_v2.bookings where id=$1 and status in ('scheduled','arrived','waiting') and voided_at is null", [existingId]);
+        if (existing.rows.length) throw new HttpError(409, 'A current appointment is already linked. Reschedule that appointment instead.');
+      }
+      episode.data[key] = { bookingId: created.booking.id, confirmed: false, postponed: false };
+      if (purpose === 'treatment') await client.query("update gamma_knife_treatment_courses set booking_id=$2,updated_at=now() where episode_id=$1 and status in ('planned','in_progress','interrupted')", [episode.id, created.booking.id]);
+      if (body.confirmed === true) await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed during scheduling.',$2)", [episode.id, actor.sub]);
+      episode.data[key].confirmed = body.confirmed === true;
+      await episodeWorkflowHistory(client, episode, actor, 'appointment_created_and_linked', '', { purpose, bookingId: created.booking.id, examTypeId });
+    });
+  return { booking: result.booking, decision: result.decisionSnapshot, episodeId: Number(episodeId) };
+}
+
+export async function rescheduleEpisodeAppointment(actor: Actor, episodeId: unknown, input: unknown) {
+  await authorize(actor, 'scheduling');
+  const body = record(input); const purpose = body.purpose;
+  if (purpose !== 'treatment' && purpose !== 'followup') throw new HttpError(400, 'Choose a valid appointment purpose.');
+  const bookingId = id(body.bookingId); const bookingDate = date(body.bookingDate);
+  const bookingTime = body.bookingTime == null || body.bookingTime === '' ? null : text(body.bookingTime, 'Appointment time', true, 20);
+  const reason = text(body.reason, 'Rescheduling reason', true, 1000);
+  const episode = await findEpisode(episodeId); assertSchedulePurposeStage(episode, purpose);
+  const { examTypeId } = await appointmentPurposeSettings(pool, purpose);
+  const result = await rescheduleBooking(bookingId, bookingDate, bookingTime, examTypeId, null, null, Number(actor.sub), actor.role,
+    body.override as CreateBookingPayload['override'], 'standard', null, null, reason, null, undefined, undefined,
+    typeof body.policySetKey === 'string' ? body.policySetKey : 'default', undefined, false, false, false,
+    async (client, rescheduled) => {
+      await authorize(actor, 'scheduling', client);
+      const current = await findEpisode(episodeId, client, true); checkEpisodeRevision(current, body.revision);
+      if (!current.active) throw new HttpError(409, 'A closed episode cannot be rescheduled.');
+      assertSchedulePurposeStage(current, purpose);
+      const key = purpose === 'treatment' ? 'treatmentAppointment' : 'followupAppointment';
+      if (Number(current.data[key]?.bookingId) !== bookingId) throw new HttpError(409, 'The appointment is no longer linked to this episode.');
+      const owner = await client.query("select 1 from appointments_v2.bookings where id=$1 and patient_id=$2 and exam_type_id=$3 and status='scheduled' and voided_at is null", [bookingId, current.patientId, examTypeId]);
+      if (!owner.rows.length) throw new HttpError(409, 'The linked appointment no longer matches this patient and Gamma Knife purpose.');
+      current.data[key] = { bookingId, confirmed: body.confirmed === true, postponed: false };
+      if (body.confirmed === true) await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed during rescheduling.',$2)", [current.id, actor.sub]);
+      await episodeWorkflowHistory(client, current, actor, 'appointment_rescheduled', reason, { purpose, bookingId, bookingDate, bookingTime, confirmed: body.confirmed === true });
+    });
+  return { booking: result.booking, episodeId: Number(episodeId) };
+}
+
 export async function createTreatmentCourse(actor: Actor, episodeId: unknown, input: unknown) {
   const body = record(input); const immobilization = String(body.immobilization);
   if (!['frame','mask'].includes(immobilization)) throw new HttpError(400, 'Choose frame or mask immobilization.');
@@ -212,15 +749,37 @@ export async function createTreatmentCourse(actor: Actor, episodeId: unknown, in
       await authorize(actor, 'treatment', client);
       const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
       if (!episode.active) throw new HttpError(409, 'Episode is closed.');
-      const existing = await client.query<{ id: string; status: string }>('select id,status from gamma_knife_treatment_courses where episode_id=$1 order by course_number desc limit 1', [episode.id]);
-      let priorCourseId: number | null = null; let reassessmentId: number | null = null;
+      if (episode.data.referralReviewRequired || episode.data.mdtReviewRequired) throw new HttpError(409, 'Complete the required clinical and MDT review of the corrected referral before proceeding.');
+        if (!episode.data.preparation?.ready) throw new HttpError(409, 'Complete and confirm treatment preparation before creating a treatment course.');
+        const requiredChecklist = await client.query("select 1 from gamma_knife_readiness_items where episode_id=$1 and required and status<>'completed' limit 1", [episode.id]);
+        if (requiredChecklist.rows.length) throw new HttpError(409, 'Complete all required operational readiness checklist items before creating a treatment course.');
+      const existing = await client.query<{ id: string; status: string; prior_course_id: number | null; reassessment_id: number | null }>('select id,status,prior_course_id,reassessment_id from gamma_knife_treatment_courses where episode_id=$1 order by course_number desc limit 1', [episode.id]);
+      let priorCourseId: number | null = null; let reassessmentId: number | null = null; let replacedCancelledCourseId: number | null = null;
       if (existing.rows.length) {
-        priorCourseId = id(body.priorCourseId); reassessmentId = id(body.reassessmentId);
-        if (Number(existing.rows[0]!.id) !== priorCourseId || existing.rows[0]!.status !== 'completed') throw new HttpError(409, 'A repeat course must link to a completed prior course.');
+        const previous = existing.rows[0]!;
+        if (previous.status === 'cancelled') {
+          const delivered = await client.query("select 1 from gamma_knife_treatment_fractions where course_id=$1 and status='delivered' limit 1", [previous.id]);
+          if (delivered.rows.length) throw new HttpError(409, 'A cancelled course with delivered fractions cannot be replaced as an undelivered plan.');
+          replacedCancelledCourseId = Number(previous.id);
+          if (previous.prior_course_id != null) {
+            priorCourseId = id(body.priorCourseId); reassessmentId = id(body.reassessmentId);
+            if (priorCourseId !== Number(previous.prior_course_id) || reassessmentId !== Number(previous.reassessment_id)) throw new HttpError(409, 'A cancelled repeat plan must be replaced under the same completed prior course and approved reassessment.');
+          } else {
+            if (body.priorCourseId != null || body.reassessmentId != null) throw new HttpError(400, 'A replacement for the first plan does not use repeat-treatment references.');
+            if (episode.data.mdt?.decision !== 'approved' || !['preparation','treatment'].includes(episode.status)) throw new HttpError(409, 'The replacement first course requires the original MDT approval and current preparation workflow.');
+          }
+        } else {
+          priorCourseId = id(body.priorCourseId); reassessmentId = id(body.reassessmentId);
+          if (Number(previous.id) !== priorCourseId || previous.status !== 'completed') throw new HttpError(409, 'A repeat course must link to a completed prior course.');
+        }
+        if (priorCourseId != null) {
         const reassessment = await client.query(`select r.status,d.decision from gamma_knife_reassessments r
           join lateral (select decision from gamma_knife_reassessment_decisions where reassessment_id=r.id order by revision desc limit 1) d on true
           where r.id=$1 and r.episode_id=$2 and r.course_id=$3 for update of r`, [reassessmentId, episode.id, priorCourseId]);
         if (!reassessment.rows.length || reassessment.rows[0]!.status !== 'decided' || reassessment.rows[0]!.decision !== 'approved') throw new HttpError(409, 'An approved reassessment linked to the completed course is required before creating a repeat course.');
+        const prior = await client.query("select 1 from gamma_knife_treatment_courses where id=$1 and episode_id=$2 and status='completed'", [priorCourseId, episode.id]);
+        if (!prior.rows.length) throw new HttpError(409, 'A completed prior treatment course is required before creating a repeat course.');
+        }
       } else if (body.priorCourseId != null || body.reassessmentId != null || episode.data.mdt?.decision !== 'approved' || !['preparation','treatment'].includes(episode.status)) {
         throw new HttpError(409, 'The first course requires the recorded MDT approval and preparation workflow.');
       }
@@ -233,8 +792,8 @@ export async function createTreatmentCourse(actor: Actor, episodeId: unknown, in
         episode.data.preparation = { consent: false, imaging: false, clinicalReady: false, notes: '', instructions: '', actions: '', ready: false };
         delete episode.data.treatmentAppointment;
       }
-      await treatmentHistory(client, Number(course.id), actor, 'course_created', course);
-      await episodeWorkflowHistory(client, episode, actor, 'course_created', '', { courseId: Number(course.id), priorCourseId, reassessmentId });
+      await treatmentHistory(client, Number(course.id), actor, replacedCancelledCourseId ? 'course_replacement_created' : 'course_created', { course, replacesCancelledCourseId: replacedCancelledCourseId });
+      await episodeWorkflowHistory(client, episode, actor, replacedCancelledCourseId ? 'course_replacement_created' : 'course_created', '', { courseId: Number(course.id), priorCourseId, reassessmentId, replacesCancelledCourseId: replacedCancelledCourseId });
       return { course, episode, ...await workflowRecords(episode.id, client) };
     });
   } catch (error) {
@@ -389,6 +948,7 @@ export async function decideReassessment(actor: Actor, episodeId: unknown, reass
 export async function createInvestigation(actor: Actor, episodeId: unknown, input: unknown) {
   const body = record(input); const requestedText = text(body.requestedText, 'Requested investigation', true, 4000);
   const dueDate = body.dueDate == null || body.dueDate === '' ? null : date(body.dueDate);
+  const priority = operationalPriority(body.priority ?? 'normal');
   return transaction(async client => {
     await authorize(actor, 'mdt', client); const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
     if (!episode.active) throw new HttpError(409, 'A task cannot be added to a closed episode.');
@@ -400,11 +960,11 @@ export async function createInvestigation(actor: Actor, episodeId: unknown, inpu
     const responsible = body.responsibleUserId == null || body.responsibleUserId === '' ? null : id(body.responsibleUserId);
     let name: string | null = null;
     if (responsible) {
-      const assigned = await client.query<{ full_name: string }>(`select full_name from users where id=$1 and is_active=true and gamma_knife_permissions @> array['access']::text[] and gamma_knife_permissions && array['clinical','mdt','documents']::text[]`, [responsible]);
+      const assigned = await client.query<{ full_name: string }>(`select full_name from users where id=$1 and is_active=true and gamma_knife_permissions @> array['access']::text[] and gamma_knife_permissions && array['clinical','mdt','documents','scheduling']::text[]`, [responsible]);
       if (!assigned.rows.length) throw new HttpError(400, 'Assign the investigation to an active Gamma Knife team member.'); name = assigned.rows[0]!.full_name;
     }
-    const inserted = await client.query(`insert into gamma_knife_investigations(episode_id,reassessment_id,requested_text,responsible_user_id,responsible_name_snapshot,due_date,created_by)
-      values($1,$2,$3,$4,$5,$6,$7) returning *`, [episode.id, reassessmentId, requestedText, responsible, name, dueDate, actor.sub]);
+    const inserted = await client.query(`insert into gamma_knife_investigations(episode_id,reassessment_id,requested_text,responsible_user_id,responsible_name_snapshot,due_date,priority,created_by)
+      values($1,$2,$3,$4,$5,$6,$7,$8) returning *`, [episode.id, reassessmentId, requestedText, responsible, name, dueDate, priority, actor.sub]);
     const task = inserted.rows[0]!; await investigationHistory(client, Number(task.id), actor, 'investigation_requested', task);
     episode.data.investigationsPending = true;
     await episodeWorkflowHistory(client, episode, actor, 'investigation_requested', '', { investigationId: Number(task.id), reassessmentId });
@@ -417,7 +977,9 @@ export async function updateInvestigation(actor: Actor, episodeId: unknown, inve
   const reason = text(body.reason, 'Correction reason', actionName !== 'receive');
   return transaction(async client => {
     const granted = await permissions(actor, client);
-    if (!granted.includes('access') || (!granted.includes('mdt') && !granted.includes('documents'))) throw new HttpError(403, 'Gamma Knife assignment and MDT or documents permission required.');
+    const coordinationOnly = granted.includes('scheduling') && (actionName === 'assign' || actionName === 'correct');
+    if (!granted.includes('access') || (!granted.includes('mdt') && !granted.includes('documents') && !coordinationOnly)) throw new HttpError(403, 'Gamma Knife assignment and MDT, documents, or scheduling permission required.');
+    if (coordinationOnly && !['assign','correct'].includes(actionName)) throw new HttpError(403, 'Scheduling permission cannot receive or cancel a clinical investigation.');
     if (body.evidenceDocumentId != null && body.evidenceDocumentId !== '' && !granted.includes('documents')) throw new HttpError(403, 'Documents permission is required to link investigation evidence.');
     const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
     if (!episode.active) throw new HttpError(409, 'Episode is closed.');
@@ -427,15 +989,16 @@ export async function updateInvestigation(actor: Actor, episodeId: unknown, inve
     if (actionName === 'receive' && before.status !== 'requested') throw new HttpError(409, 'Only a requested investigation can be received.');
     if (actionName === 'reopen' && before.status === 'requested') throw new HttpError(409, 'This investigation is already outstanding.');
     let requestedText = String(before.requested_text); let responsibleUserId = before.responsible_user_id == null ? null : Number(before.responsible_user_id); let responsibleName = before.responsible_name_snapshot as string | null;
-    let dueDate = before.due_date ? String(before.due_date).slice(0,10) : null; let status = String(before.status); let evidenceDocumentId = before.evidence_document_id == null ? null : Number(before.evidence_document_id); let receivedNote = before.received_note as string | null;
+    let dueDate = before.due_date ? String(before.due_date).slice(0,10) : null; let priority = String(before.priority ?? 'normal'); let status = String(before.status); let evidenceDocumentId = before.evidence_document_id == null ? null : Number(before.evidence_document_id); let receivedNote = before.received_note as string | null;
     if (actionName === 'correct') {
       requestedText = text(body.requestedText, 'Requested investigation', true, 4000);
       dueDate = body.dueDate === undefined ? dueDate : body.dueDate == null || body.dueDate === '' ? null : date(body.dueDate);
+      priority = body.priority === undefined ? priority : operationalPriority(body.priority);
     }
     if (actionName === 'assign' || body.responsibleUserId !== undefined) {
       responsibleUserId = body.responsibleUserId == null || body.responsibleUserId === '' ? null : id(body.responsibleUserId);
       if (responsibleUserId) {
-        const assigned = await client.query<{ full_name: string }>(`select full_name from users where id=$1 and is_active=true and gamma_knife_permissions @> array['access']::text[] and gamma_knife_permissions && array['clinical','mdt','documents']::text[]`, [responsibleUserId]);
+        const assigned = await client.query<{ full_name: string }>(`select full_name from users where id=$1 and is_active=true and gamma_knife_permissions @> array['access']::text[] and gamma_knife_permissions && array['clinical','mdt','documents','scheduling']::text[]`, [responsibleUserId]);
         if (!assigned.rows.length) throw new HttpError(400, 'Assign the investigation to an active Gamma Knife team member.'); responsibleName = assigned.rows[0]!.full_name;
       } else responsibleName = null;
     }
@@ -450,7 +1013,7 @@ export async function updateInvestigation(actor: Actor, episodeId: unknown, inve
     }
     if (actionName === 'cancel') status = 'cancelled';
     if (actionName === 'reopen') { status = 'requested'; evidenceDocumentId = null; receivedNote = null; }
-    const saved = await client.query(`update gamma_knife_investigations set requested_text=$2,responsible_user_id=$3,responsible_name_snapshot=$4,due_date=$5,status=$6,evidence_document_id=$7,received_note=$8,updated_at=now() where id=$1 returning *`, [id(investigationId), requestedText, responsibleUserId, responsibleName, dueDate, status, evidenceDocumentId, receivedNote]);
+    const saved = await client.query(`update gamma_knife_investigations set requested_text=$2,responsible_user_id=$3,responsible_name_snapshot=$4,due_date=$5,priority=$6,status=$7,evidence_document_id=$8,received_note=$9,updated_at=now() where id=$1 returning *`, [id(investigationId), requestedText, responsibleUserId, responsibleName, dueDate, priority, status, evidenceDocumentId, receivedNote]);
     await investigationHistory(client, id(investigationId), actor, `investigation_${actionName}`, { before, after: saved.rows[0] }, reason);
     const open = await client.query("select count(*)::int as count from gamma_knife_investigations where episode_id=$1 and status='requested'", [episode.id]);
     episode.data.investigationsPending = Number(open.rows[0]!.count) > 0;
@@ -482,6 +1045,7 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       data.clinical = clinical(body.clinical, action === 'submit', episode.diagnosisCategory);
       data.assessmentStatus = action === 'clinical' ? 'draft' : body.status === 'finalized' ? 'finalized' : body.status === 'provisional' ? 'provisional' : (() => { throw new HttpError(400, 'Choose Provisional or Finalized.'); })();
       data.assessmentRevision = episode.revision + 1;
+      if (action === 'submit') data.referralReviewRequired = false;
       episode.status = action === 'submit' ? 'mdt' : 'clinical_review';
     } else if (action === 'mdt') {
       requireStage(episode, correctNotSuitable ? ['closed'] : ['mdt','preparation','treatment']);
@@ -491,6 +1055,8 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       if (!consultants.length) throw new HttpError(400, 'At least one responsible consultant is required.');
       if (data.mdt) text(reason, 'Reason for correcting the previous MDT decision', true);
       episode.active = body.decision !== 'not_suitable';
+      episode.closureClassification = body.decision === 'not_suitable' ? 'not_suitable' : null;
+      data.mdtReviewRequired = false;
       if (data.preparation) data.preparation.ready = false;
       if (body.decision !== 'approved' && data.treatmentAppointment) { data.treatmentAppointment.confirmed = false; data.treatmentAppointment.postponed = true; }
       data.mdt = { decision: body.decision as NonNullable<typeof data.mdt>['decision'], consultants, assessment: text(body.assessment, 'MDT assessment', true), notes: text(body.notes, 'Discussion'), investigations: text(body.investigations, 'Requested investigations', body.decision === 'additional_information'), assessmentRevision: data.assessmentRevision! };
@@ -514,6 +1080,11 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
     } else if (action === 'preparation') {
       requireStage(episode, ['preparation','treatment']);
       const ready = body.ready === true;
+      if (ready && (data.referralReviewRequired || data.mdtReviewRequired)) throw new HttpError(409, 'Complete the required clinical and MDT review of the corrected referral before proceeding.');
+      if (ready) {
+        const pendingChecklist = await client.query("select count(*)::int as count from gamma_knife_readiness_items where episode_id=$1 and required and status<>'completed'", [episode.id]);
+        if (Number(pendingChecklist.rows[0]!.count) > 0) throw new HttpError(409, 'Complete all required operational readiness checklist items before marking this patient ready.');
+      }
       data.preparation = { consent: body.consent === true, imaging: body.imaging === true, clinicalReady: body.clinicalReady === true, notes: text(body.notes, 'Preparation notes', ready), instructions: text(body.instructions, 'Patient preparation instructions'), actions: text(body.actions, 'Patient required actions'), ready };
       if (ready && (!data.preparation.consent || !data.preparation.imaging || !data.preparation.clinicalReady)) throw new HttpError(409, 'Confirm consent, required imaging, and clinical readiness.');
       episode.status = ready ? 'treatment' : 'preparation';
@@ -521,6 +1092,7 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       const purpose = body.purpose;
       if (purpose !== 'treatment' && purpose !== 'followup') throw new HttpError(400, 'Invalid appointment purpose.');
       requireStage(episode, purpose === 'treatment' ? ['preparation','treatment'] : ['followup']);
+      if (purpose === 'treatment' && (data.referralReviewRequired || data.mdtReviewRequired)) throw new HttpError(409, 'Complete the required clinical and MDT review of the corrected referral before proceeding.');
       const config = await readConfig(client); const expectedExam = purpose === 'treatment' ? config.treatmentExamTypeId : config.followupExamTypeId;
       if (!expectedExam) throw new HttpError(409, 'Configure the RISpro exam type for this appointment purpose first.');
       const booking = await client.query('select id from appointments_v2.bookings where id=$1 and patient_id=$2 and exam_type_id=$3 and status=\'scheduled\' and voided_at is null for share', [id(body.bookingId), episode.patientId, expectedExam]);
@@ -528,11 +1100,13 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       const key = purpose === 'treatment' ? 'treatmentAppointment' : 'followupAppointment';
       if (data[key]) text(reason, 'Reason for replacing appointment link', true);
       data[key] = { bookingId: id(body.bookingId), confirmed: body.confirmed === true, postponed: false };
+      if (body.confirmed === true) await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed when linked to this episode.',$2)", [episode.id, actor.sub]);
       if (purpose === 'treatment') await client.query("update gamma_knife_treatment_courses set booking_id=$2,updated_at=now() where episode_id=$1 and status in ('planned','in_progress','interrupted')", [episode.id, id(body.bookingId)]);
     } else if (action === 'confirm_appointment') {
       const key = body.purpose === 'treatment' ? 'treatmentAppointment' : body.purpose === 'followup' ? 'followupAppointment' : null;
       if (!key || !data[key] || data[key].postponed) throw new HttpError(409, 'Link a current appointment first.');
       data[key].confirmed = true;
+      await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed with the patient.',$2)", [episode.id, actor.sub]);
     } else if (action === 'postpone') {
       requireStage(episode, ['preparation','treatment']); reason = text(body.reason, 'Postponement reason', true);
       if (data.treatmentAppointment) { data.treatmentAppointment.postponed = true; data.treatmentAppointment.confirmed = false; }
@@ -594,6 +1168,7 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       const unfinalizedCourses = await client.query("select 1 from gamma_knife_treatment_courses where episode_id=$1 and status='completed' and not documentation_finalized limit 1", [episode.id]);
       if (openCourses.rows.length || unfinalizedCourses.rows.length || !data.treatment?.finalized) throw new HttpError(409, 'Complete or resolve every treatment course and finalize its treatment report before closing follow-up.');
       reason = text(body.reason, 'Follow-up closure reason', true); data.closureReason = reason; episode.active = false; episode.status = 'closed';
+      episode.closureClassification = 'completed';
     } else if (action === 'document_visibility') {
       const documentId = id(body.documentId);
       const found = await client.query('select category from gamma_knife_documents where episode_id=$1 and document_id=$2 and removed_at is null', [episode.id, documentId]);
@@ -629,7 +1204,7 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       episode.qrActive = false; await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
     }
     episode.revision++;
-    await client.query('update gamma_knife_episodes set status=$2,active=$3,data=$4::jsonb,revision=$5,updated_at=now() where id=$1', [episode.id, episode.status, episode.active, JSON.stringify(data), episode.revision]);
+    await client.query('update gamma_knife_episodes set status=$2,active=$3,closure_classification=$4,replacement_episode_id=$5,data=$6::jsonb,revision=$7,updated_at=now() where id=$1', [episode.id, episode.status, episode.active, episode.closureClassification ?? null, episode.replacementEpisodeId ?? null, JSON.stringify(data), episode.revision]);
     await history(client, episode, actor, action, reason, Object.keys(historyDetails).length ? historyDetails : ['document_visibility','document_remove'].includes(action) ? { documentId: id(body.documentId), released: action === 'document_visibility' && body.released === true } : {});
     return { episode, ...(token ? { token } : {}) };
   });

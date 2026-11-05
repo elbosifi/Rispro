@@ -1,6 +1,6 @@
 import { HttpError } from '../../utils/http-error.js';
 import { validateIsoDate } from '../../utils/date.js';
-import { CATEGORIES, type BrainMetastasisLesion, type Category, type Clinical, type Config, type DiagnosisClinicalDetails, type Episode, type Permission } from './gamma-knife-types.js';
+import { CATEGORIES, type BrainMetastasisLesion, type Category, type Clinical, type Config, type DiagnosisClinicalDetails, type Episode, type Permission, type ReferralInfo } from './gamma-knife-types.js';
 
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'An object is required.');
@@ -65,6 +65,32 @@ export function clinical(value: unknown, submit: boolean, diagnosisCategory?: st
   const body = record(value);
   const details = diagnosisDetails(body.structuredDetails, diagnosisCategory);
   return { history: text(body.history, 'History', submit), examination: text(body.examination, 'Examination', submit), imaging: text(body.imaging, 'Imaging', submit), assessment: text(body.assessment, 'Clinical assessment', submit), priorTreatment: text(body.priorTreatment, 'Prior treatment'), diagnosisDetails: text(body.diagnosisDetails, 'Diagnosis-specific information'), priorTreatmentUnavailable: body.priorTreatmentUnavailable === true, ...(details ? { structuredDetails: details } : {}) };
+}
+export function referralCorrection(value: unknown): { diagnosis: string; diagnosisCategory: string; referral: ReferralInfo; reason: string } {
+  const body = record(value);
+  return {
+    diagnosis: text(body.diagnosis, 'Provisional diagnosis', true, 1000),
+    diagnosisCategory: text(body.diagnosisCategory, 'Diagnosis category', true, 150),
+    referral: {
+      details: text(body.details, 'Referral details', false, 4000),
+      administrativeNotes: text(body.administrativeNotes, 'Administrative notes', false, 4000),
+      source: text(body.source, 'Referral source', false, 250),
+      referringPhysician: text(body.referringPhysician, 'Referring physician', false, 250),
+    },
+    reason: text(body.reason, 'Correction reason', true, 1000),
+  };
+}
+export function mriPrimaryScreening(value: unknown): { result: 'no_known_implant_reported' | 'implant_reported_review_required'; implantSite: string | null; implantDescription: string | null; previousReviewerNameReported: string | null } | null {
+  if (value == null) return null;
+  const body = record(value);
+  const result = body.result;
+  if (result !== 'no_known_implant_reported' && result !== 'implant_reported_review_required') throw new HttpError(400, 'Choose a valid MRI implant screening result.');
+  return {
+    result,
+    implantSite: text(body.implantSite, 'Implant or device site', false, 250) || null,
+    implantDescription: text(body.implantDescription, 'Implant or device description', false, 1000) || null,
+    previousReviewerNameReported: text(body.previousReviewerNameReported, 'Previous reviewer name', false, 250) || null,
+  };
 }
 export function category(value: unknown): Category {
   if (!CATEGORIES.includes(value as Category)) throw new HttpError(400, 'Invalid document category.');

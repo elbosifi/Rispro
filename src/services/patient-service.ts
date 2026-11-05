@@ -528,9 +528,9 @@ async function validatePatientPayload(
   };
 }
 
-export async function getPatientById(patientId: UserId): Promise<PatientRow> {
+export async function getPatientById(patientId: UserId, db: PoolClient | typeof pool = pool): Promise<PatientRow> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
-  const { rows } = await pool.query<PatientRow>(
+  const { rows } = await db.query<PatientRow>(
     `
       select
         p.id,
@@ -1144,12 +1144,46 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
   }
 }
 
+export async function updatePatientContactDetails(patientId: UserId, input: { phone1?: unknown; phone2?: unknown; address?: unknown }, updatedByUserId: OptionalUserId, db: PoolClient | typeof pool = pool): Promise<PatientRow> {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
+  const rules = await loadPatientRegistrationSettings();
+  const phone1 = validatePhone(input.phone1, "phone1", { required: rules.phoneRule !== "optional" });
+  const phone2 = validatePhone(input.phone2, "phone2", { required: false });
+  const address = String(input.address ?? "").trim();
+  if (address.length > 1000) throw new HttpError(400, "address must be at most 1000 characters.");
+  const ownsTransaction = db === pool;
+  const client = ownsTransaction ? await pool.connect() : db;
+  try {
+    if (ownsTransaction) await client.query("begin");
+    const previous = await client.query<{ id: number; phone_1: string | null; phone_2: string | null; address: string | null }>(
+      "select id,phone_1,phone_2,address from patients where id=$1 for update", [cleanPatientId]
+    );
+    if (!previous.rows[0]) throw new HttpError(404, "Patient not found.");
+    const updated = await client.query<{ id: number; phone_1: string | null; phone_2: string | null; address: string | null }>(
+      "update patients set phone_1=nullif($2,''),phone_2=nullif($3,''),address=nullif($4,''),updated_by_user_id=$5,updated_at=now() where id=$1 returning id,phone_1,phone_2,address",
+      [cleanPatientId, phone1, phone2, address, updatedByUserId]
+    );
+    await logAuditEntry({ entityType: "patient", entityId: cleanPatientId, actionType: "contact_details_update", oldValues: previous.rows[0], newValues: updated.rows[0], changedByUserId: updatedByUserId }, client);
+    if (ownsTransaction) await client.query("commit");
+    return await getPatientById(cleanPatientId, client);
+  } catch (error) {
+    if (ownsTransaction) await client.query("rollback");
+    throw error;
+  } finally {
+    if (ownsTransaction) (client as PoolClient).release();
+  }
+}
+
 export async function deletePatient(patientId: UserId, deletedByUserId: OptionalUserId): Promise<{ ok: boolean }> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const client = await pool.connect();
 
   try {
     await client.query("begin");
+    const patientLock = await client.query("select id from patients where id=$1 for update", [cleanPatientId]);
+    if (!patientLock.rows.length) throw new HttpError(404, "Patient not found.");
+    const gammaKnifeEpisodes = await client.query("select id from gamma_knife_episodes where patient_id=$1 limit 1", [cleanPatientId]);
+    if (gammaKnifeEpisodes.rows.length) throw new HttpError(409, "This patient has Gamma Knife episode history. Resolve the episode through the authorized Gamma Knife correction workflow before deleting the patient; treatment history is never deleted.");
     const previousPatient = await getPatientById(cleanPatientId);
 
     const { rows: appointmentRows } = await client.query<{ id: unknown }>(
@@ -1356,6 +1390,20 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
       throw new HttpError(404, "Both patient records must exist before merging.");
     }
 
+    const gammaKnifeImpact = await client.query<{ active_episode: boolean | null; treated_episode: boolean | null }>(`
+      select bool_or(e.active) as active_episode,
+        bool_or(exists(
+          select 1 from gamma_knife_treatment_courses c
+          where c.episode_id=e.id and (c.status='completed' or exists(
+            select 1 from gamma_knife_treatment_fractions f where f.course_id=c.id and f.status='delivered'
+          ))
+        )) as treated_episode
+      from gamma_knife_episodes e where e.patient_id=any($1::bigint[])
+    `, [[targetPatientId, sourcePatientId]]);
+    if (gammaKnifeImpact.rows[0]?.active_episode || gammaKnifeImpact.rows[0]?.treated_episode) {
+      throw new HttpError(409, "These patient records include an active or treated Gamma Knife episode. Resolve the episode identity through the authorized Gamma Knife clinical correction workflow before merging.");
+    }
+
     await revokePatientIdentityVerification(
       client,
       [targetPatientId, sourcePatientId],
@@ -1382,6 +1430,8 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
     await client.query(`update patient_import_staging_rows set migrated_patient_id = $1, updated_at = now() where migrated_patient_id = $2`, [targetPatientId, sourcePatientId]);
     await client.query(`update scheduling_override_audit_events set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
     await client.query(`update appointments_v2.override_audit_events set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update gamma_knife_episodes set patient_id=$1 where patient_id=$2`, [targetPatientId, sourcePatientId]);
+      await client.query(`update gamma_knife_patient_identity_correction_requests set patient_id=$1 where patient_id=$2`, [targetPatientId, sourcePatientId]);
     await client.query(`delete from patient_custom_values where patient_id = $1`, [sourcePatientId]);
     await mergePatientIdentifiers(client, targetPatientId, sourcePatientId, updatedByUserId);
     await client.query(`delete from patient_duplicate_dismissals where patient_a_id = $1 or patient_b_id = $1`, [sourcePatientId]);
