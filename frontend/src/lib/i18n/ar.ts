@@ -1641,6 +1641,8 @@ export const ar = {
   "settings.users.status": "الحالة",
   "settings.users.doctorProfile": "ملف بوابة الطبيب",
   "settings.users.permissions": "الصلاحيات",
+  "settings.users.gammaKnifeOnly": "حساب مخصص لقاما نايف فقط",
+  "settings.users.gammaKnifeOnlyHelp": "يقصر هذا الحساب على قاما نايف وأمان الحساب وMedASR. عيّن صلاحية قاما نايف أولاً. ستُلغى الجلسات الحالية.",
   "settings.users.updated": "آخر تحديث",
   "settings.users.manage": "إدارة",
   "settings.users.account": "الحساب",

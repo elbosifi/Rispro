@@ -37,6 +37,10 @@ export function LoginPage() {
   const loginDestination = resolveLoginDestination(location.state);
 
   const completeLogin = async (user: User) => {
+    if (user.gammaKnifeOnly) {
+      navigate("/gamma-knife", { replace: true });
+      return;
+    }
     if (user.mustChangePassword) {
       navigate(loginDestination.to, { replace: true });
       return;

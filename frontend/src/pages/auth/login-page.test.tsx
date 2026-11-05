@@ -88,6 +88,16 @@ describe("LoginPage routing", () => {
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/doctor/dashboard"));
   });
 
+  it("sends a Gamma Knife-only doctor directly to the module without loading Doctor Portal identity", async () => {
+    testState.login.mockResolvedValue({ ...loggedInUser("doctor"), gammaKnifeOnly: true });
+    const { container } = renderLogin("/appointments");
+
+    await submitLogin(container);
+
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/gamma-knife"));
+    expect(testState.fetchDoctorMe).not.toHaveBeenCalled();
+  });
+
   it("keeps supervisors in Core from the default login target", async () => {
     testState.login.mockResolvedValue(loggedInUser("supervisor"));
     testState.fetchDoctorMe.mockResolvedValue({

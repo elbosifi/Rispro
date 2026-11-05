@@ -94,7 +94,12 @@ function LoadingScreen() {
 
 function AuthenticatedQzConnectionManager() {
   const { user } = useAuth();
-  return <QzConnectionManager enabled={Boolean(user && canAccessWorkstationPrinting(user.role))} />;
+  return <QzConnectionManager enabled={Boolean(user && !user.gammaKnifeOnly && canAccessWorkstationPrinting(user.role))} />;
+}
+
+function CoreWorkspaceRestriction({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  return user?.gammaKnifeOnly ? <Navigate to="/gamma-knife" replace /> : <>{children}</>;
 }
 
 function QueueCheckInAccessRoute() {
@@ -439,7 +444,7 @@ function RouterConfig() {
         path="/doctor/*"
         element={
           <ProtectedRoute>
-            <DoctorWorkspaceRoute />
+            <CoreWorkspaceRestriction><DoctorWorkspaceRoute /></CoreWorkspaceRestriction>
           </ProtectedRoute>
         }
       />
@@ -447,7 +452,7 @@ function RouterConfig() {
         path="/*"
         element={
           <ProtectedRoute>
-            <AppContent />
+            <CoreWorkspaceRestriction><AppContent /></CoreWorkspaceRestriction>
           </ProtectedRoute>
         }
       />

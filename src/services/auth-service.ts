@@ -20,6 +20,7 @@ interface AuthUserRow {
   is_active: boolean;
   must_change_password: boolean;
   auth_version: number;
+  gamma_knife_only?: boolean;
 }
 
 interface CookieResponse {
@@ -51,7 +52,7 @@ export async function authenticateUser(
 ): Promise<AuthUserRow> {
   const normalizedUsername = normalizeUsername(username);
   const query = `
-    select id, username, full_name, english_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password, auth_version
+    select id, username, full_name, english_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password, auth_version, gamma_knife_only
     from users
     where lower(btrim(username)) = $1
     limit 1
@@ -102,11 +103,12 @@ export interface CurrentSessionUser {
   role: Role;
   is_active: boolean;
   must_change_password: boolean;
+  gamma_knife_only: boolean;
 }
 
 export async function findCurrentSessionUser(userId: UserId): Promise<CurrentSessionUser | null> {
   const { rows } = await pool.query<CurrentSessionUser>(
-    `select id, username, full_name, english_name, role, is_active,
+    `select id, username, full_name, english_name, role, is_active, gamma_knife_only,
             coalesce(must_change_password, false) as must_change_password
        from users where id = $1 limit 1`,
     [Number(userId)]
@@ -114,7 +116,7 @@ export async function findCurrentSessionUser(userId: UserId): Promise<CurrentSes
   return rows[0] ?? null;
 }
 
-export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password"> & { auth_version?: number }): string {
+export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password"> & { gamma_knife_only?: boolean; auth_version?: number }): string {
   return jwt.sign(
     {
       sub: user.id,
@@ -122,7 +124,8 @@ export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "f
       fullName: user.full_name,
       role: user.role,
       authVersion: user.auth_version ?? 0,
-      mustChangePassword: user.must_change_password
+      mustChangePassword: user.must_change_password,
+      gammaKnifeOnly: Boolean(user.gamma_knife_only)
     },
     env.jwtSecret,
     { expiresIn: `${env.sessionHours}h` }

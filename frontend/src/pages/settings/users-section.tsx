@@ -25,6 +25,7 @@ import {
   updateUserPassword,
   updateUserRole,
   updateUserSchedulingOverridePermission,
+  updateUserGammaKnifeOnly,
 } from "@/lib/api-hooks";
 import { getUserDisplayName } from "@/lib/user-display-name";
 import { useAuth } from "@/providers/auth-provider";
@@ -204,6 +205,14 @@ export default function UsersSection({
         payload.userId,
         payload.canRequestSchedulingOverride,
       ),
+    onSuccess: async (updatedUser) => {
+      await invalidateUserDetails(updatedUser.id);
+      setManageError(null);
+    },
+    onError: (error) => setManageError(mutationErrorMessage(error)),
+  });
+  const gammaKnifeOnlyMutation = useMutation({
+    mutationFn: ({ userId, gammaKnifeOnly }: { userId: number; gammaKnifeOnly: boolean }) => updateUserGammaKnifeOnly(userId, gammaKnifeOnly),
     onSuccess: async (updatedUser) => {
       await invalidateUserDetails(updatedUser.id);
       setManageError(null);
@@ -1023,6 +1032,17 @@ export default function UsersSection({
                 <h4 className="font-semibold">
                   {t("settings.users.security")}
                 </h4>
+                {!['supervisor', 'super_admin'].includes(selectedUser.role) && <div className="mt-3 rounded-lg border border-border p-3">
+                  <label className="flex items-start gap-2 text-sm">
+                    <Input
+                      type="checkbox"
+                      checked={Boolean(selectedUser.gammaKnifeOnly)}
+                      disabled={gammaKnifeOnlyMutation.isPending}
+                      onChange={(event) => gammaKnifeOnlyMutation.mutate({ userId: selectedUser.id, gammaKnifeOnly: event.target.checked })}
+                    />
+                    <span><span className="font-medium">{t("settings.users.gammaKnifeOnly")}</span><span className="mt-1 block text-muted-foreground">{t("settings.users.gammaKnifeOnlyHelp")}</span></span>
+                  </label>
+                </div>}
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1">
                     <span>{t("settings.users.directPassword")}</span>

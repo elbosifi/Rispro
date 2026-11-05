@@ -23,6 +23,7 @@ export interface UserRow {
   is_active: boolean;
   must_change_password: boolean;
   can_request_scheduling_override: boolean;
+  gamma_knife_only: boolean;
   last_login_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -85,6 +86,7 @@ export async function listUsers(actorRole: Role = "supervisor", actorUserId: Nul
            case when role in ('supervisor', 'super_admin') and $1 <> 'super_admin' and id is distinct from $2 then null
                 else coalesce(must_change_password, false) end as must_change_password,
            coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+           coalesce(gamma_knife_only, false) as gamma_knife_only,
            case when role in ('supervisor', 'super_admin') and $1 <> 'super_admin' and id is distinct from $2 then null else last_login_at end as last_login_at,
            created_at, updated_at
     from users
@@ -321,6 +323,7 @@ export async function updateUserRole(
       `select id, username, email, full_name, english_name, role, is_active,
               coalesce(must_change_password, false) as must_change_password,
               coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+              coalesce(gamma_knife_only, false) as gamma_knife_only,
               created_at, updated_at
          from users where id = $1 for update`,
       [cleanUserId]
@@ -361,12 +364,14 @@ export async function updateUserRole(
       `update users
           set role = $2,
               can_request_scheduling_override = false,
+              gamma_knife_only = case when $2 in ('supervisor', 'super_admin') then false else gamma_knife_only end,
               auth_version = auth_version + 1,
               updated_at = now()
         where id = $1
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  coalesce(gamma_knife_only, false) as gamma_knife_only,
                   created_at, updated_at`,
       [cleanUserId, role]
     );
@@ -380,11 +385,13 @@ export async function updateUserRole(
       oldValues: {
         role: previous.role,
         canRequestSchedulingOverride: previous.can_request_scheduling_override,
+        gammaKnifeOnly: previous.gamma_knife_only,
         doctorProfileActive: profile?.active ?? null
       },
       newValues: {
         role: updatedUser.role,
         canRequestSchedulingOverride: updatedUser.can_request_scheduling_override,
+        gammaKnifeOnly: updatedUser.gamma_knife_only,
         doctorProfileActive: deactivateDoctorProfile ? false : profile?.active ?? null
       },
       changedByUserId: actor.userId
@@ -530,6 +537,74 @@ export async function updateUserSchedulingOverridePermission(
   });
 
   return updated;
+}
+
+export async function updateUserGammaKnifeOnly(
+  userId: UserId,
+  gammaKnifeOnly: boolean,
+  actor: UserActorContext
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) throw new HttpError(400, "userId must be a positive whole number.");
+  if (typeof gammaKnifeOnly !== "boolean") throw new HttpError(400, "gammaKnifeOnly must be a boolean.");
+  if (actor.role !== "supervisor" && actor.role !== "super_admin") throw new HttpError(403, "Supervisor access required.");
+  if (gammaKnifeOnly && actor.userId != null && Number(actor.userId) === cleanUserId) {
+    throw new HttpError(409, "Administrators cannot restrict their own account to Gamma Knife.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const current = await client.query<UserRow & { gamma_knife_permissions: string[] }>(
+      `select id, username, email, full_name, english_name, role, is_active,
+              coalesce(must_change_password, false) as must_change_password,
+              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+              coalesce(gamma_knife_only, false) as gamma_knife_only,
+              coalesce(gamma_knife_permissions, array[]::text[]) as gamma_knife_permissions,
+              created_at, updated_at
+         from users where id = $1 for update`,
+      [cleanUserId]
+    );
+    const previous = current.rows[0];
+    if (!previous) throw new HttpError(404, "User not found.");
+    assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
+    if (gammaKnifeOnly && !["doctor", "modality_staff", "administrative", "receptionist"].includes(previous.role)) {
+      throw new HttpError(409, "Administrative accounts must retain RISpro Core access.");
+    }
+    if (gammaKnifeOnly && !previous.gamma_knife_permissions.includes("access")) {
+      throw new HttpError(409, "Assign Gamma Knife access and permissions before restricting this account.");
+    }
+    if (previous.gamma_knife_only === gammaKnifeOnly) {
+      await client.query("commit");
+      return previous;
+    }
+    const result = await client.query<UserRow>(
+      `update users set gamma_knife_only = $2, auth_version = auth_version + 1, updated_at = now()
+        where id = $1
+        returning id, username, email, full_name, english_name, role, is_active,
+                  coalesce(must_change_password, false) as must_change_password,
+                  coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  gamma_knife_only, created_at, updated_at`,
+      [cleanUserId, gammaKnifeOnly]
+    );
+    const updated = result.rows[0];
+    if (!updated) throw new HttpError(500, "Failed to update Gamma Knife account access.");
+    await logSecurityAuditEntry({
+      entityType: "user",
+      entityId: updated.id,
+      actionType: "update_gamma_knife_only_access",
+      oldValues: { gammaKnifeOnly: previous.gamma_knife_only },
+      newValues: { gammaKnifeOnly: updated.gamma_knife_only },
+      changedByUserId: actor.userId
+    }, client);
+    await client.query("commit");
+    return updated;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getUserSchedulingOverridePermission(userId: UserId): Promise<boolean> {
@@ -986,6 +1061,7 @@ export async function updateOwnPassword(
       `select id, username, email, full_name, english_name, role, password_hash, is_active,
               coalesce(must_change_password, false) as must_change_password,
               coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+              coalesce(gamma_knife_only, false) as gamma_knife_only,
               auth_version, created_at, updated_at
          from users where id = $1 for update`,
       [cleanUserId]
@@ -1007,6 +1083,7 @@ export async function updateOwnPassword(
         returning id, username, email, full_name, english_name, role, is_active,
                   coalesce(must_change_password, false) as must_change_password,
                   coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                  coalesce(gamma_knife_only, false) as gamma_knife_only,
                   created_at, updated_at, auth_version`,
       [cleanUserId, passwordHash]
     );

@@ -49,6 +49,7 @@ export interface User {
   recentSupervisorReauth?: boolean;
   mustChangePassword?: boolean;
   canRequestSchedulingOverride?: boolean;
+  gammaKnifeOnly?: boolean;
 }
 
 export interface UserEffectiveAccess {

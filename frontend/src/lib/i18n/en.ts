@@ -1599,6 +1599,8 @@ export const en = {
   "settings.users.status": "Status",
   "settings.users.doctorProfile": "Doctor profile",
   "settings.users.permissions": "Permissions",
+  "settings.users.gammaKnifeOnly": "Gamma Knife only account",
+  "settings.users.gammaKnifeOnlyHelp": "Limits this account to Gamma Knife, account security, and MedASR. Assign Gamma Knife access first. Existing sessions will be revoked.",
   "settings.users.updated": "Updated",
   "settings.users.manage": "Manage",
   "settings.users.account": "Account",

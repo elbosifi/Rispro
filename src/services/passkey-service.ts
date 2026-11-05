@@ -23,6 +23,7 @@ export interface PasskeyUser {
   role: Role;
   mustChangePassword: boolean;
   authVersion: number;
+  gammaKnifeOnly: boolean;
 }
 
 interface PasskeyRow {
@@ -37,6 +38,7 @@ interface PasskeyRow {
   english_name: string | null;
   role: Role;
   must_change_password: boolean;
+  gamma_knife_only: boolean;
   auth_version: DbNumeric;
 }
 
@@ -156,7 +158,7 @@ export async function verifyPasskeyLogin(
   const stored = (await pool.query(
     `select p.id, p.credential_id, p.public_key, p.counter, p.transports, p.user_id,
             u.username, u.full_name, u.english_name, u.role,
-            coalesce(u.must_change_password, false) as must_change_password, u.auth_version
+            coalesce(u.must_change_password, false) as must_change_password, u.auth_version, u.gamma_knife_only
      from user_passkeys p
      join users u on u.id = p.user_id
      where p.credential_id = $1 and u.is_active = true
@@ -198,6 +200,7 @@ export async function verifyPasskeyLogin(
     englishName: passkey.english_name,
     role: passkey.role,
     mustChangePassword: passkey.must_change_password,
-    authVersion: Number(passkey.auth_version)
+    authVersion: Number(passkey.auth_version),
+    gammaKnifeOnly: passkey.gamma_knife_only
   };
 }

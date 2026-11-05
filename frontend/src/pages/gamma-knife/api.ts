@@ -1,9 +1,9 @@
 import { api } from '@/lib/api-client';
 export { PERMISSIONS, CATEGORIES, STATUS_LABELS, nextAction } from '../../../../src/modules/gamma-knife/gamma-knife-types';
-export type { Config, Episode, Clinical, Permission, EpisodeDocument } from '../../../../src/modules/gamma-knife/gamma-knife-types';
-import type { Config, Episode, Permission, EpisodeDocument } from '../../../../src/modules/gamma-knife/gamma-knife-types';
+export type { Config, Episode, Clinical, Permission, EpisodeDocument, TreatmentCourse, Reassessment, Investigation, ReassessmentDecision } from '../../../../src/modules/gamma-knife/gamma-knife-types';
+import type { Config, Episode, Permission, EpisodeDocument, TreatmentCourse, Reassessment, Investigation } from '../../../../src/modules/gamma-knife/gamma-knife-types';
 export type Appointment = { id: number; date: string; time: string | null; status: string; examTypeId: number };
-export type Profile = { episode: Episode; config: Config; permissions: Permission[]; documents: EpisodeDocument[]; appointments: Appointment[]; nextAction: string; history: { revision: number; action: string; actor: string; createdAt: string; snapshot: { reason?: string; data: Episode['data']; status: string } }[]; episodes: { id: number; status: string }[] };
+export type Profile = { episode: Episode; config: Config; permissions: Permission[]; gammaKnifeOnly?: boolean; documents: EpisodeDocument[]; appointments: Appointment[]; courses: TreatmentCourse[]; reassessments: Reassessment[]; investigations: Investigation[]; nextAction: string; history: { revision: number; action: string; actor: string; createdAt: string; snapshot: { reason?: string; details?: Record<string, unknown>; data: Episode['data']; status: string } }[]; episodes: { id: number; status: string }[] };
 export type Settings = { config: Config; users: { id: number; name: string; role: string; active: boolean; permissions: Permission[] }[]; exams: { id: number; name: string; arabicName: string | null }[]; smsAvailable: false };
 export type PublicView = { progress: string; appointments: { purpose: string; date: string; time: string | null }[]; actions: string; instructions: string; documents: { id: number; name: string }[] };
 export const gk = <T,>(path: string, body?: unknown, method = 'POST') => api<T>(`/gamma-knife${path}`, body === undefined ? {} : { method, body: JSON.stringify(body) });

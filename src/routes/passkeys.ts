@@ -43,7 +43,8 @@ function currentUser(request: PasskeyRequest): PasskeyUser {
     englishName: request.user.englishName ?? null,
     role: request.user.role,
     mustChangePassword: request.user.mustChangePassword === true,
-    authVersion: Number(request.user.authVersion ?? 0)
+    authVersion: Number(request.user.authVersion ?? 0),
+    gammaKnifeOnly: request.user.gammaKnifeOnly === true
   };
 }
 
@@ -63,7 +64,8 @@ function loginResponse(user: PasskeyUser) {
       fullName: user.fullName,
       englishName: user.englishName,
       role: user.role,
-      mustChangePassword: user.mustChangePassword
+      mustChangePassword: user.mustChangePassword,
+      gammaKnifeOnly: user.gammaKnifeOnly
     }
   };
 }
@@ -129,6 +131,7 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
         full_name: user.fullName,
         role: user.role,
         must_change_password: user.mustChangePassword,
+        gamma_knife_only: user.gammaKnifeOnly,
         auth_version: user.authVersion
       });
       writeSessionCookie(res, token);

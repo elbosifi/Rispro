@@ -505,12 +505,13 @@ function AccountMenu({ user, language, accountActions, canAccessSettings, onSett
   );
 }
 
-export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessTeaching = false, canAccessCoreWorkspace = true, onNavigate }: {
+export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorWorkspace, canAccessTeaching = false, canAccessCoreWorkspace = true, gammaKnifeOnly = false, onNavigate }: {
   language: Language;
   currentWorkspace: "core" | "doctor" | "teaching" | "gamma";
   canAccessDoctorWorkspace: boolean;
   canAccessTeaching?: boolean;
   canAccessCoreWorkspace?: boolean;
+  gammaKnifeOnly?: boolean;
   onNavigate: (path: "/dashboard" | "/doctor/my-work" | "/teaching/dashboard" | "/gamma-knife" | "/gamma-knife/settings") => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -524,10 +525,13 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
   const labelFor = (workspace: "core" | "doctor" | "teaching" | "gamma") => t(language, workspace === "doctor" ? "workspace.doctor" : workspace === "teaching" ? "workspace.teaching" : workspace === "gamma" ? "gk.title" : "workspace.core");
   const currentLabel = labelFor(currentWorkspace);
   const workspaces: Array<"core" | "doctor" | "teaching" | "gamma"> = [];
-  if (canAccessCoreWorkspace) workspaces.push("core");
-  if (canAccessDoctorWorkspace) workspaces.push("doctor");
-  if (canAccessTeaching) workspaces.push("teaching");
-  if (canAccessGamma) workspaces.push("gamma");
+  if (gammaKnifeOnly) workspaces.push("gamma");
+  else {
+    if (canAccessCoreWorkspace) workspaces.push("core");
+    if (canAccessDoctorWorkspace) workspaces.push("doctor");
+    if (canAccessTeaching) workspaces.push("teaching");
+    if (canAccessGamma) workspaces.push("gamma");
+  }
   return (
     <div ref={ref} className="relative">
       <button
@@ -573,9 +577,9 @@ export function WorkspaceSwitcher({ language, currentWorkspace, canAccessDoctorW
 export function ModuleWorkspaceSwitcher({ language, currentWorkspace }: { language: Language; currentWorkspace: "teaching" | "gamma" }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const doctor = useQuery({ queryKey: ["doctor", "me"], queryFn: fetchDoctorMe, enabled: Boolean(user), staleTime: 60000, retry: false });
-  const teaching = useTeachingIdentity(user ? String(user.id) : null);
-  return <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctor.data)} canAccessCoreWorkspace={doctor.data?.canAccessCoreWorkspace ?? false} canAccessTeaching={Boolean(teaching.data?.permissions?.includes("teaching.access"))} onNavigate={(path) => requestNavigationWithUnsavedGuard(() => navigate(path))} />;
+  const doctor = useQuery({ queryKey: ["doctor", "me"], queryFn: fetchDoctorMe, enabled: Boolean(user && !user.gammaKnifeOnly), staleTime: 60000, retry: false });
+  const teaching = useTeachingIdentity(user && !user.gammaKnifeOnly ? String(user.id) : null);
+  return <WorkspaceSwitcher language={language} currentWorkspace={currentWorkspace} gammaKnifeOnly={Boolean(user?.gammaKnifeOnly)} canAccessDoctorWorkspace={hasDoctorWorkspaceAccess(doctor.data)} canAccessCoreWorkspace={doctor.data?.canAccessCoreWorkspace ?? false} canAccessTeaching={Boolean(teaching.data?.permissions?.includes("teaching.access"))} onNavigate={(path) => requestNavigationWithUnsavedGuard(() => navigate(path))} />;
 }
 
 export function TopBar({

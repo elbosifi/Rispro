@@ -37,7 +37,7 @@ import { validateConfiguredQzIdentityAtStartup } from "./services/qz-signing-ser
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
-import { blockForcedPasswordChange } from "./middleware/auth.js";
+import { blockForcedPasswordChange, restrictGammaKnifeOnlyAccount } from "./middleware/auth.js";
 import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-service.js";
 import { cleanupExpiredDiagnosticEvents } from "./services/system-diagnostics-service.js";
 import { systemDiagnosticsRouter } from "./routes/system-diagnostics.js";
@@ -172,6 +172,9 @@ export function createApp(): Application {
     }
   });
 
+  // Apply account-level access restriction before every private API mount.
+  // Authentication endpoints remain usable through the middleware allowlist.
+  app.use("/api", restrictGammaKnifeOnlyAccount);
   app.use("/api/auth", authRouter);
   // Public branding contains only institution fields, never deployment secrets.
   app.get("/api/public/institution-identity", async (_req, res, next) => {

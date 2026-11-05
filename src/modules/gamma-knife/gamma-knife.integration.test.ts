@@ -17,7 +17,7 @@ import { PERMISSIONS, type Config, type Episode } from './gamma-knife-types.js';
 
 const prefix = `GK${randomUUID().replaceAll('-','').slice(0,6)}_`;
 let fixture: TestData; let server: Server; let base: string; let previous: Config;
-let cookie: string; let outsider: number; let episode: Episode; let followupExam: number;
+let cookie: string; let outsider: number; let episode: Episode; let followupExam: number; let completedCourseId = 0; let repeatCourseId = 0;
 const episodeIds: number[] = []; const documentIds: number[] = []; const bookingIds: number[] = [];
 const actor = () => ({ sub: fixture.userId, role: 'supervisor' as const });
 const answers = { history: 'Synthetic history', examination: 'Synthetic examination', imaging: 'Synthetic MRI', assessment: 'Synthetic assessment', priorTreatment: '', diagnosisDetails: '' };
@@ -29,13 +29,20 @@ async function command(action: string, values: object = {}) {
   const result = await request(`/api/gamma-knife/episodes/${episode.id}/actions/${action}`, { revision: episode.revision, ...values });
   assert.equal(result.status, 200, JSON.stringify(result.body)); episode = result.body.episode as Episode; return result.body;
 }
+async function resource(path: string, values: object = {}, method: 'POST' | 'PATCH' = 'POST', expectedStatus = 200) {
+  const result = await request(`/api/gamma-knife${path}`, { revision: episode.revision, ...values }, cookie, method);
+  assert.equal(result.status, expectedStatus, JSON.stringify(result.body));
+  if (result.body.episode) episode = result.body.episode as Episode;
+  else episode = await findEpisode(episode.id);
+  return result.body;
+}
 async function booking(exam: number, patient = fixture.patientId) {
   const result = await pool.query(`insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,booking_date,booking_time,case_category,requires_report,status,policy_version_id,capacity_resolution_mode,uses_special_quota,is_walk_in,created_by_user_id)
     values($1,$2,$3,'2045-05-12','09:00','non_oncology',false,'scheduled',$4,'standard',false,false,$5) returning id`, [patient, fixture.modalityId, exam, fixture.policyVersionId, fixture.userId]);
   const value = Number(result.rows[0].id); bookingIds.push(value); return value;
 }
-async function upload(category: string, name = 'synthetic.pdf') {
-  const result = await request(`/api/gamma-knife/episodes/${episode.id}/documents`, { revision: episode.revision, category, originalFilename: name, mimeType: 'application/pdf', fileContentBase64: Buffer.from('%PDF-1.4\nSynthetic test file\n%%EOF').toString('base64') });
+async function upload(category: string, name = 'synthetic.pdf', source = 'manual_upload', idempotencyKey?: string) {
+  const result = await request(`/api/gamma-knife/episodes/${episode.id}/documents`, { revision: episode.revision, category, source, ...(idempotencyKey ? { idempotencyKey } : {}), originalFilename: name, mimeType: 'application/pdf', fileContentBase64: Buffer.from(`%PDF-1.4\nSynthetic test file ${name}\n%%EOF`).toString('base64') });
   assert.equal(result.status, 201, JSON.stringify(result.body)); documentIds.push(Number(result.body.id)); episode = await findEpisode(episode.id); return Number(result.body.id);
 }
 describe('Gamma Knife minimal episode workflow and access boundaries', { concurrency: false }, () => {
@@ -53,6 +60,15 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     if (server) await new Promise<void>((resolve,reject) => server.close(error => error ? reject(error) : resolve()));
     if (fixture) {
       for (const documentId of documentIds) { const document = await getDocumentById(documentId, pool, { allowGammaKnife: true }); await unlink(getDocumentAbsolutePath(document)).catch(() => undefined); }
+      await pool.query('delete from gamma_knife_treatment_history where course_id in (select id from gamma_knife_treatment_courses where episode_id=any($1::bigint[]))', [episodeIds]);
+      await pool.query('delete from gamma_knife_reassessment_history where reassessment_id in (select id from gamma_knife_reassessments where episode_id=any($1::bigint[]))', [episodeIds]);
+      await pool.query('delete from gamma_knife_reassessment_decisions where reassessment_id in (select id from gamma_knife_reassessments where episode_id=any($1::bigint[]))', [episodeIds]);
+      await pool.query('delete from gamma_knife_investigation_history where investigation_id in (select id from gamma_knife_investigations where episode_id=any($1::bigint[]))', [episodeIds]);
+      await pool.query('delete from gamma_knife_investigations where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_treatment_fractions where course_id in (select id from gamma_knife_treatment_courses where episode_id=any($1::bigint[]))', [episodeIds]);
+      await pool.query('update gamma_knife_treatment_courses set prior_course_id=null,reassessment_id=null where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_reassessments where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_treatment_courses where episode_id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_documents where episode_id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_history where episode_id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_episodes where id=any($1::bigint[])', [episodeIds]);
@@ -102,7 +118,9 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     const noConsultant = await request(`/api/gamma-knife/episodes/${episode.id}/actions/mdt`, { revision: episode.revision, decision: 'approved', consultants: [], assessment: 'MDT' }); assert.equal(noConsultant.status, 400);
     await command('mdt', { decision: 'deferred', consultants: ['External consultant'], assessment: 'Synthetic MDT', notes: 'Discussion' }); assert.equal(episode.status, 'mdt');
     await command('mdt', { decision: 'additional_information', consultants: ['External consultant'], assessment: 'Need additional information', investigations: 'Synthetic imaging request', reason: 'Updated discussion' }); assert.equal(episode.data.investigationsPending, true);
-    await command('investigations', { reason: 'Synthetic investigation received' }); assert.equal(episode.data.assessmentStatus, 'draft');
+    const requested = (await request(`/api/gamma-knife/episodes/${episode.id}`)).body.investigations.find((task: { status: string; reassessmentId: number | null }) => task.status === 'requested' && task.reassessmentId == null);
+    assert.ok(requested, 'an initial MDT request persists as an individually trackable investigation');
+    await resource(`/episodes/${episode.id}/investigations/${requested.id}`, { action: 'receive', receivedNote: 'Synthetic investigation received and reviewed.', reason: '' }, 'PATCH'); assert.equal(episode.data.assessmentStatus, 'draft');
     await command('submit', { clinical: answers, status: 'finalized' });
     await command('mdt', { decision: 'approved', consultants: ['Manual consultant, no account'], assessment: 'Synthetic approved assessment', reason: 'Information reviewed' }); assert.equal(episode.status, 'preparation');
   });
@@ -117,14 +135,69 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     await command('preparation', { consent: true, imaging: true, clinicalReady: true, notes: 'Readiness rechecked', ready: true, instructions: 'Patient-safe instructions' });
     const qr = await changeEpisode(actor(), episode.id, 'qr_replace', { revision: episode.revision }); episode = qr.episode;
     assert.equal((await publicEpisode(qr.token!)).instructions, 'Patient-safe instructions');
-    const unconfirmed = await request(`/api/gamma-knife/episodes/${episode.id}/actions/completion`, { revision: episode.revision, date: '2026-10-25', immobilization: 'frame', fractions: 1, team: ['Synthetic clinician'] }); assert.equal(unconfirmed.status, 409);
-    await command('completion', { confirmed: true, date: '2026-10-25', immobilization: 'frame', fractions: 1, team: ['Synthetic clinician'] }); assert.equal(episode.status, 'followup'); assert.equal(episode.data.treatment?.finalized, false);
+    const retiredAggregateCompletion = await request(`/api/gamma-knife/episodes/${episode.id}/actions/completion`, { revision: episode.revision, date: '2026-10-25', immobilization: 'frame', fractions: 1, team: ['Synthetic clinician'], confirmed: true }); assert.equal(retiredAggregateCompletion.status, 409);
+    const courseResult = await resource(`/episodes/${episode.id}/courses`, { immobilization: 'frame', plannedFractionCount: 1, gammaPlanReference: 'GP-SYNTHETIC-001', targetReferences: ['M1'] }, 'POST', 201);
+    const courseId = Number(courseResult.course.id); completedCourseId = courseId;
+    const fraction = await resource(`/episodes/${episode.id}/courses/${courseId}/fractions`, { plannedFractionNumber: 1, status: 'delivered', eventDate: '2026-10-25', operatorName: 'Synthetic clinician', gammaPlanReference: 'GP-SYNTHETIC-001-F1' }, 'POST', 201);
+    assert.equal(fraction.fraction.status, 'delivered');
+    const unconfirmedCompletion = await request(`/api/gamma-knife/episodes/${episode.id}/courses/${courseId}/complete`, { revision: episode.revision, completedAt: '2026-10-25', reason: 'Synthetic completion record', confirmed: false }); assert.equal(unconfirmedCompletion.status, 409);
+    await resource(`/episodes/${episode.id}/courses/${courseId}/complete`, { completedAt: '2026-10-25', reason: 'Synthetic GammaPlan completion confirmation', confirmed: true }); assert.equal(episode.status, 'followup'); assert.equal(episode.data.treatment?.finalized, false);
+    const completedProfile = await request(`/api/gamma-knife/episodes/${episode.id}`);
+    assert.equal(completedProfile.body.courses.length, 1); assert.equal(completedProfile.body.courses[0].fractions.length, 1); assert.equal(completedProfile.body.courses[0].status, 'completed');
     assert.equal((await publicEpisode(qr.token!)).instructions, '');
     await command('appointment', { purpose: 'followup', bookingId: followupBooking, confirmed: true });
   });
+  it('returns a completed course for reassessment, tracks requested investigations, and links an interrupted mask retreatment', async () => {
+    const reassessmentResult = await resource(`/episodes/${episode.id}/reassessments`, { courseId: completedCourseId, reason: 'progression', reasonDetail: 'Synthetic surveillance MRI suggests change; multidisciplinary reassessment requested.' }, 'POST', 201);
+    const reassessmentId = Number(reassessmentResult.reassessment.id);
+    assert.equal(episode.status, 'followup');
+    const additional = await resource(`/episodes/${episode.id}/reassessments/${reassessmentId}/decisions`, { decision: 'additional_information', assessment: 'Review requires a new MRI sequence.', notes: 'Synthetic MDT discussion.', consultants: ['Synthetic neurosurgeon', 'Synthetic radiation oncologist'], investigations: 'Obtain synthetic contrast-enhanced MRI.' });
+    assert.equal(additional.decision.decision, 'additional_information');
+    const reassessmentProfile = await request(`/api/gamma-knife/episodes/${episode.id}`);
+    const outstanding = reassessmentProfile.body.investigations.find((task: { reassessmentId: number; status: string }) => task.reassessmentId === reassessmentId && task.status === 'requested');
+    assert.ok(outstanding, 'additional information decision creates a linked outstanding investigation');
+    const received = await resource(`/episodes/${episode.id}/investigations/${outstanding.id}`, { action: 'receive', receivedNote: 'Synthetic MRI received and reviewed.', reason: '', evidenceDocumentId: null }, 'PATCH');
+    assert.equal(received.investigation.status, 'received');
+    assert.equal(received.episode.data.investigationsPending, false);
+    const approved = await resource(`/episodes/${episode.id}/reassessments/${reassessmentId}/decisions`, { decision: 'approved', assessment: 'Synthetic reassessment approved for a new course.', notes: 'No dose or plan approval is made in RISpro.', consultants: ['Synthetic neurosurgeon', 'Synthetic radiation oncologist'], reason: 'New imaging reviewed.' });
+    assert.equal(approved.decision.revision, 2);
+    const repeat = await resource(`/episodes/${episode.id}/courses`, { priorCourseId: completedCourseId, reassessmentId, immobilization: 'mask', plannedFractionCount: 3, gammaPlanReference: 'GP-SYNTHETIC-REPEAT', targetReferences: ['M2','M3'] }, 'POST', 201);
+    repeatCourseId = Number(repeat.course.id);
+    assert.equal(Number(repeat.course.prior_course_id), completedCourseId);
+    assert.equal(Number(repeat.course.reassessment_id), reassessmentId);
+    const treatmentBooking = await booking(fixture.examTypeId);
+    await command('appointment', { purpose: 'treatment', bookingId: treatmentBooking, confirmed: true });
+    await command('preparation', { consent: true, imaging: true, clinicalReady: true, notes: 'Repeat course readiness reconfirmed.', ready: true, instructions: 'Patient-safe synthetic instructions.' });
+    const addFraction = (number: number, status: string, ref: string) => resource(`/episodes/${episode.id}/courses/${repeatCourseId}/fractions`, { plannedFractionNumber: number, status, eventDate: '2026-10-26', operatorName: 'Synthetic technologist', gammaPlanReference: status === 'delivered' ? ref : '', notes: status === 'interrupted' ? 'Synthetic interruption; no fraction delivered.' : '' }, 'POST', 201);
+    await addFraction(1, 'delivered', 'GP-SYNTHETIC-REPEAT-F1');
+    const incomplete = await request(`/api/gamma-knife/episodes/${episode.id}/courses/${repeatCourseId}/complete`, { revision: episode.revision, completedAt: '2026-10-26', reason: 'Attempt before all planned fractions were recorded.', confirmed: true });
+    assert.equal(incomplete.status, 409);
+    await addFraction(2, 'interrupted', '');
+    const cannotContinueWhileInterrupted = await request(`/api/gamma-knife/episodes/${episode.id}/courses/${repeatCourseId}/fractions`, { revision: episode.revision, plannedFractionNumber: 3, status: 'delivered', eventDate: '2026-10-26', operatorName: 'Synthetic technologist', gammaPlanReference: 'GP-SYNTHETIC-REPEAT-F3' });
+    assert.equal(cannotContinueWhileInterrupted.status, 409);
+    await resource(`/episodes/${episode.id}/courses/${repeatCourseId}/resume`, { reason: 'Synthetic interruption reviewed; treatment readiness reconfirmed.' });
+    await addFraction(2, 'delivered', 'GP-SYNTHETIC-REPEAT-F2');
+    await addFraction(3, 'delivered', 'GP-SYNTHETIC-REPEAT-F3');
+    await resource(`/episodes/${episode.id}/courses/${repeatCourseId}/complete`, { completedAt: '2026-10-26', reason: 'Synthetic GammaPlan course completion confirmed.', confirmed: true });
+    const courseProfile = await request(`/api/gamma-knife/episodes/${episode.id}`);
+    assert.equal(courseProfile.body.courses.find((course: { id: number }) => course.id === completedCourseId).status, 'completed');
+    const repeatCourse = courseProfile.body.courses.find((course: { id: number }) => course.id === repeatCourseId);
+    assert.equal(repeatCourse.status, 'completed'); assert.equal(repeatCourse.fractions.filter((fraction: { status: string }) => fraction.status === 'delivered').length, 3);
+    assert.equal(courseProfile.body.reassessments.find((item: { id: number }) => item.id === reassessmentId).decisionHistory.length, 2);
+  });
   it('isolates stored documents from generic access and requires a report for finalization', async () => {
     const missingReport = await request(`/api/gamma-knife/episodes/${episode.id}/actions/report`, { revision: episode.revision, documentId: 99999999 }); assert.equal(missingReport.status, 400);
-    const report = await upload('treatment_report'); await command('report', { documentId: report }); assert.equal(episode.data.treatment?.finalized, true);
+    const reportForFirstCourse = await upload('treatment_report', 'course-one-report.pdf'); await command('report', { documentId: reportForFirstCourse, courseId: completedCourseId, reason: 'Finalize the first course report.' }); assert.equal(episode.data.treatment?.finalized, false);
+    const reportForRepeatCourse = await upload('treatment_report', 'course-repeat-report.pdf'); await command('report', { documentId: reportForRepeatCourse, courseId: Number((await request(`/api/gamma-knife/episodes/${episode.id}`)).body.courses.at(-1).id), reason: 'Finalize the repeat course report.' }); assert.equal(episode.data.treatment?.finalized, true);
+    const report = reportForRepeatCourse;
+    const finalizedCourses = await request(`/api/gamma-knife/episodes/${episode.id}`); assert.ok(finalizedCourses.body.courses.every((course: { documentationFinalized: boolean }) => course.documentationFinalized));
+    const wrongReportCategory = await request(`/api/gamma-knife/episodes/${episode.id}/actions/document_correct`, { revision: episode.revision, documentId: reportForFirstCourse, category: 'other', originalFilename: 'wrong-category.pdf', reason: 'Must preserve linked report category.' }); assert.equal(wrongReportCategory.status, 409);
+    const scanKey = `gamma-knife-episode:${episode.id}:${randomUUID()}`;
+    const scanBody = { revision: episode.revision, category: 'investigation', source: 'naps2_webscan', idempotencyKey: scanKey, originalFilename: 'synthetic-scan.pdf', mimeType: 'application/pdf', pageCount: 2, fileContentBase64: Buffer.from('%PDF-1.4\nSynthetic scan bytes\n%%EOF').toString('base64') };
+    const scanFirst = await request(`/api/gamma-knife/episodes/${episode.id}/documents`, scanBody); assert.equal(scanFirst.status, 201); documentIds.push(Number(scanFirst.body.id)); episode = await findEpisode(episode.id);
+    const scanRetry = await request(`/api/gamma-knife/episodes/${episode.id}/documents`, { ...scanBody, revision: episode.revision }); assert.equal(scanRetry.status, 201, JSON.stringify(scanRetry.body)); assert.equal(Number(scanRetry.body.id), Number(scanFirst.body.id));
+    const wrongEpisodeRetry = await request(`/api/gamma-knife/episodes/${episode.id}/documents`, { ...scanBody, revision: episode.revision, idempotencyKey: `gamma-knife-episode:${episode.id + 1}:${randomUUID()}` }); assert.equal(wrongEpisodeRetry.status, 400);
+    const scanMetadata = await pool.query<{ source: string; page_count: number }>('select source,page_count from documents where id=$1', [Number(scanFirst.body.id)]); assert.equal(scanMetadata.rows[0]?.source, 'naps2_webscan'); assert.equal(scanMetadata.rows[0]?.page_count, 2);
     assert.equal((await request(`/api/documents/${report}/view`)).status, 404);
     assert.equal((await request(`/api/documents/${report}`, {}, cookie, 'DELETE')).status, 404);
     const listing = await request(`/api/documents?patientId=${fixture.patientId}`); assert.ok(!listing.body.documents.some((d: { id: number }) => Number(d.id) === report));
@@ -132,7 +205,10 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     const denied = await request(`/api/gamma-knife/episodes/${episode.id}/documents/${report}`, undefined, createTestAuthCookie(outsider,'doctor')); assert.equal(denied.status, 403);
     const futureVisit = await request(`/api/gamma-knife/episodes/${episode.id}/actions/followup`, { revision: episode.revision, date: '2999-12-31', condition: 'Synthetic future follow-up' }); assert.equal(futureVisit.status, 400);
     const preTreatmentVisit = await request(`/api/gamma-knife/episodes/${episode.id}/actions/followup`, { revision: episode.revision, date: '2026-10-24', condition: 'Synthetic pre-treatment follow-up' }); assert.equal(preTreatmentVisit.status, 400);
-    await command('followup', { date: '2026-10-25', condition: 'Synthetic follow-up', imaging: 'Synthetic imaging', response: 'Recorded response', complications: '' }); assert.equal(episode.data.followups?.length, 1);
+    await command('followup', { date: '2026-10-26', condition: 'Synthetic follow-up', imaging: 'Synthetic imaging', response: 'Recorded response', complications: '' }); assert.equal(episode.data.followups?.length, 1);
+    const visitId = episode.data.followups![0]!.id!;
+    await command('followup_correct', { visitId, date: '2026-10-27', condition: 'Corrected synthetic follow-up', imaging: 'Synthetic imaging', response: 'Stable on review', complications: '', severity: '', actions: '', reason: 'Corrected a transcription error.' });
+    await command('followup_void', { visitId, reason: 'Duplicate entry marked entered in error.' }); assert.equal(episode.data.followups?.[0]?.voided, true);
   });
   it('publishes only allowed routine documents and immediately invalidates replaced/revoked QR tokens', async () => {
     const instructions = await upload('patient_instructions', 'تعليمات-المريض.pdf'); const sensitive = documentIds[0]!;
@@ -149,6 +225,12 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     for (const secret of ['Synthetic history','Synthetic assessment','Manual consultant','stored_path','patientId']) assert.ok(!JSON.stringify(view).includes(secret));
     assert.equal((await publicFetch(issued.token!, `/documents/${sensitive}`)).status, 404);
     assert.equal((await publicFetch(issued.token!, `/documents/${instructions}`)).status, 200);
+    const removable = await upload('other', 'episode-attachment.pdf');
+    await command('document_correct', { documentId: removable, category: 'other', originalFilename: 'corrected-episode-attachment.pdf', reason: 'Corrected the display label.' });
+    const correctedListing = await request(`/api/gamma-knife/episodes/${episode.id}`); assert.equal(correctedListing.body.documents.find((d: { id: number }) => d.id === removable).name, 'corrected-episode-attachment.pdf');
+    await command('document_remove', { documentId: removable, reason: 'Attached to the wrong clinical episode section.' });
+    assert.ok(!(await request(`/api/gamma-knife/episodes/${episode.id}`)).body.documents.some((d: { id: number }) => d.id === removable));
+    assert.equal((await request(`/api/gamma-knife/episodes/${episode.id}/documents/${removable}`)).status, 404);
     const replaced = await changeEpisode(actor(), episode.id, 'qr_replace', { revision: episode.revision }); episode = replaced.episode;
     assert.equal((await publicFetch(issued.token!)).status, 404);
     await command('qr_revoke'); assert.equal((await publicFetch(replaced.token!)).status, 404);

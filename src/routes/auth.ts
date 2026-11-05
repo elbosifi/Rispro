@@ -37,6 +37,7 @@ interface AuthenticatedUser {
   fullName?: string;
   englishName?: string;
   mustChangePassword?: boolean;
+  gammaKnifeOnly?: boolean;
   authVersion: number;
 }
 
@@ -65,6 +66,7 @@ function requireCurrentUser(request: AuthSessionRequest): AuthenticatedUser {
     fullName: request.user.fullName,
     englishName: request.user.englishName,
     mustChangePassword: request.user.mustChangePassword,
+    gammaKnifeOnly: request.user.gammaKnifeOnly,
     authVersion: Number(request.user.authVersion ?? 0)
   };
 }
@@ -109,7 +111,8 @@ authRouter.post(
         fullName: user.full_name,
         englishName: user.english_name,
         role: user.role,
-        mustChangePassword: user.must_change_password
+        mustChangePassword: user.must_change_password,
+        gammaKnifeOnly: Boolean(user.gamma_knife_only)
       }
     });
   })
@@ -149,7 +152,8 @@ authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response
       englishName: currentUser.englishName ?? null,
       role: currentUser.role,
       recentSupervisorReauth: hasRecentSupervisorReauth(request),
-      mustChangePassword: currentUser.mustChangePassword
+      mustChangePassword: currentUser.mustChangePassword,
+      gammaKnifeOnly: currentUser.gammaKnifeOnly
     }
   });
 }));
@@ -177,7 +181,8 @@ authRouter.post(
         fullName: user.full_name,
         englishName: user.english_name,
         role: user.role,
-        mustChangePassword: user.must_change_password
+        mustChangePassword: user.must_change_password,
+        gammaKnifeOnly: Boolean(user.gamma_knife_only)
       }
     });
   })

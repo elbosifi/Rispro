@@ -16,4 +16,5 @@ export interface AuthenticatedUserContext {
   fullName?: string;
   englishName?: string;
   mustChangePassword?: boolean;
+  gammaKnifeOnly?: boolean;
 }

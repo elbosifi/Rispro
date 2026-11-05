@@ -49,6 +49,7 @@ interface CurrentAuthState {
   isActive: boolean;
   role: Role;
   mustChangePassword: boolean;
+  gammaKnifeOnly: boolean;
   username: string;
   fullName: string;
   englishName: string | null;
@@ -63,8 +64,9 @@ async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null
     username: string;
     full_name: string;
     english_name: string | null;
+    gamma_knife_only: boolean;
   }>(
-    `select auth_version, is_active, role, username, full_name, english_name,
+    `select auth_version, is_active, role, username, full_name, english_name, gamma_knife_only,
             coalesce(must_change_password, false) as must_change_password
        from users where id = $1 limit 1`,
     [Number(userId)]
@@ -77,7 +79,8 @@ async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null
     mustChangePassword: row.must_change_password,
     username: row.username,
     fullName: row.full_name,
-    englishName: row.english_name
+    englishName: row.english_name,
+    gammaKnifeOnly: row.gamma_knife_only
   } : null;
 }
 
@@ -103,8 +106,28 @@ async function currentSessionUser(payload: Record<string, unknown>): Promise<Aut
     username: current.username,
     fullName: current.fullName,
     englishName: current.englishName ?? undefined,
-    mustChangePassword: current.mustChangePassword
+    mustChangePassword: current.mustChangePassword,
+    gammaKnifeOnly: current.gammaKnifeOnly
   };
+}
+
+const GAMMA_KNIFE_ONLY_PATHS = [
+  /^\/api\/gamma-knife(?:\/|$)/,
+  /^\/api\/public\/gamma-knife(?:\/|$)/,
+  /^\/api\/medical-dictation(?:\/|$)/,
+  /^\/api\/auth\/(?:me|logout|refresh|change-password|login)(?:\/|$)/,
+  /^\/api\/auth\/passkeys(?:\/|$)/,
+];
+
+/** Enforce the account boundary for authenticated API calls, independent of route-level role checks. */
+export function restrictGammaKnifeOnlyAccount(req: AuthRequest, _res: Response, next: NextFunction): void {
+  optionalAuth(req, _res, (error?: unknown) => {
+    if (error) return next(error);
+    if (!req.user?.gammaKnifeOnly) return next();
+    const path = req.originalUrl.split("?", 1)[0] ?? "";
+    if (GAMMA_KNIFE_ONLY_PATHS.some((pattern) => pattern.test(path))) return next();
+    next(new HttpError(403, "This account is restricted to Gamma Knife access.", { code: "GAMMA_KNIFE_ONLY" }));
+  });
 }
 
 export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction): void {

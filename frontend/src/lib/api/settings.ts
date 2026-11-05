@@ -234,6 +234,14 @@ export async function updateUserSchedulingOverridePermission(userId: number, can
   return mapUser(raw.user);
 }
 
+export async function updateUserGammaKnifeOnly(userId: number, gammaKnifeOnly: boolean): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/gamma-knife-only`, {
+    method: "PUT",
+    body: JSON.stringify({ gammaKnifeOnly })
+  });
+  return mapUser(raw.user);
+}
+
 export async function deleteUser(userId: number) {
   return api<{ user: RawRecord }>(`/users/${userId}`, { method: "DELETE" });
 }

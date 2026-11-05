@@ -17,7 +17,8 @@ import {
   updateUserRole,
   updateUserActiveState,
   updateUserPassword,
-  updateUserSchedulingOverridePermission
+  updateUserSchedulingOverridePermission,
+  updateUserGammaKnifeOnly
 } from "../services/user-service.js";
 
 export const usersRouter = express.Router();
@@ -115,6 +116,22 @@ usersRouter.delete(
   "/:userId",
   asyncRoute(async (req: Request, res: Response) => {
     const user = await deleteUser(asString(req.params.userId), { userId: req.user!.sub, role: req.user!.role });
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
+  "/:userId/gamma-knife-only",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    if (typeof body.gammaKnifeOnly !== "boolean") {
+      res.status(400).json({ message: "gammaKnifeOnly must be a boolean." });
+      return;
+    }
+    const user = await updateUserGammaKnifeOnly(asString(req.params.userId), body.gammaKnifeOnly, {
+      userId: req.user!.sub,
+      role: req.user!.role
+    });
     res.json({ user });
   })
 );

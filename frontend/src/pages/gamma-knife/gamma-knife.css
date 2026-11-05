@@ -26,4 +26,8 @@
   .gk-shell .gk-tabs > button { flex: 1 1 auto; font-size: .8rem; }
   .gk-shell form > button { min-height: 2.75rem; }
   .gk-snapshot-grid { grid-template-columns: 1fr; }
+  .gk-shell .gk-worklist-row > div { align-items: stretch; flex-direction: column; }
+  .gk-shell .gk-worklist-row > div > div:first-child { width: 100%; }
+  .gk-shell .gk-worklist-row > div > div:last-child { justify-content: space-between; }
+  .gk-shell .gk-worklist-row p { overflow-wrap: break-word; }
 }

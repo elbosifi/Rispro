@@ -652,7 +652,7 @@ export async function uploadDocument(
   const appVersion = String(payload.appVersion || "").trim() || null;
   const idempotencyKey = String(payload.idempotencyKey || "").trim() || null;
   const requestScanJobId = normalizePositiveInteger(payload.requestScanJobId, "requestScanJobId", { required: false });
-    if (idempotencyKey && !/^(?:request-scan:(?:v2-booking:\d+:appointment-request|job:\d+:(?:appointment-request|clinical-document))|complementary-recall-request-document:\d+:\d+)$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
+    if (idempotencyKey && !/^(?:request-scan:(?:v2-booking:\d+:appointment-request|job:\d+:(?:appointment-request|clinical-document))|complementary-recall-request-document:\d+:\d+|gamma-knife-episode:\d+:[0-9a-f-]{36})$/.test(idempotencyKey)) throw new HttpError(400, "Invalid document idempotency key.");
   if (fileSize === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }
