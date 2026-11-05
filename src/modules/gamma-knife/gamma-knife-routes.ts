@@ -10,6 +10,7 @@ import { HttpError } from '../../utils/http-error.js';
 import { authorize, addTreatmentFraction, changeEpisode, changeTreatmentCourse, correctTreatmentFraction, createEpisode, createInvestigation, createTreatmentCourse, decideReassessment, episodeDocument, investigationAssignees, listEpisodes, permissions, profile, publicDocument, publicEpisode, readConfig, requestReassessment, saveSettings, settings, updateInvestigation, uploadEpisodeDocument } from './gamma-knife-service.js';
 import { text } from './gamma-knife-validation.js';
 import { getIntegrationStatus } from '../../services/integration-service.js';
+import { linkHistoricalTreatment } from './historical-treatment-service.js';
 
 export const gammaKnifeRouter = Router();
 export const gammaKnifePublicRouter = Router();
@@ -36,6 +37,7 @@ gammaKnifeRouter.post('/episodes', asyncRoute(async (req, res) => { res.status(2
 gammaKnifeRouter.get('/episodes/:id', asyncRoute(async (req, res) => { res.json(await profile(req.user!, req.params.id)); }));
 gammaKnifeRouter.get('/investigation-assignees', asyncRoute(async (req, res) => { res.json({ users: await investigationAssignees(req.user!) }); }));
 gammaKnifeRouter.post('/episodes/:id/courses', asyncRoute(async (req, res) => { res.status(201).json(await createTreatmentCourse(req.user!, req.params.id, req.body)); }));
+gammaKnifeRouter.post('/episodes/:id/historical-treatment-references', asyncRoute(async (req, res) => { res.status(201).json(await linkHistoricalTreatment(req.user!,req.params.id,req.body)); }));
 gammaKnifeRouter.post('/episodes/:id/courses/:courseId/fractions', asyncRoute(async (req, res) => { res.status(201).json(await addTreatmentFraction(req.user!, req.params.id, req.params.courseId, req.body)); }));
 gammaKnifeRouter.post('/episodes/:id/courses/:courseId/:action', asyncRoute(async (req, res) => { res.json(await changeTreatmentCourse(req.user!, req.params.id, req.params.courseId, String(req.params.action), req.body)); }));
 gammaKnifeRouter.post('/episodes/:id/courses/:courseId/fractions/:fractionId/correct', asyncRoute(async (req, res) => { res.json(await correctTreatmentFraction(req.user!, req.params.id, req.params.courseId, req.params.fractionId, req.body)); }));
@@ -57,7 +59,7 @@ gammaKnifeRouter.get('/episodes/:id/documents/:documentId', asyncRoute(async (re
   const document = await episodeDocument(req.user!, req.params.id, req.params.documentId);
   const content = await readDocumentContent(document);
   // Recheck membership immediately before sending storage content.
-  await authorize(req.user!);
+  await authorize(req.user!, 'documents');
   res.setHeader('Content-Type', document.mime_type); res.setHeader('Content-Disposition', 'inline'); res.send(content);
 }));
 

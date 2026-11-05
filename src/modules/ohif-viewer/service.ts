@@ -2,6 +2,7 @@ import type { Response as ExpressResponse } from "express";
 import { env } from "../../config/env.js";
 import { httpsCookieName, trustedHttpsRequest } from "../automatic-https/https-transport.js";
 import { pool } from "../../db/pool.js";
+import { assertModuleAccess } from '../module-access/module-access-service.js';
 import { logAuditEntry } from "../../services/audit-service.js";
 import { recordDiagnosticEvent } from "../../services/system-diagnostics-service.js";
 import { listPacsNodes } from "../../services/pacs-node-service.js";
@@ -382,6 +383,7 @@ export async function getRetrievalStatusForDoctor(actor: Actor, jobId: number) {
 }
 
 export async function exchangeViewerLaunchToken(token: string, userId: UserId, response: ExpressResponse): Promise<string> {
+  await assertModuleAccess(userId, ['core','doctor']);
   const launchTokenHash = hashLaunchToken(token);
   const viewerSession = createViewerSessionToken();
   // The short launch-link deadline must not interrupt an active reading session.
@@ -409,6 +411,7 @@ export async function exchangeViewerLaunchToken(token: string, userId: UserId, r
 export async function authorizeViewerDicomWebRequest(input: {
   userId: UserId; launchToken: string; contextId?: string; appRole?: Actor["appRole"]; relativePathWithQuery: string;
 }) {
+  await assertModuleAccess(input.userId, ['core','doctor']);
   if (!input.launchToken && !input.contextId) throw new HttpError(401, "Viewer session is required.");
   const session = input.contextId
     ? await findViewerContext(input.contextId, input.userId)
@@ -433,6 +436,7 @@ export async function authorizeViewerDicomWebRequest(input: {
 // Recovery keeps the UUID, allowlist, primary and report association immutable.
 // An expired selector is accepted here only, never for diagnostic reads/writes.
 export async function renewViewerContext(actor: Actor & { authVersion: number; mustChangePassword?: boolean }, contextId: string) {
+  await assertModuleAccess(actor.userId, ['core','doctor']);
   const session = await requireRecoverableViewerContext(contextId, actor.userId);
   const bound = session?.recoveryState;
   const denied = () => new HttpError(403, 'Viewer authorization changed or the recovery window ended. Local work is retained.', { code: 'VIEWER_DENIED' });

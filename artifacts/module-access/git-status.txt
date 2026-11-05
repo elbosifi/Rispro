@@ -1,0 +1,64 @@
+﻿ M docs/domains/index.md
+ M e2e/specs/gamma-knife.spec.ts
+ M frontend/src/App.tsx
+ M frontend/src/components/auth/protected-route.tsx
+ M frontend/src/components/layout/navigation.tsx
+ M frontend/src/components/printing/workstation-printing-button.tsx
+ M frontend/src/lib/api-client.ts
+ M frontend/src/lib/api/auth.ts
+ M frontend/src/lib/api/documents-printing.ts
+ M frontend/src/lib/api/settings.ts
+ M frontend/src/lib/i18n/gamma-knife.ts
+ M frontend/src/lib/mappers.ts
+ M frontend/src/pages/auth/login-page.test.tsx
+ M frontend/src/pages/auth/login-page.tsx
+ M frontend/src/pages/doctor/doctor-page.tsx
+ M frontend/src/pages/gamma-knife/api.ts
+ M frontend/src/pages/gamma-knife/clinical-workflow-panels.tsx
+ M frontend/src/pages/gamma-knife/gamma-knife-page.tsx
+ M frontend/src/pages/gamma-knife/gamma-knife-profile.tsx
+ M frontend/src/pages/public/cancel-appointment-page.tsx
+ M frontend/src/pages/settings/users-section.tsx
+ M frontend/src/pages/workstation/workstation-printing-page.test.tsx
+ M frontend/src/pages/workstation/workstation-printing-page.tsx
+ M frontend/src/providers/auth-provider-component.tsx
+ M frontend/src/types/api.ts
+ M src/app.ts
+ M src/middleware/auth.ts
+ M src/modules/appointments-v2/tests/unit/modality-protocol-assignment.test.ts
+ M src/modules/doctor-portal/capabilities.test.ts
+ M src/modules/doctor-portal/doctor-import-export-service.ts
+ M src/modules/doctor-portal/doctor-portal.integration.test.ts
+ M src/modules/doctor-portal/profile-service.ts
+ M src/modules/gamma-knife/gamma-knife-account.integration.test.ts
+ M src/modules/gamma-knife/gamma-knife-routes.ts
+ M src/modules/gamma-knife/gamma-knife-service.ts
+ M src/modules/ohif-viewer/repository.ts
+ M src/modules/ohif-viewer/routes.ts
+ M src/modules/ohif-viewer/service.ts
+ M src/modules/teaching/tests/teaching-routes.integration.test.ts
+ M src/routes/auth.ts
+ M src/routes/incidents.test.ts
+ M src/routes/passkeys.ts
+ M src/routes/scanner-bootstrap-routes.integration.test.ts
+ M src/routes/scanner-bootstrap-routes.ts
+ M src/routes/users.ts
+ M src/services/audit-service.ts
+ M src/services/scan-session-service.ts
+ M src/services/scanner-bootstrap-service.test.ts
+ M src/services/user-service.ts
+?? artifacts/module-access/
+?? docs/domains/module-access/
+?? docs/testing/MODULE_ACCESS_VALIDATION.md
+?? e2e/specs/module-access.spec.ts
+?? frontend/src/lib/module-access.test.ts
+?? frontend/src/lib/module-access.ts
+?? frontend/src/pages/settings/module-access-section.test.tsx
+?? frontend/src/pages/settings/module-access-section.tsx
+?? src/db/migrations/247_user_module_access.lifecycle.test.ts
+?? src/db/migrations/247_user_module_access.sql
+?? src/db/migrations/248_gamma_knife_historical_references.lifecycle.test.ts
+?? src/db/migrations/248_gamma_knife_historical_references.sql
+?? src/modules/gamma-knife/historical-treatment-service.ts
+?? src/modules/gamma-knife/historical-treatment.integration.test.ts
+?? src/modules/module-access/

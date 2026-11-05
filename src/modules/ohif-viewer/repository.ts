@@ -303,6 +303,8 @@ export async function findRecoverableViewerContext(contextId: string, userId: Us
   return result.rows[0] ? launchSessionRow(result.rows[0]) : null;
 }
 export async function assertViewerLogin(contextId: string, user: { id: UserId; auth_version: number; role: string }) {
+  const { assertModuleAccess } = await import('../module-access/module-access-service.js');
+  await assertModuleAccess(user.id, ['core','doctor']);
   const session = await requireRecoverableViewerContext(contextId, user.id);
   if (session.recoveryState!.authVersion !== user.auth_version || session.recoveryState!.role !== user.role)
     throw new HttpError(403, 'Viewer authorization changed. Reopen the study from RISpro.', { code: 'VIEWER_DENIED' });

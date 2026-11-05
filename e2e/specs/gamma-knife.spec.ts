@@ -404,7 +404,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('multiple-lesions-clinical-mobile.png'), fullPage: true });
   const unassignedContext = await browser.newContext(); const unassigned = await unassignedContext.newPage();
-  await signInWithSession(unassigned, 'e2e_doctor_other'); await unassigned.goto('/gamma-knife'); await expect(unassigned.getByText('Gamma Knife assignment and permission required.')).toBeVisible(); await unassignedContext.close();
+  await signInWithSession(unassigned, 'e2e_doctor_other'); await unassigned.goto('/gamma-knife'); await expect(unassigned).not.toHaveURL(/\/gamma-knife/); expect((await unassigned.request.get(`${api}/gamma-knife/episodes`)).status()).toBe(403); await unassignedContext.close();
   expect(e2eTodayInTripoli()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 });
 

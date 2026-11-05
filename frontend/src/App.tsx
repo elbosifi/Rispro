@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/providers/auth-provider";
+import { canAccessModule } from '@/lib/module-access';
 import { AuthProvider } from "@/providers/auth-provider-component";
 import { ActionPinIdleLock, ActionPinProvider } from "@/providers/action-pin-provider";
 import { PageAccessRoute } from "@/components/auth/page-access-route";
@@ -94,12 +95,7 @@ function LoadingScreen() {
 
 function AuthenticatedQzConnectionManager() {
   const { user } = useAuth();
-  return <QzConnectionManager enabled={Boolean(user && !user.gammaKnifeOnly && canAccessWorkstationPrinting(user.role))} />;
-}
-
-function CoreWorkspaceRestriction({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  return user?.gammaKnifeOnly ? <Navigate to="/gamma-knife" replace /> : <>{children}</>;
+  return <QzConnectionManager enabled={Boolean(user && user.moduleAccess?.modules.some(m => m.effective && m.workstationPath) && canAccessWorkstationPrinting(user.role))} />;
 }
 
 function QueueCheckInAccessRoute() {
@@ -157,7 +153,7 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
-  const teachingIdentityQuery = useTeachingIdentity(user ? String(user.id) : null);
+  const teachingIdentityQuery = useTeachingIdentity(canAccessModule(user, 'teaching') ? String(user!.id) : null);
   const canAccessTeaching = teachingIdentityQuery.data?.permissions?.includes("teaching.access") ?? false;
   const userRole = user?.role;
   const { language, toggleLanguage, t } = useLanguage();
@@ -424,7 +420,7 @@ function RouterConfig() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/gamma-knife/*" element={<ProtectedRoute><GammaKnifeApplication /></ProtectedRoute>} />
       <Route path="/public/gamma-knife" element={<GammaKnifePublicPage />} />
-      <Route path="/teaching/*" element={<EnglishOnlyRoute><TeachingApplication /></EnglishOnlyRoute>} />
+      <Route path="/teaching/*" element={<ProtectedRoute><EnglishOnlyRoute><TeachingApplication /></EnglishOnlyRoute></ProtectedRoute>} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/reporting/worklist/:token" element={<EnglishOnlyRoute><ReportingBoardMobilePage /></EnglishOnlyRoute>} />
@@ -444,7 +440,7 @@ function RouterConfig() {
         path="/doctor/*"
         element={
           <ProtectedRoute>
-            <CoreWorkspaceRestriction><DoctorWorkspaceRoute /></CoreWorkspaceRestriction>
+            <DoctorWorkspaceRoute />
           </ProtectedRoute>
         }
       />
@@ -452,7 +448,7 @@ function RouterConfig() {
         path="/*"
         element={
           <ProtectedRoute>
-            <CoreWorkspaceRestriction><AppContent /></CoreWorkspaceRestriction>
+            <AppContent />
           </ProtectedRoute>
         }
       />

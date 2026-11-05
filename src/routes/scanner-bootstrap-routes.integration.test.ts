@@ -57,7 +57,10 @@ describe("authorized independent scanner bootstrap", () => {
   it("requires an authorized workstation session", async () => {
     assert.equal((await fetch(`${base}/api/scanner-bootstrap/windows-setup`)).status, 401);
     assert.equal((await fetch(`${base}/api/scanner-bootstrap/windows-setup`, { headers: { Cookie: cookie("reporting_board") } })).status, 401);
-    assert.equal((await fetch(`${base}/api/scanner-bootstrap/windows-setup`, { headers: { Cookie: cookie("administrative") } })).status, 403);
+    await pool.query("update users set role='administrative' where id=$1",[userId]);
+    try {
+      assert.equal((await fetch(`${base}/api/scanner-bootstrap/windows-setup`, { headers: { Cookie: cookie('supervisor') } })).status,403,'the current database role must defeat a stale privileged token claim');
+    } finally { await pool.query("update users set role='supervisor' where id=$1",[userId]); }
   });
   it("downloads exactly one fixed file using configured HTTP origin, ignoring Host and query input", async () => {
     const result = await fetch(`${base}/api/scanner-bootstrap/windows-setup?origin=http://attacker&path=/etc/passwd`, { headers: { Cookie: cookie(), Host: "attacker" } });

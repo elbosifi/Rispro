@@ -5,6 +5,7 @@ import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { clearSessionCookie, clearSupervisorReauthCookie } from "../services/auth-service.js";
 import { listUserSecurityActivity } from "../services/audit-service.js";
+import { updateModuleAccess } from '../modules/module-access/module-access-service.js';
 import {
   createUser,
   deleteUser,
@@ -24,6 +25,12 @@ import {
 export const usersRouter = express.Router();
 
 usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+
+usersRouter.put('/:userId/module-access', asyncRoute(async (req, res) => {
+  const access = await updateModuleAccess(asString(req.params.userId), req.body, { userId: req.user!.sub, role: req.user!.role });
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json({ access });
+}));
 
 usersRouter.get(
   "/",

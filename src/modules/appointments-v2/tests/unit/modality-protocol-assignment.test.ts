@@ -214,11 +214,11 @@ test("modality protocol assignment returns free-text MRI using an MR booking mod
   assert.match(db.calls[0].sql, /upper\(coalesce\(protocol\.modality, modality\.code\)\) in \('MR', 'MRI'\)/);
 });
 
-test("modality protocol assignment excludes cancelled assignments and appointments", () => {
+test("modality protocol assignment excludes cancelled and voided appointments while retaining discontinued clinical history", () => {
   const source = readFileSync(join(process.cwd(), "src/modules/appointments-v2/modality/protocol-assignment.service.ts"), "utf8");
 
   assert.match(source, /assignment\.status <> 'CANCELLED'/);
-  assert.match(source, /booking\.status not in \('cancelled', 'discontinued', 'voided'\)/);
+  assert.match(source, /booking\.status not in \('cancelled', 'voided'\)/);
 });
 
 test("modality protocol assignment route is read-only and modality guarded", () => {

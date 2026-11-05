@@ -1,4 +1,5 @@
 import { HttpError } from "../../utils/http-error.js";
+import { assertUsableModuleAccess, hasModuleAccess, resolveModuleAccess } from '../module-access/module-access-service.js';
 import bcrypt from "bcryptjs";
 import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
@@ -75,9 +76,11 @@ function assertDoctorWorkspaceRole(role: Role): void {
 
 export async function getDoctorMe(userId: UserId, appRole: Role): Promise<DoctorMeResponse> {
   const profile = await findDoctorProfileByUserId(userId);
-  const hasActiveDoctorProfile = Boolean(profile?.active && profile.coreRole && DOCTOR_WORKSPACE_ROLES.has(profile.coreRole as Role));
+  const access = await resolveModuleAccess(userId);
+  const admitted = hasModuleAccess(access, 'doctor');
+  const hasActiveDoctorProfile = admitted && Boolean(profile?.active && profile.coreRole && DOCTOR_WORKSPACE_ROLES.has(profile.coreRole as Role));
   const isSuperAdmin = appRole === "super_admin";
-  const canManageDoctorProfiles = isSuperAdmin || appRole === "supervisor";
+  const canManageDoctorProfiles = admitted && (isSuperAdmin || appRole === "supervisor");
   const canAccessClinicalDoctorPortal = hasActiveDoctorProfile;
   const allowedModalities = hasActiveDoctorProfile && profile ? await listDoctorModalityPermissions(profile.id) : [];
   const moduleCapabilities = deriveDoctorCapabilities({
@@ -87,7 +90,7 @@ export async function getDoctorMe(userId: UserId, appRole: Role): Promise<Doctor
   });
 
   const pageMatrix = await readPageVisibilityMatrix();
-  const canAccessCoreWorkspace = CORE_ROUTE_KEYS.some((routeKey) => canRoleAccessPage(routeKey, appRole, pageMatrix));
+  const canAccessCoreWorkspace = hasModuleAccess(access, 'core') && CORE_ROUTE_KEYS.some((routeKey) => canRoleAccessPage(routeKey, appRole, pageMatrix));
 
   return {
     hasActiveDoctorProfile,
@@ -137,6 +140,7 @@ export async function createProfileForAdmin(
     const user = target.rows[0];
     if (!user) throw new HttpError(404, "User not found.");
     assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.id);
+    if (Number(actorUserId) === Number(user.id)) throw new HttpError(403, 'Administrators cannot create their own clinical profile.');
     if (input.active) assertDoctorWorkspaceRole(user.role);
     profile = await createDoctorProfile(input, actorUserId, client);
     await client.query("commit");
@@ -376,9 +380,15 @@ export async function updateProfileForAdmin(
     if (!user) throw new HttpError(404, "Doctor profile not found.");
     assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.userId);
     if (input.active === true || (input.active === undefined && user.profileActive)) assertDoctorWorkspaceRole(user.role);
+    if (Number(actorUserId) === Number(user.userId)) {
+      const current = (await client.query('select active,can_finalize_reports,can_assign_protocols,can_supervise from doctor_portal.doctor_profiles where id=$1',[profileId])).rows[0];
+      if ((input.active && !current.active) || (input.canFinalizeReports && !current.can_finalize_reports) || (input.canAssignProtocols && !current.can_assign_protocols) || (input.canSupervise && !current.can_supervise)) throw new HttpError(403, 'Administrators cannot increase their own clinical permissions.');
+    }
     const updated = await updateDoctorProfile(profileId, input, actorUserId, client);
     if (!updated) throw new HttpError(404, "Doctor profile not found.");
     profile = updated;
+    await assertUsableModuleAccess(user.userId, client);
+    await client.query('update users set auth_version=auth_version+1 where id=$1', [user.userId]);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");
@@ -485,6 +495,7 @@ export async function updateLinkedDoctorUserForAdmin(
         changedByUserId: actorUserId
       }, client);
     }
+    await assertUsableModuleAccess(targetUserId, client);
     await client.query("commit");
     return { user: updatedUser, profile: await findDoctorProfileByUserId(targetUserId) };
   } catch (error) {
@@ -608,7 +619,15 @@ export async function updateProfileModalitiesForAdmin(
     if (!user) throw new HttpError(404, "Doctor profile not found.");
     assertCanManageProtectedAccount(appRole, user.role, actorUserId, user.userId);
     if (user.profileActive) assertDoctorWorkspaceRole(user.role);
+    if (Number(actorUserId) === Number(user.userId)) {
+      const existing = await client.query<{modality_id:number;active:boolean;can_protocol:boolean;can_report:boolean;can_supervise:boolean}>('select modality_id,active,can_protocol,can_report,can_supervise from doctor_portal.doctor_modality_permissions where doctor_id=$1',[profileId]);
+      for (const requested of permissions) {
+        const old = existing.rows.find(p => Number(p.modality_id) === Number(requested.modalityId));
+        if (requested.active && (!old?.active || (requested.canProtocol && !old.can_protocol) || (requested.canReport && !old.can_report) || (requested.canSupervise && !old.can_supervise))) throw new HttpError(403, 'Administrators cannot increase their own modality permissions.');
+      }
+    }
     const result = await replaceDoctorModalityPermissions(profileId, permissions, actorUserId, client);
+    await client.query('update users set auth_version=auth_version+1 where id=$1',[user.userId]);
     await client.query("commit");
     return result;
   } catch (error) {

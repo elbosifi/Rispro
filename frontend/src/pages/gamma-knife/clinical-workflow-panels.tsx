@@ -1,26 +1,25 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Badge, Button, Checkbox, DisclosureSection, EmptyState, Input, Textarea } from '@/components/shared';
+import { Badge, Button, Checkbox, DisclosureSection, Input, Textarea } from '@/components/shared';
 import { useGammaKnifeText } from './use-gamma-knife-text';
-import { gk, splitLines, today, type Investigation, type Profile, type Reassessment, type TreatmentCourse } from './api';
+import { gk, splitLines, today, type Investigation, type Profile, type TreatmentCourse } from './api';
 
 type ResourceCommand = (path: string, body: object, method?: 'POST' | 'PATCH') => Promise<void>;
-type ActionCommand = (name: string, body: object) => Promise<void>;
 function values(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); return Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>; }
 const statusKey: Record<string, string> = { planned: 'Planned', in_progress: 'In progress', interrupted: 'Interrupted', completed: 'Completed', cancelled: 'Cancelled', requested: 'Requested', awaiting_information: 'Awaiting information', decided: 'Decision recorded', received: 'Received', delivered: 'Delivered', not_delivered: 'Not delivered', interrupt: 'Interrupt course', resume: 'Resume course', cancel: 'Cancel course', complete: 'Confirm course complete' };
 const historyActionLabel: Record<string, string> = { course_created: 'Record a planned treatment course', course_correct: 'Correct course details', course_interrupt: 'Interrupt course', course_resume: 'Resume course', course_cancel: 'Cancel course', course_complete: 'Confirm course complete', fraction_delivered: 'Delivered', fraction_interrupted: 'Interrupted', fraction_not_delivered: 'Not delivered', fraction_corrected: 'Correct fraction event', investigation_requested: 'Investigation requested', investigation_receive: 'Record receipt', investigation_correct: 'Correct request or assignment', investigation_cancel: 'Cancel request', investigation_reopen: 'Reopen task' };
 
 export function TreatmentCourses({ profile, busy, canTreat, run }: { profile: Profile; busy: boolean; canTreat: boolean; run: ResourceCommand }) {
-  const { tr, dateText } = useGammaKnifeText();
+  const { tr } = useGammaKnifeText();
   const { episode } = profile;
   const last = profile.courses.at(-1);
-  const completedCourses = profile.courses.filter(course => course.status === 'completed');
   const eligibleReassessment = profile.reassessments.find(item => item.status === 'decided' && item.decision?.decision === 'approved' && !profile.courses.some(course => course.reassessmentId === item.id));
   const canCreateInitial = !profile.courses.length && episode.data.mdt?.decision === 'approved' && ['preparation','treatment'].includes(episode.status);
   const canCreateRepeat = Boolean(last?.status === 'completed' && eligibleReassessment);
   const canCreate = canTreat && episode.active && !profile.courses.some(course => ['planned','in_progress','interrupted'].includes(course.status)) && (canCreateInitial || canCreateRepeat);
   return <section className="space-y-4 border-t border-border pt-4">
     <h3 className="font-semibold">{tr('Treatment courses')}</h3>
+    <HistoricalTreatmentReferences profile={profile} busy={busy} run={run}/>
     {profile.courses.length === 0 && <p className="text-sm text-muted-foreground">{tr('No treatment course recorded yet.')}</p>}
     {profile.courses.map(course => <TreatmentCourseCard key={course.id} course={course} courses={profile.courses} profile={profile} busy={busy} canTreat={canTreat} run={run}/>) }
     {canCreate && <form className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-2" onSubmit={event => {
@@ -39,6 +38,25 @@ export function TreatmentCourses({ profile, busy, canTreat, run }: { profile: Pr
     {!canCreate && canTreat && episode.active && profile.courses.length === 0 && <p className="text-sm text-muted-foreground">{tr('Record the approved MDT decision and complete preparation before starting a course.')}</p>}
     {!canCreate && canTreat && last?.status === 'completed' && !eligibleReassessment && <p className="text-sm text-muted-foreground">{tr('A new course requires a separate approved reassessment linked to the completed course.')}</p>}
   </section>;
+}
+
+function HistoricalTreatmentReferences({ profile, busy, run }: { profile: Profile; busy: boolean; run: ResourceCommand }) {
+  const { tr } = useGammaKnifeText();
+  const history = profile.historicalTreatment;
+  if (!history || (!history.candidates.length && !history.references.length)) return null;
+  return <div className="space-y-2 rounded border border-border p-3">
+    <h4 className="font-medium">{tr('Historical treatment in earlier episodes')}</h4>
+    <p className="text-sm text-muted-foreground">{tr('Historical references do not approve a new treatment. Current assessment, MDT and treatment readiness requirements still apply.')}</p>
+    {history.references.map(reference => <p key={reference.id} className="text-sm">{tr('Episode')} #{reference.priorEpisodeId}{reference.priorCourseId ? ` · ${tr('Course')} #${reference.priorCourseId}` : ''} · {reference.reason} · {reference.actor}</p>)}
+    {profile.episode.active && profile.permissions.includes('clinical') && history.candidates.some(c => !history.references.some(r => r.priorEpisodeId === c.episodeId)) && <form className="space-y-2" onSubmit={event => {
+      const form = values(event); const candidate = history.candidates[Number(form.candidate)];
+      if (candidate) void run(`/episodes/${profile.episode.id}/historical-treatment-references`, { priorEpisodeId:Number(candidate.episodeId),priorCourseId:candidate.courseId == null ? null : Number(candidate.courseId),reason:form.reason });
+    }}>
+      <label className="block text-sm">{tr('Completed historical treatment')}<select className="input-premium w-full" name="candidate" defaultValue="" required><option value="" disabled>{tr('Select an earlier episode')}</option>{history.candidates.map((candidate,index) => !history.references.some(r => r.priorEpisodeId === candidate.episodeId) && <option key={`${candidate.episodeId}:${candidate.courseId}`} value={index}>{tr('Episode')} #{candidate.episodeId}{candidate.courseNumber ? ` · ${tr('Course')} #${candidate.courseNumber}` : ''}</option>)}</select></label>
+      <label className="block text-sm">{tr('Historical treatment reference reason')}<Textarea name="reason" dir="auto" required maxLength={4000}/></label>
+      <Button disabled={busy} variant="secondary">{tr('Link historical treatment')}</Button>
+    </form>}
+  </div>;
 }
 
 function TreatmentCourseCard({ course, courses, profile, busy, canTreat, run }: { course: TreatmentCourse; courses: TreatmentCourse[]; profile: Profile; busy: boolean; canTreat: boolean; run: ResourceCommand }) {
@@ -96,7 +114,6 @@ export function InvestigationPanel({ profile, busy, run }: { profile: Profile; b
   const { tr } = useGammaKnifeText(); const episode = profile.episode;
   const canCreate = profile.permissions.includes('mdt') && episode.active;
   const canUpdate = episode.active && (profile.permissions.includes('mdt') || profile.permissions.includes('documents'));
-  const canLinkEvidence = profile.permissions.includes('documents');
   const usersQuery = useQuery({ queryKey: ['gamma-knife','investigation-assignees'], queryFn: () => gk<{ users: Array<{ id: number; name: string }> }>('/investigation-assignees'), enabled: canCreate || canUpdate, retry: false });
   if (!profile.investigations.length && !canCreate) return null;
   return <section className="space-y-3 border-t border-border pt-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{tr('Investigation tasks')}</h3><Badge variant={profile.investigations.some(item => item.status === 'requested') ? 'warning' : 'secondary'}>{tr('Outstanding')}: {profile.investigations.filter(item => item.status === 'requested').length}</Badge></div>

@@ -46,7 +46,6 @@ type LinkErrorState = "invalid" | "expired" | "unavailable" | "disabled";
 type FlowState = "landing" | "confirm" | "success" | "already_cancelled";
 
 const INST_AR = "RISpro";
-const DEPT_AR = "";
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
   printQrOnAppointmentSlip: true,

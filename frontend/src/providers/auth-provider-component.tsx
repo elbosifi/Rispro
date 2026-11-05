@@ -1,4 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/shared';
+import { requestNavigationWithUnsavedGuard } from '@/lib/unsaved-navigation-guard';
+import { canAccessModule } from '@/lib/module-access';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { changeOwnPassword, fetchCurrentSession, getPasskeyLoginOptions, getPasskeyReauthOptions, login as loginApi, logout as logoutApi, reAuthSupervisor, verifyPasskeyLogin, verifyPasskeyReauth } from "@/lib/api-hooks";
 import { startAuthentication } from "@simplewebauthn/browser";
@@ -17,16 +20,32 @@ function safeLogoutTarget(returnTo: string): string {
   return returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/\\") ? returnTo : "/";
 }
 
+class SessionRevokedError extends Error {}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const { data: user, isLoading } = useQuery<User | null>({
+  const { data: user, isLoading, error: sessionError } = useQuery<User | null>({
     queryKey: ["auth-session"],
-    queryFn: fetchCurrentSession,
+    queryFn: async () => {
+      const current = await fetchCurrentSession();
+      const previous = queryClient.getQueryData<User | null>(['auth-session']);
+      if (previous && (!current || previous.id !== current.id || previous.moduleAccess?.modules.some(m => m.effective && !canAccessModule(current, m.id)))) throw new SessionRevokedError('Session authorization changed.');
+      return current;
+    },
     staleTime: 1000 * 60 * 5,
-    retry: false
+    retry: false,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: true,
+    meta: { suppressGlobalToast: true }
   });
+
+  useEffect(() => {
+    const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['auth-session'] }); };
+    window.addEventListener('rispro-authorization-changed', refresh);
+    return () => window.removeEventListener('rispro-authorization-changed', refresh);
+  }, [queryClient]);
 
   const loginMutation = useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) =>
@@ -141,6 +160,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <Dialog open={sessionError instanceof SessionRevokedError} onClose={() => {}}>
+        <DialogContent maxWidth="480px">
+          <DialogTitle>Session access changed / تغيّر الوصول للجلسة</DialogTitle>
+          <DialogDescription>Sign in again to use your current module access. Local work remains on this screen until you choose to leave. / يرجى تسجيل الدخول مجدداً. يبقى عملك المحلي في هذه الشاشة حتى تختار المغادرة.</DialogDescription>
+          <Button onClick={() => requestNavigationWithUnsavedGuard(() => window.location.assign('/login'))}>Sign in / تسجيل الدخول</Button>
+        </DialogContent>
+      </Dialog>
     </AuthContext.Provider>
   );
 }

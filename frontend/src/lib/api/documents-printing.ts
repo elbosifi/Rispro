@@ -51,6 +51,10 @@ export interface IntegrationStatus {
   };
 }
 
+export function fetchScannerWorkstationSettings(): Promise<IntegrationStatus> {
+  return api<IntegrationStatus>('/scanner-bootstrap/settings');
+}
+
 export function mapRequestDocument(raw: RawRecord): RequestDocument {
   const rawSource = String(raw.source ?? "manual_upload");
   const source: RequestDocument["source"] = rawSource === "naps2_webscan" || rawSource === "scanner_app" || rawSource === "request_scan_automation" || rawSource === "modality_scan_automation"

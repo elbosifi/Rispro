@@ -97,6 +97,7 @@ export async function api<T>(
     if (!response.ok) {
       const error = await parseErrorResponse(response);
       const details = error.details as Record<string, unknown> | undefined;
+      if (path !== '/auth/me' && typeof window !== 'undefined' && ['SESSION_REVOKED', 'MODULE_ACCESS_DENIED'].includes(String(details?.code))) window.dispatchEvent(new Event('rispro-authorization-changed'));
       if (
         !skipActionPinRetry &&
         !actionPinRetried &&

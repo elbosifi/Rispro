@@ -1,5 +1,12 @@
 // Gamma Knife uses the application's language provider and translation catalogs.
 export const gammaKnifeEn = {
+  'gk.previousEpisodes': 'Historical treatment in earlier episodes',
+  'gk.historicalEvidenceOnly': 'Historical references do not approve a new treatment. Current assessment, MDT and treatment readiness requirements still apply.',
+  'gk.completedHistorical': 'Completed historical treatment',
+  'gk.selectEarlier': 'Select an earlier episode',
+  'gk.historicalReason': 'Historical treatment reference reason',
+  'gk.linkHistorical': 'Link historical treatment',
+  'gk.historicalLinked': 'historical_treatment_linked',
   'gk.scheduled': 'Scheduled', 'gk.cancelled': 'Cancelled', 'gk.completed': 'Completed',
   'gk.chooseDecision': 'Choose MDT decision', 'gk.consultantRequired': 'At least one responsible consultant is required.',
   'gk.preparationWait': 'Preparation starts after MDT approval.',
@@ -107,6 +114,13 @@ export const gammaKnifeEn = {
 } as const;
 
 export const gammaKnifeAr: Record<keyof typeof gammaKnifeEn, string> = {
+  'gk.previousEpisodes': 'العلاج التاريخي في ملفات سابقة',
+  'gk.historicalEvidenceOnly': 'المراجع التاريخية لا تمنح موافقة على علاج جديد. تبقى متطلبات التقييم الحالي وقرار الفريق والجاهزية للعلاج سارية.',
+  'gk.completedHistorical': 'علاج تاريخي مكتمل',
+  'gk.selectEarlier': 'اختر ملفاً سابقاً',
+  'gk.historicalReason': 'سبب ربط العلاج التاريخي',
+  'gk.linkHistorical': 'ربط العلاج التاريخي',
+  'gk.historicalLinked': 'رُبط العلاج التاريخي',
   'gk.receiptEvidenceLabel': '\u0645\u0633\u062a\u0646\u062f \u0625\u062b\u0628\u0627\u062a', 'gk.correctDocumentInformation': '\u062a\u0635\u062d\u064a\u062d \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u0633\u062a\u0646\u062f', 'gk.documentName': '\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062a\u0646\u062f', 'gk.followupAfterCourse': '\u0645\u062a\u0627\u0628\u0639\u0629 \u0628\u0639\u062f \u0627\u0644\u062f\u0648\u0631\u0629', 'gk.measurementsMm': '\u0627\u0644\u0642\u064a\u0627\u0633\u0627\u062a (\u0645\u0645)', 'gk.markEnteredInError': '\u062a\u0633\u062c\u064a\u0644 \u0628\u0623\u0646\u0647 \u0623\u064f\u062f\u062e\u0644 \u0628\u0627\u0644\u062e\u0637\u0623', 'gk.removeDocumentFromEpisode': '\u0641\u0635\u0644 \u0627\u0644\u0645\u0633\u062a\u0646\u062f \u0639\u0646 \u0627\u0644\u062d\u0627\u0644\u0629', 'gk.linkedReportCategoryHelp': '\u064a\u0628\u0642\u0649 \u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0639\u0644\u0627\u062c \u0627\u0644\u0645\u0631\u062a\u0628\u0637 \u0636\u0645\u0646 \u0641\u0626\u0629 \u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0639\u0644\u0627\u062c.', 'gk.replaceLinkedReportHelp': '\u0627\u0633\u062a\u0628\u062f\u0644 \u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0639\u0644\u0627\u062c \u0627\u0644\u0645\u0631\u062a\u0628\u0637 \u0642\u0628\u0644 \u0625\u0632\u0627\u0644\u0629 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u062a\u0646\u062f.', 'gk.removeDocumentHelp': '\u064a\u0628\u0642\u0649 \u0627\u0644\u0645\u0644\u0641 \u0648\u0633\u062c\u0644\u0651\u0647 \u0645\u062d\u0641\u0648\u0638\u064a\u0646. \u062a\u0641\u0635\u0644 \u0627\u0644\u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u0645\u0633\u062a\u0646\u062f \u0639\u0646 \u0627\u0644\u062d\u0627\u0644\u0629 \u0648\u062a\u0633\u062d\u0628 \u0625\u062a\u0627\u062d\u062a\u0647 \u0644\u0644\u0645\u0631\u064a\u0636.', 'gk.voidFollowupHelp': '\u064a\u062d\u062a\u0641\u0638 \u0627\u0644\u0646\u0638\u0627\u0645 \u0628\u0627\u0644\u0633\u062c\u0644 \u0648\u0633\u0628\u0628\u0647 \u0641\u064a \u0633\u062c\u0644 \u0627\u0644\u062a\u062f\u0642\u064a\u0642\u060c \u0648\u064a\u0633\u062a\u0628\u0639\u062f\u0647 \u0645\u0646 \u062a\u0633\u0644\u0633\u0644 \u0627\u0644\u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u0646\u0634\u0637.',
   'gk.scheduled': 'محجوز', 'gk.cancelled': 'ملغى', 'gk.completed': 'مكتمل',
   'gk.chooseDecision': 'اختر قرار الفريق', 'gk.consultantRequired': 'حدد استشاريًا مسؤولًا واحدًا على الأقل.',

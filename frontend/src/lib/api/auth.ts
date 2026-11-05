@@ -1,4 +1,4 @@
-import { api } from "@/lib/api-client";
+import { api, ApiError } from "@/lib/api-client";
 import { mapUser } from "@/lib/mappers";
 import type { User } from "@/types/api";
 
@@ -93,8 +93,9 @@ export async function fetchCurrentSession(): Promise<User | null> {
   try {
     const res = await api<{ user: RawRecord }>("/auth/me");
     return mapUser(res.user);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
   }
 }
 

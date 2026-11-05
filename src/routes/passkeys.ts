@@ -1,4 +1,5 @@
 import express, { type Request, type Response, type Router } from "express";
+import { resolveModuleAccess } from '../modules/module-access/module-access-service.js';
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { requireAuth, requireSupervisor } from "../middleware/auth.js";
 import {
@@ -56,7 +57,7 @@ function readChallenge(request: PasskeyRequest, type: "registration" | "authenti
   return challenge.challenge;
 }
 
-function loginResponse(user: PasskeyUser) {
+async function loginResponse(user: PasskeyUser) {
   return {
     user: {
       id: user.id,
@@ -65,7 +66,8 @@ function loginResponse(user: PasskeyUser) {
       englishName: user.englishName,
       role: user.role,
       mustChangePassword: user.mustChangePassword,
-      gammaKnifeOnly: user.gammaKnifeOnly
+      gammaKnifeOnly: user.gammaKnifeOnly,
+      moduleAccess: await resolveModuleAccess(user.id)
     }
   };
 }
@@ -145,7 +147,7 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
         newValues: { username: user.username, role: user.role },
         changedByUserId: user.id
       });
-      res.json(loginResponse(user));
+      res.json(await loginResponse(user));
     })
   );
 
@@ -204,7 +206,8 @@ export function createPasskeyRouter(webauthn: PasskeyWebAuthn = simpleWebAuthn):
           englishName: verified.englishName,
           role: verified.role,
           mustChangePassword: verified.mustChangePassword,
-          recentSupervisorReauth: true
+          recentSupervisorReauth: true,
+          moduleAccess: await resolveModuleAccess(verified.id)
         }
       });
     })

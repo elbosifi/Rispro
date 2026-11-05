@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { assertModuleAccess } from '../modules/module-access/module-access-service.js';
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
@@ -169,6 +170,7 @@ async function loadSessionByToken(token: string): Promise<ScanSessionRow> {
   if (!session) {
     throw new HttpError(401, "Invalid scan token.");
   }
+  if (session.requested_by_user_id != null) await assertModuleAccess(session.requested_by_user_id, 'core');
 
   if (new Date(session.expires_at).getTime() <= Date.now() && session.status !== "uploaded") {
     await pool.query(

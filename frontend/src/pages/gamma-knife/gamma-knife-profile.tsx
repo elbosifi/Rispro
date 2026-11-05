@@ -40,11 +40,11 @@ function BookingLink({ profile, purpose, run, busy }: {
     const link = purpose === 'treatment' ? episode.data.treatmentAppointment : episode.data.followupAppointment;
     const expectedExam = purpose === 'treatment' ? config.treatmentExamTypeId : config.followupExamTypeId;
     const booking = profile.appointments.find(a => a.id === link?.bookingId);
-    const editable = !profile.gammaKnifeOnly && profile.permissions.includes('scheduling') && episode.active && (purpose === 'treatment' ? ['preparation', 'treatment'].includes(episode.status) : episode.status === 'followup');
+    const editable = profile.canAccessCore && profile.permissions.includes('scheduling') && episode.active && (purpose === 'treatment' ? ['preparation', 'treatment'].includes(episode.status) : episode.status === 'followup');
     return <section className="space-y-3 border-t border-border pt-3"><h3 className="font-semibold">{purpose === 'treatment' ? tr("Treatment appointment") : tr("Next follow-up appointment")}</h3>
     {link && <p className="text-sm">{booking ? `${dateText(booking.date)} ${booking.time?.slice(0, 5) ?? ''} · ${statusText(booking.status)}` : tr("Linked appointment")} · {link.postponed ? tr("Postponed") : link.confirmed ? tr("Confirmed") : tr("Tentative")}</p>}
-    {purpose === 'treatment' && episode.data.treatment?.completed && booking?.status === 'scheduled' && <p role="status" className="text-sm border-s-2 border-border ps-3">{tr('Treatment completion is recorded, but this RISpro booking is still marked scheduled. Reconcile the appointment status with the treatment record.')}{' '}{!profile.gammaKnifeOnly && profile.permissions.includes('scheduling') ? <a className="underline" href={`/appointments?patientId=${episode.patientId}`} target="_blank" rel="noreferrer">{tr('Review booking in RISpro')}</a> : tr('Ask an authorized scheduling user to review this booking.')}</p>}
-      {!link && !editable && <p className="text-sm text-muted-foreground">{tr(profile.gammaKnifeOnly ? 'Contact the authorized coordinator to arrange or link this appointment.' : purpose === 'treatment' ? 'No treatment appointment linked.' : 'No follow-up appointment linked.')}</p>}
+    {purpose === 'treatment' && episode.data.treatment?.completed && booking?.status === 'scheduled' && <p role="status" className="text-sm border-s-2 border-border ps-3">{tr('Treatment completion is recorded, but this RISpro booking is still marked scheduled. Reconcile the appointment status with the treatment record.')}{' '}{profile.canAccessCore && profile.permissions.includes('scheduling') ? <a className="underline" href={`/appointments?patientId=${episode.patientId}`} target="_blank" rel="noreferrer">{tr('Review booking in RISpro')}</a> : tr('Ask an authorized scheduling user to review this booking.')}</p>}
+      {!link && !editable && <p className="text-sm text-muted-foreground">{tr(!profile.canAccessCore ? 'Contact the authorized coordinator to arrange or link this appointment.' : purpose === 'treatment' ? 'No treatment appointment linked.' : 'No follow-up appointment linked.')}</p>}
     {editable && <>
       <a className="inline-block underline text-sm" href={`/appointments?patientId=${episode.patientId}`} target="_blank" rel="noreferrer">{tr("Schedule or reschedule in RISpro")}</a>
       <p className="text-sm text-muted-foreground">{tr("Create or update the booking in RISpro, then reload this profile to select it. Treatment and follow-up use separate configured exam types.")}</p>
@@ -58,7 +58,7 @@ function BookingLink({ profile, purpose, run, busy }: {
   </section>;
 }
 export function GammaKnifeProfile() {
-    const { tr, errorText, patientName, statusText, dateText, language, isArabic } = useGammaKnifeText();
+    const { tr, errorText, patientName, statusText, language, isArabic } = useGammaKnifeText();
     const { id } = useParams();
     const [tab, setTab] = useState<{ episodeId: number; value: string } | null>(null);
     const [mdtCorrectionEpisode, setMdtCorrectionEpisode] = useState<number | null>(null);
@@ -238,7 +238,7 @@ function Documents({ profile, run, busy, refresh, onError }: {
     refresh: () => Promise<unknown>;
     onError: (message: string) => void;
 }) {
-    const { tr, categoryText, statusText, language } = useGammaKnifeText();
+    const { tr, categoryText, language } = useGammaKnifeText();
     const [uploading, setUploading] = useState(false);
     const fileInput = useRef<HTMLInputElement>(null);
     const fileInputId = useId();

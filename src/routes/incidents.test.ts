@@ -8,5 +8,6 @@ test("incident routes keep attachments isolated and generic documents cannot exp
   assert.match(incidents, /listDocuments\(\{ incidentId: id \}\)\)\.map\(\s*toPublicDocumentResponse/);
   assert.match(incidents, /incidentId: id,[\s\S]*documentType: "incident_attachment",[\s\S]*source: "manual_upload"/);
   assert.doesNotMatch(documents, /incidentId: asOptionalUserId/);
-  assert.match(documents, /documents\.map\(toPublicDocumentResponse\)/);
+  assert.match(documents, /visibleDocuments\.map\(toPublicDocumentResponse\)/);
+  assert.match(documents, /const visibleDocuments = documents\.filter\(/);
 });

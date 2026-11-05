@@ -24,6 +24,7 @@ import type { Role } from "../types/domain.js";
 import { updateOwnPassword } from "../services/user-service.js";
 import { normalizeUsername } from "../utils/credentials.js";
 import { createPasskeyRouter } from "./passkeys.js";
+import { resolveModuleAccess } from '../modules/module-access/module-access-service.js';
 
 interface AuthSessionRequest extends Request {
   body: Record<string, unknown>;
@@ -112,7 +113,8 @@ authRouter.post(
         englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password,
-        gammaKnifeOnly: Boolean(user.gamma_knife_only)
+        gammaKnifeOnly: Boolean(user.gamma_knife_only),
+        moduleAccess: await resolveModuleAccess(user.id)
       }
     });
   })
@@ -153,7 +155,8 @@ authRouter.get("/me", requireAuth, asyncRoute(async (req: Request, res: Response
       role: currentUser.role,
       recentSupervisorReauth: hasRecentSupervisorReauth(request),
       mustChangePassword: currentUser.mustChangePassword,
-      gammaKnifeOnly: currentUser.gammaKnifeOnly
+      gammaKnifeOnly: currentUser.gammaKnifeOnly,
+      moduleAccess: await resolveModuleAccess(currentUser.sub)
     }
   });
 }));
@@ -182,7 +185,8 @@ authRouter.post(
         englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password,
-        gammaKnifeOnly: Boolean(user.gamma_knife_only)
+        gammaKnifeOnly: Boolean(user.gamma_knife_only),
+        moduleAccess: await resolveModuleAccess(user.id)
       }
     });
   })
@@ -218,7 +222,8 @@ authRouter.post(
         englishName: user.english_name,
         role: user.role,
         mustChangePassword: user.must_change_password,
-        recentSupervisorReauth: true
+        recentSupervisorReauth: true,
+        moduleAccess: await resolveModuleAccess(user.id)
       }
     });
   })

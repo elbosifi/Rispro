@@ -12,6 +12,7 @@ import { canRoleAccessPage, PAGE_VISIBILITY_ROUTE_KEYS, readPageVisibilityMatrix
 import { normalizeUsername, requireExactPassword } from "../utils/credentials.js";
 import { normalizeOptionalEmail } from "../utils/email-address.js";
 import { assertCanManageProtectedAccount, isProtectedAdministrativeRole } from "./protected-account-authorization.js";
+import { assertUsableModuleAccess, hasModuleAccess, resolveModuleAccess, updateModuleAccess } from '../modules/module-access/module-access-service.js';
 
 export interface UserRow {
   id: number;
@@ -377,6 +378,8 @@ export async function updateUserRole(
     );
     updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(500, "Failed to update user role.");
+    await assertUsableModuleAccess(cleanUserId, client);
+    if (role === 'super_admin' && (await resolveModuleAccess(cleanUserId, client)).mode !== 'legacy') throw new HttpError(409, 'Restore legacy administrative module access before assigning Super Admin.');
 
     await logSecurityAuditEntry({
       entityType: "user",
@@ -544,69 +547,11 @@ export async function updateUserGammaKnifeOnly(
   gammaKnifeOnly: boolean,
   actor: UserActorContext
 ): Promise<UserRow> {
-  const cleanUserId = Number(userId);
-  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) throw new HttpError(400, "userId must be a positive whole number.");
-  if (typeof gammaKnifeOnly !== "boolean") throw new HttpError(400, "gammaKnifeOnly must be a boolean.");
-  if (actor.role !== "supervisor" && actor.role !== "super_admin") throw new HttpError(403, "Supervisor access required.");
-  if (gammaKnifeOnly && actor.userId != null && Number(actor.userId) === cleanUserId) {
-    throw new HttpError(409, "Administrators cannot restrict their own account to Gamma Knife.");
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    const current = await client.query<UserRow & { gamma_knife_permissions: string[] }>(
-      `select id, username, email, full_name, english_name, role, is_active,
-              coalesce(must_change_password, false) as must_change_password,
-              coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-              coalesce(gamma_knife_only, false) as gamma_knife_only,
-              coalesce(gamma_knife_permissions, array[]::text[]) as gamma_knife_permissions,
-              created_at, updated_at
-         from users where id = $1 for update`,
-      [cleanUserId]
-    );
-    const previous = current.rows[0];
-    if (!previous) throw new HttpError(404, "User not found.");
-    assertCanManageProtectedAccount(actor.role, previous.role, actor.userId, previous.id);
-    if (gammaKnifeOnly && !["doctor", "modality_staff", "administrative", "receptionist"].includes(previous.role)) {
-      throw new HttpError(409, "Administrative accounts must retain RISpro Core access.");
-    }
-    if (gammaKnifeOnly && !previous.gamma_knife_permissions.includes("access")) {
-      throw new HttpError(409, "Assign Gamma Knife access and permissions before restricting this account.");
-    }
-    if (previous.gamma_knife_only === gammaKnifeOnly) {
-      await client.query("commit");
-      return previous;
-    }
-    const result = await client.query<UserRow>(
-      `update users set gamma_knife_only = $2, auth_version = auth_version + 1, updated_at = now()
-        where id = $1
-        returning id, username, email, full_name, english_name, role, is_active,
-                  coalesce(must_change_password, false) as must_change_password,
-                  coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
-                  gamma_knife_only, created_at, updated_at`,
-      [cleanUserId, gammaKnifeOnly]
-    );
-    const updated = result.rows[0];
-    if (!updated) throw new HttpError(500, "Failed to update Gamma Knife account access.");
-    await logSecurityAuditEntry({
-      entityType: "user",
-      entityId: updated.id,
-      actionType: "update_gamma_knife_only_access",
-      oldValues: { gammaKnifeOnly: previous.gamma_knife_only },
-      newValues: { gammaKnifeOnly: updated.gamma_knife_only },
-      changedByUserId: actor.userId
-    }, client);
-    await client.query("commit");
-    return updated;
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
+  await updateModuleAccess(userId, { mode: gammaKnifeOnly ? 'restricted' : 'legacy', grants: gammaKnifeOnly ? ['gamma-knife'] : [], defaultModule: gammaKnifeOnly ? 'gamma-knife' : null }, actor);
+  const user = (await pool.query<UserRow>('select * from users where id=$1', [userId])).rows[0];
+  if (!user) throw new HttpError(404, 'User not found.');
+  return user;
 }
-
 export async function getUserSchedulingOverridePermission(userId: UserId): Promise<boolean> {
   const { rows } = await pool.query<{ can_request_scheduling_override: boolean }>(
     `
@@ -640,24 +585,26 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
   if (!user) throw new HttpError(404, "User not found.");
   assertCanManageProtectedAccount(actor.role, user.role, actor.userId, user.id);
 
-  const [profile, visibility] = await Promise.all([
+  const [profile, visibility, moduleAccess] = await Promise.all([
     findDoctorProfileByUserId(cleanUserId),
-    readPageVisibilityMatrix()
+    readPageVisibilityMatrix(),
+    resolveModuleAccess(cleanUserId)
   ]);
   const modalityPermissions = profile ? await listDoctorModalityPermissions(profile.id) : [];
   const profileRoleEligible = Boolean(profile?.coreRole && DOCTOR_WORKSPACE_ROLES.has(profile.coreRole as Role));
   return {
     userId: user.id,
+    moduleAccess,
     role: user.role,
     isActive: user.is_active,
     passwordChangeRequired: user.must_change_password,
     canRequestSchedulingOverride:
-      user.role === "receptionist" && user.is_active && user.can_request_scheduling_override,
+      hasModuleAccess(moduleAccess, 'core') && user.role === "receptionist" && user.is_active && user.can_request_scheduling_override,
     doctorPortal: {
       configured: Boolean(profile),
       profile: profile ? {
         active: profile.active,
-        effective: user.is_active && profile.active && profileRoleEligible,
+        effective: hasModuleAccess(moduleAccess, 'doctor') && user.is_active && profile.active && profileRoleEligible,
         doctorRole: profile.doctorRole,
         canFinalizeReports: profile.canFinalizeReports,
         canAssignProtocols: profile.canAssignProtocols,
@@ -670,7 +617,7 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
         canProtocol: permission.canProtocol,
         canReport: permission.canReport,
         canSupervise: permission.canSupervise,
-        effective: user.is_active && Boolean(profile?.active) && profileRoleEligible && permission.active
+        effective: hasModuleAccess(moduleAccess, 'doctor') && user.is_active && Boolean(profile?.active) && profileRoleEligible && permission.active
       }))
     },
     navigationVisibility: {
@@ -678,7 +625,7 @@ export async function getUserEffectiveAccess(userId: string, actor: UserActorCon
       note: "Navigation visibility only; API authorization is enforced separately.",
       pages: PAGE_VISIBILITY_ROUTE_KEYS.map((routeKey) => ({
         routeKey,
-        visible: canRoleAccessPage(routeKey, user.role, visibility)
+        visible: hasModuleAccess(moduleAccess, 'core') && canRoleAccessPage(routeKey, user.role, visibility)
       }))
     }
   };
@@ -1015,6 +962,7 @@ export async function updateUserActiveState(
     );
     updatedUser = updatedResult.rows[0];
     if (!updatedUser) throw new HttpError(500, "Failed to update user active state.");
+    await assertUsableModuleAccess(cleanUserId, client);
 
     await logSecurityAuditEntry({
       entityType: "user",

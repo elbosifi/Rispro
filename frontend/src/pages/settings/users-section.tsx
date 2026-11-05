@@ -25,13 +25,13 @@ import {
   updateUserPassword,
   updateUserRole,
   updateUserSchedulingOverridePermission,
-  updateUserGammaKnifeOnly,
 } from "@/lib/api-hooks";
 import { getUserDisplayName } from "@/lib/user-display-name";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
-import type { DoctorProfile, Role, User, UserEffectiveAccess, UserSecurityActivityEntry, UserSecurityActivityPage } from "@/types/api";
+import type { DoctorProfile, ModuleAccess, Role, User, UserEffectiveAccess, UserSecurityActivityEntry, UserSecurityActivityPage } from "@/types/api";
 import { QueryError, ReAuthPrompt } from "./settings-section-helpers";
+import { ModuleAccessSection } from './module-access-section';
 
 type RoleFilter = "all" | Role;
 type StatusFilter = "all" | "active" | "inactive";
@@ -211,14 +211,6 @@ export default function UsersSection({
     },
     onError: (error) => setManageError(mutationErrorMessage(error)),
   });
-  const gammaKnifeOnlyMutation = useMutation({
-    mutationFn: ({ userId, gammaKnifeOnly }: { userId: number; gammaKnifeOnly: boolean }) => updateUserGammaKnifeOnly(userId, gammaKnifeOnly),
-    onSuccess: async (updatedUser) => {
-      await invalidateUserDetails(updatedUser.id);
-      setManageError(null);
-    },
-    onError: (error) => setManageError(mutationErrorMessage(error)),
-  });
   const directPasswordMutation = useMutation({
     mutationFn: ({ userId, password }: { userId: number; password: string }) =>
       updateUserPassword(userId, password),
@@ -322,6 +314,16 @@ export default function UsersSection({
       ? `${t("settings.users.activity.from")}: ${previousRole} · ${t("settings.users.activity.to")}: ${nextRole}`
       : null;
   };
+  const moduleTransition = (entry: UserSecurityActivityEntry) => {
+    if (entry.actionType !== 'update_module_access') return null;
+    const describe = (value: unknown) => {
+      const access = value as ModuleAccess | null;
+      const names = access?.modules?.filter(m => m.effective).map(m => language === 'ar' ? m.nameAr : m.nameEn).join(', ') || '—';
+      const landing = access?.modules?.find(m => m.id === access.defaultModule);
+      return `${names} · ${language === 'ar' ? 'الافتراضي' : 'Default'}: ${landing ? (language === 'ar' ? landing.nameAr : landing.nameEn) : '—'}`;
+    };
+    return `${t('settings.users.activity.from')}: ${describe(entry.oldValues)} → ${t('settings.users.activity.to')}: ${describe(entry.newValues)}`;
+  };
   const roleLabel = (role: Role) =>
     t(
       (
@@ -382,6 +384,7 @@ export default function UsersSection({
     return role ? roleLabel(role) : null;
   };
   const auditActionLabel = (entry: UserSecurityActivityEntry) => {
+    if (entry.actionType === 'update_module_access') return language === 'ar' ? 'تغيّر الوصول إلى الوحدات' : 'Module access changed';
     const labels: Record<string, Parameters<typeof t>[0]> = {
       user_created: "settings.users.activity.userCreated",
       create: "settings.users.activity.userCreated",
@@ -1032,17 +1035,7 @@ export default function UsersSection({
                 <h4 className="font-semibold">
                   {t("settings.users.security")}
                 </h4>
-                {!['supervisor', 'super_admin'].includes(selectedUser.role) && <div className="mt-3 rounded-lg border border-border p-3">
-                  <label className="flex items-start gap-2 text-sm">
-                    <Input
-                      type="checkbox"
-                      checked={Boolean(selectedUser.gammaKnifeOnly)}
-                      disabled={gammaKnifeOnlyMutation.isPending}
-                      onChange={(event) => gammaKnifeOnlyMutation.mutate({ userId: selectedUser.id, gammaKnifeOnly: event.target.checked })}
-                    />
-                    <span><span className="font-medium">{t("settings.users.gammaKnifeOnly")}</span><span className="mt-1 block text-muted-foreground">{t("settings.users.gammaKnifeOnlyHelp")}</span></span>
-                  </label>
-                </div>}
+                {effectiveAccessQuery.data?.moduleAccess && <ModuleAccessSection key={`${selectedUser.id}:${effectiveAccessQuery.dataUpdatedAt}`} userId={selectedUser.id} access={effectiveAccessQuery.data.moduleAccess} disabled={selectedUser.id === actorUser?.id} unrestricted={selectedUser.role === 'super_admin'} onSaved={async () => { await invalidateUserDetails(selectedUser.id); }} />}
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1">
                     <span>{t("settings.users.directPassword")}</span>
@@ -1162,6 +1155,7 @@ export default function UsersSection({
                             </p>
                             <p className="text-xs description-center">{formatDate(entry.createdAt, language, t("settings.users.notAvailable"))}</p>
                             {roleTransition(entry) && <p className="mt-1 text-xs">{roleTransition(entry)}</p>}
+                            {moduleTransition(entry) && <p className="mt-1 break-words text-xs">{moduleTransition(entry)}</p>}
                             {entry.summary && <p className="mt-1 text-xs description-center">{entry.summary}</p>}
                           </li>
                         ))}

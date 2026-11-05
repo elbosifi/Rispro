@@ -134,7 +134,9 @@ describe("Doctor Portal wiring", () => {
     assert.match(service, /requireRosterManager/);
     assert.match(service, /doctor_supervisor/);
     assert.match(service, /doctor_admin/);
-    assert.match(service, /Only draft roster weeks can be edited in Phase 2/);
-    assert.match(service, /Past roster edits are blocked in Phase 2/);
+    assert.match(service, /withDraftRosterWeek/);
+    const repository = readFileSync(join(rootDir, 'src', 'modules', 'doctor-portal', 'roster-repository.ts'), 'utf8');
+    assert.match(repository, /week\.status !== "draft" \|\| week\.weekEndDate < getTripoliToday\(\)/);
+    assert.match(repository, /Only current or future draft rosters can be edited/);
   });
 });

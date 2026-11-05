@@ -76,7 +76,7 @@ describe('Gamma Knife-only account boundary', { concurrency: false }, () => {
     app.use('/api/gamma-knife', gammaKnifeRouter);
     app.get('/api/doctor/me', requireAuth, (_req, res) => res.json({ reachable: true }));
     app.get('/api/core-data', requireAuth, (_req, res) => res.json({ reachable: true }));
-    app.post('/api/medical-dictation/test', requireAuth, (_req, res) => res.status(204).end());
+    app.post('/api/medical-dictation/transcribe', requireAuth, (_req, res) => res.status(204).end());
     app.use(errorHandler);
     server = createServer(app);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -130,7 +130,7 @@ describe('Gamma Knife-only account boundary', { concurrency: false }, () => {
     assert.deepEqual(identity.body!.permissions, permissions);
     assert.equal((await call('/api/doctor/me')).status, 403);
     assert.equal((await call('/api/core-data')).status, 403);
-    assert.equal((await call('/api/medical-dictation/test', 'POST')).status, 204);
+    assert.equal((await call('/api/medical-dictation/transcribe', 'POST')).status, 204);
 
     const config = await readConfig();
     const created = await call('/api/gamma-knife/episodes', 'POST', {

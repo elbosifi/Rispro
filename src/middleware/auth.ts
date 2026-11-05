@@ -87,7 +87,7 @@ async function currentAuthState(userId: UserId): Promise<CurrentAuthState | null
 function decodeSessionToken(token: string): Record<string, unknown> {
   const decoded = jwt.verify(token, env.jwtSecret);
   const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
-  if (!payload || !payload.sub || !payload.role || payload.purpose !== undefined) {
+  if (!payload || !payload.sub || !isRole(String(payload.role ?? '')) || payload.purpose !== undefined) {
     throw new HttpError(401, "Invalid session.");
   }
   return payload;
@@ -95,6 +95,7 @@ function decodeSessionToken(token: string): Record<string, unknown> {
 
 async function currentSessionUser(payload: Record<string, unknown>): Promise<AuthenticatedUserContext | null> {
   const userId = payload.sub as UserId;
+  if (!Number.isSafeInteger(Number(userId)) || Number(userId) <= 0) throw new HttpError(401, 'Invalid session.', { code:'AUTH_INVALID' });
   const authVersion = parseAuthVersion(payload.authVersion);
   const current = await currentAuthState(userId);
   if (!current?.isActive || current.authVersion !== authVersion) return null;
@@ -111,24 +112,8 @@ async function currentSessionUser(payload: Record<string, unknown>): Promise<Aut
   };
 }
 
-const GAMMA_KNIFE_ONLY_PATHS = [
-  /^\/api\/gamma-knife(?:\/|$)/,
-  /^\/api\/public\/gamma-knife(?:\/|$)/,
-  /^\/api\/medical-dictation(?:\/|$)/,
-  /^\/api\/auth\/(?:me|logout|refresh|change-password|login)(?:\/|$)/,
-  /^\/api\/auth\/passkeys(?:\/|$)/,
-];
-
-/** Enforce the account boundary for authenticated API calls, independent of route-level role checks. */
-export function restrictGammaKnifeOnlyAccount(req: AuthRequest, _res: Response, next: NextFunction): void {
-  optionalAuth(req, _res, (error?: unknown) => {
-    if (error) return next(error);
-    if (!req.user?.gammaKnifeOnly) return next();
-    const path = req.originalUrl.split("?", 1)[0] ?? "";
-    if (GAMMA_KNIFE_ONLY_PATHS.some((pattern) => pattern.test(path))) return next();
-    next(new HttpError(403, "This account is restricted to Gamma Knife access.", { code: "GAMMA_KNIFE_ONLY" }));
-  });
-}
+// Deprecated compatibility export; new application mounts use the generic policy.
+export { enforceModuleApiAccess as restrictGammaKnifeOnlyAccount } from '../modules/module-access/module-access-middleware.js';
 
 export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
   void (async () => {

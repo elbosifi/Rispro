@@ -36,7 +36,7 @@ vi.mock("@/pages/settings/qz-tray-printing-section", () => ({
 }));
 
 vi.mock("@/lib/toast", () => ({ pushToast: (...args: unknown[]) => mockPushToast(...args) }));
-vi.mock("@/lib/api-hooks", () => ({ fetchIntegrationStatus: () => mockFetchIntegrationStatus() }));
+vi.mock("@/lib/api-hooks", () => ({ fetchScannerWorkstationSettings: () => mockFetchIntegrationStatus() }));
 vi.mock("@/providers/language-provider", async () => {
   const { t } = await import("@/lib/i18n");
   return {

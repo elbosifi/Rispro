@@ -21,8 +21,13 @@ test("Teaching API mount, authentication, permission resolution, and minimal ide
     return;
   }
 
-  const teachingIdentitySubject = `teaching-test-${randomUUID()}`;
-  const unauthorizedSubject = `teaching-test-${randomUUID()}`;
+  const marker = randomUUID();
+  const createAccount = async (role: string) => String((await pool.query<{id:string}>(
+    "insert into users(username,full_name,password_hash,role) values($1,'Teaching Test Learner','synthetic',$2) returning id",
+    [`teaching-test-${role}-${marker}`,role],
+  )).rows[0].id);
+  const teachingIdentitySubject = await createAccount('doctor');
+  const unauthorizedSubject = await createAccount('receptionist');
   const app = createApp();
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -65,7 +70,8 @@ test("Teaching API mount, authentication, permission resolution, and minimal ide
     );
     assert.deepEqual(persisted.rows.map((row) => row.permission), ["teaching.access", "teaching.learn"]);
 
-    const persistedIdentity = await request("/api/teaching/me", "receptionist", teachingIdentitySubject, "Updated Teaching Name");
+    await pool.query("update users set role='receptionist',full_name='Updated Teaching Name' where id=$1",[teachingIdentitySubject]);
+    const persistedIdentity = await request("/api/teaching/me", "doctor", teachingIdentitySubject, "Stale token display name");
     assert.equal(persistedIdentity.status, 200);
     assert.equal(persistedIdentity.data.displayName, "Updated Teaching Name");
     assert.deepEqual(persistedIdentity.data.permissions, ["teaching.access", "teaching.learn"]);
@@ -78,5 +84,6 @@ test("Teaching API mount, authentication, permission resolution, and minimal ide
       "delete from teaching.user_profiles where identity_issuer = 'rispro' and identity_subject = any($1::text[])",
       [[teachingIdentitySubject, unauthorizedSubject]],
     );
+    await pool.query('delete from users where id=any($1::bigint[])',[[teachingIdentitySubject,unauthorizedSubject]]);
   }
 });

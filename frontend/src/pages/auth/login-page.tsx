@@ -4,6 +4,7 @@ import { fetchDoctorMe } from "@/lib/api-hooks";
 import { LoginForm } from "@/components/auth/login-form";
 import type { User } from "@/types/api";
 import { shouldAutoEnterDoctorWorkspace } from "@/components/layout/navigation.helpers";
+import { canAccessModule, canAccessPath, moduleLanding } from '@/lib/module-access';
 
 type LoginDestination = string | { pathname: string; search: string; hash: string };
 
@@ -37,15 +38,15 @@ export function LoginPage() {
   const loginDestination = resolveLoginDestination(location.state);
 
   const completeLogin = async (user: User) => {
-    if (user.gammaKnifeOnly) {
-      navigate("/gamma-knife", { replace: true });
+    if (user.moduleAccess?.mode === 'restricted' || user.moduleAccess?.landingConfigured || !canAccessPath(user, loginDestination.pathname)) {
+      navigate(moduleLanding(user) ?? '/', { replace: true });
       return;
     }
     if (user.mustChangePassword) {
       navigate(loginDestination.to, { replace: true });
       return;
     }
-    const doctorMe = await fetchDoctorMe().catch(() => null);
+    const doctorMe = canAccessModule(user, 'doctor') ? await fetchDoctorMe().catch(() => null) : null;
     if (shouldAutoEnterDoctorWorkspace(user, doctorMe) && (loginDestination.pathname === "/" || loginDestination.pathname === "/login")) {
       navigate("/doctor/dashboard", { replace: true });
       return;

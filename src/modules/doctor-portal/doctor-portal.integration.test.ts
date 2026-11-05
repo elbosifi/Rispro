@@ -2079,7 +2079,9 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((updated.data as { profile: { doctorRole: string } }).profile.doctorRole, "resident");
     assert.equal((updated.data as { profile: { canAssignProtocols: boolean } }).profile.canAssignProtocols, true);
 
-    const inactiveMe = await api(userCookie, "/api/doctor/me");
+    assert.equal((await api(userCookie, '/api/doctor/me')).status,401,'profile permission changes revoke the previously issued session');
+    const authVersion = Number((await pool.query('select auth_version from users where id=$1',[createdData.user.id])).rows[0].auth_version);
+    const inactiveMe = await api(createTestAuthCookie(createdData.user.id,'doctor',authVersion), "/api/doctor/me");
     assert.equal(inactiveMe.status, 200);
     assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).hasActiveDoctorProfile, false);
     assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).canAccessClinicalDoctorPortal, false);

@@ -6,7 +6,7 @@ import { LoginPage } from "./login-page";
 import type { User } from "@/types/api";
 
 function loggedInUser(role: User["role"], mustChangePassword = false): User {
-  return { id: 1, username: role, fullName: role, role, mustChangePassword };
+  return { id: 1, username: role, fullName: role, role, mustChangePassword, moduleAccess:{ mode:'legacy',grants:[],defaultModule:'core',landingConfigured:false,landingPath:'/dashboard',modules:['core','doctor'].map(id => ({ id,nameEn:id,nameAr:id,landingPath:id==='core'?'/dashboard':'/doctor/my-work',frontendPrefixes:[id==='core'?'/':'/doctor'],available:true,dictation:true,eligible:true,granted:true,effective:true,permissions:[] })) } };
 }
 
 const testState = vi.hoisted(() => ({
@@ -89,12 +89,24 @@ describe("LoginPage routing", () => {
   });
 
   it("sends a Gamma Knife-only doctor directly to the module without loading Doctor Portal identity", async () => {
-    testState.login.mockResolvedValue({ ...loggedInUser("doctor"), gammaKnifeOnly: true });
+    const user = loggedInUser('doctor');
+    user.moduleAccess = { ...user.moduleAccess!, mode:'restricted',grants:['gamma-knife'],defaultModule:'gamma-knife',landingConfigured:true,landingPath:'/gamma-knife',modules:[...user.moduleAccess!.modules.map(m => ({...m,effective:false})),{...user.moduleAccess!.modules[0],id:'gamma-knife',frontendPrefixes:['/gamma-knife'],landingPath:'/gamma-knife'}] };
+    testState.login.mockResolvedValue(user);
     const { container } = renderLogin("/appointments");
 
     await submitLogin(container);
 
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/gamma-knife"));
+    expect(testState.fetchDoctorMe).not.toHaveBeenCalled();
+  });
+
+  it('uses a multi-module account’s designated landing module for an unauthorized return URL', async () => {
+    const user = loggedInUser('doctor');
+    user.moduleAccess = { ...user.moduleAccess!,mode:'restricted',grants:['doctor','teaching'],defaultModule:'doctor',landingConfigured:true,landingPath:'/doctor/my-work',modules:user.moduleAccess!.modules.map(m => ({...m,effective:m.id==='doctor'})) };
+    testState.login.mockResolvedValue(user);
+    const {container} = renderLogin('/settings');
+    await submitLogin(container);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/doctor/my-work'));
     expect(testState.fetchDoctorMe).not.toHaveBeenCalled();
   });
 

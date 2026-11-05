@@ -6,6 +6,7 @@ import { httpsCookieName } from "../automatic-https/https-transport.js";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor, requireSameOriginSessionRequest } from "../../middleware/auth.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { HttpError } from "../../utils/http-error.js";
+import { requireModuleAccess } from '../module-access/module-access-middleware.js';
 import { asyncRoute } from "../../utils/async-route.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { ohifNativeAuthorizationRouter } from "./native-authorization.js";
@@ -42,6 +43,7 @@ function positiveInteger(value: unknown, field: string): number {
 }
 
 export const ohifViewerRouter = Router();
+ohifViewerRouter.use(requireModuleAccess(['core','doctor']));
 ohifViewerRouter.use("/native", ohifNativeAuthorizationRouter);
 
 ohifViewerRouter.post('/contexts/:contextId/renew', requireAuth, requireSameOriginSessionRequest, asyncRoute(async (req, res) => {
@@ -124,7 +126,7 @@ ohifViewerRouter.get(
 
 export const ohifDicomWebProxyRouter = Router();
 
-ohifDicomWebProxyRouter.use(requireAuth);
+ohifDicomWebProxyRouter.use(requireModuleAccess(['core','doctor']));
 ohifDicomWebProxyRouter.get(
   "*",
   asyncRoute(async (req: OhifRequest, res: Response) => {

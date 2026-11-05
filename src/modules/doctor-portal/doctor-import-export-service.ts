@@ -12,6 +12,7 @@ import { emailFromUsername } from "../../utils/email-address.js";
 import { lockActiveSuperAdminSet } from "../../services/user-service.js";
 import { assertCanManageProtectedAccount } from "../../services/protected-account-authorization.js";
 import { logSecurityAuditEntry } from "../../services/audit-service.js";
+import { assertUsableModuleAccess } from '../module-access/module-access-service.js';
 
 const EXPORT_COLUMNS = [
   "username",
@@ -319,6 +320,7 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
       );
       let userId = existing.rows[0]?.id;
       const previousUser = existing.rows[0];
+      if (Number(userId) === Number(actorUserId)) throw new HttpError(403, 'A different administrator must import changes to this account.');
       const nextRole = values.core_role as Role;
       const nextIsActive = boolValue(values.user_active, true);
       if (!previousUser || nextRole !== previousUser.role) assertCanManageProtectedAccount(actor.role, nextRole);
@@ -488,6 +490,8 @@ export async function confirmDoctorImport(input: { fileContentBase64: string; fo
         );
         summary.modalityPermissionsUpdated += 1;
       }
+      await assertUsableModuleAccess(userId, client);
+      await client.query('update users set auth_version=auth_version+1 where id=$1',[userId]);
     }
     await insertDoctorAuditEvent(client, {
       actorUserId,

@@ -11,13 +11,15 @@ import { GammaKnifeSettings } from './gamma-knife-settings';
 import { GammaKnifeProfile } from './gamma-knife-profile';
 import { DictationControl } from '@/components/layout/dictation-control';
 import { useAuth } from '@/providers/auth-provider';
+import { canAccessModule } from '@/lib/module-access';
+import WorkstationPrintingPage from '@/pages/workstation/workstation-printing-page';
 export function GammaKnifeApplication() {
     const { tr, isArabic, language, toggleLanguage } = useGammaKnifeText();
     const { user } = useAuth();
     const identity = useQuery({ queryKey: ['gamma-knife', 'me'], queryFn: () => gk<{ permissions: Permission[]; canManageSettings: boolean }>('/me'), retry: false });
     return <main lang={language} dir={isArabic ? "rtl" : "ltr"} className="gk-shell min-h-screen bg-background text-foreground"><div className="mx-auto max-w-6xl p-4 sm:p-6 space-y-5">
-    <header className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-semibold">{tr("Gamma Knife")}</h1><nav aria-label={tr("Gamma Knife")}><div className="flex flex-wrap gap-4 text-sm">{!user?.gammaKnifeOnly && <a href="/">{tr("RISpro")}</a>}{identity.data?.permissions.includes('access') && <a href="/gamma-knife">{tr("Patient list")}</a>}{identity.data?.canManageSettings && <a href="/gamma-knife/settings">{tr("Settings")}</a>}</div></nav><DictationControl /><ModuleWorkspaceSwitcher language={language} currentWorkspace="gamma" /><Button variant="secondary" size="sm" onClick={toggleLanguage} aria-label={isArabic ? 'Switch to English' : 'التبديل إلى العربية'}>{isArabic ? 'English' : 'العربية'}</Button></header>
-    <Routes><Route index element={<PatientList />}/><Route path="settings" element={<SettingsPage />}/><Route path="episodes/:id" element={<GammaKnifeProfile />}/><Route path="*" element={<ErrorState retryLabel={tr('Retry')} message={tr("Page not found.")}/>}/></Routes>
+    <header className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-semibold">{tr("Gamma Knife")}</h1><nav aria-label={tr("Gamma Knife")}><div className="flex flex-wrap gap-4 text-sm">{canAccessModule(user, 'core') && <a href="/">{tr("RISpro")}</a>}{identity.data?.permissions.includes('access') && <a href="/gamma-knife">{tr("Patient list")}</a>}{identity.data?.canManageSettings && <a href="/gamma-knife/settings">{tr("Settings")}</a>}</div></nav><DictationControl /><ModuleWorkspaceSwitcher language={language} currentWorkspace="gamma-knife" /><Button variant="secondary" size="sm" onClick={toggleLanguage} aria-label={isArabic ? 'Switch to English' : 'التبديل إلى العربية'}>{isArabic ? 'English' : 'العربية'}</Button></header>
+    <Routes><Route path="workstation-printing" element={<WorkstationPrintingPage />} /><Route index element={<PatientList />}/><Route path="settings" element={<SettingsPage />}/><Route path="episodes/:id" element={<GammaKnifeProfile />}/><Route path="*" element={<ErrorState retryLabel={tr('Retry')} message={tr("Page not found.")}/>}/></Routes>
   </div></main>;
 }
 function SettingsPage() {
@@ -67,6 +69,7 @@ function ReferralForm({ config, onCreated }: {
     onCreated: (episode: Episode) => void;
 }) {
     const { tr, errorText, language } = useGammaKnifeText();
+    const { user } = useAuth();
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [patientId, setPatientId] = useState('');
@@ -84,7 +87,7 @@ function ReferralForm({ config, onCreated }: {
     const selectedPatient = candidates.data?.patients.find(patient => String(patient.id) === patientId);
     if (!open)
         return <Button onClick={() => setOpen(true)}>{tr("Register referral")}</Button>;
-    return <Card><h2 className="font-semibold">{tr("Register referral")}</h2><p className="text-sm mt-1">{tr("Select an existing patient.")}<a className="underline" href="/patients" target="_blank" rel="noreferrer">{tr("Open RISpro patient registration")}</a></p><div className="grid gap-3 mt-3 sm:grid-cols-2"><label className="text-sm">{tr("Find patient")}<Input value={search} onChange={e => { setSearch(e.target.value); setPatientId(''); }} placeholder={tr("Enter name or MRN")}/></label><label className="text-sm">{tr("Patient")}<select className="input-premium w-full" value={patientId} onChange={e => setPatientId(e.target.value)}><option value="">{tr("Select verified patient")}</option>{candidates.data?.patients.map(p => <option key={p.id} value={p.id}>{chooseLocalized(language, p.arabicName, p.englishName) || p.name} · {p.mrn}</option>)}</select></label><label className="text-sm">{tr("Provisional diagnosis")}<Input value={diagnosis} onChange={e => setDiagnosis(e.target.value)}/></label><label className="text-sm">{tr("Diagnosis category")}<select className="input-premium w-full" value={category} onChange={e => setCategory(e.target.value)}>{config.diagnoses.map(d => <option key={d.name}>{tr(d.name)}</option>)}</select></label></div>
+    return <Card><h2 className="font-semibold">{tr("Register referral")}</h2><p className="text-sm mt-1">{tr("Select an existing patient.")}{canAccessModule(user, 'core') && <a className="underline" href="/patients" target="_blank" rel="noreferrer">{tr("Open RISpro patient registration")}</a>}</p><div className="grid gap-3 mt-3 sm:grid-cols-2"><label className="text-sm">{tr("Find patient")}<Input value={search} onChange={e => { setSearch(e.target.value); setPatientId(''); }} placeholder={tr("Enter name or MRN")}/></label><label className="text-sm">{tr("Patient")}<select className="input-premium w-full" value={patientId} onChange={e => setPatientId(e.target.value)}><option value="">{tr("Select verified patient")}</option>{candidates.data?.patients.map(p => <option key={p.id} value={p.id}>{chooseLocalized(language, p.arabicName, p.englishName) || p.name} · {p.mrn}</option>)}</select></label><label className="text-sm">{tr("Provisional diagnosis")}<Input value={diagnosis} onChange={e => setDiagnosis(e.target.value)}/></label><label className="text-sm">{tr("Diagnosis category")}<select className="input-premium w-full" value={category} onChange={e => setCategory(e.target.value)}>{config.diagnoses.map(d => <option key={d.name}>{tr(d.name)}</option>)}</select></label></div>
     {selectedPatient && <p role="status" className="gk-clinical-note mt-3 text-sm">{tr('Selected patient:')} <strong>{chooseLocalized(language, selectedPatient.arabicName, selectedPatient.englishName) || selectedPatient.name} · {tr('MRN')} <bdi dir="ltr">{selectedPatient.mrn}</bdi></strong></p>}
     {error && <p role="alert" className="mt-3 text-red-700">{errorText(error)}</p>}<div className="mt-4 flex gap-2"><Button disabled={busy || !patientId || !diagnosis.trim()} onClick={async () => { setBusy(true); setError(''); try {
         const result = await gk<{

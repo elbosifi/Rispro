@@ -50,9 +50,20 @@ export interface User {
   mustChangePassword?: boolean;
   canRequestSchedulingOverride?: boolean;
   gammaKnifeOnly?: boolean;
+  moduleAccess?: ModuleAccess;
+}
+
+export interface ModuleAccess {
+  mode: 'legacy' | 'restricted';
+  grants: string[];
+  defaultModule: string | null;
+  landingConfigured: boolean;
+  landingPath: string | null;
+  modules: Array<{ id: string; nameEn: string; nameAr: string; landingPath: string; frontendPrefixes: string[]; workstationPath?: string; available: boolean; dictation: boolean; eligible: boolean; granted: boolean; effective: boolean; permissions: string[] }>;
 }
 
 export interface UserEffectiveAccess {
+  moduleAccess: ModuleAccess;
   userId: number;
   role: Role;
   isActive: boolean;

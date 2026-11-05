@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool.js';
+import { assertModuleAccess, assertUsableModuleAccess, hasModuleAccess, resolveModuleAccess } from '../module-access/module-access-service.js';
 import { HttpError } from '../../utils/http-error.js';
 import { getTripoliToday } from '../../utils/date.js';
 import { logAuditEntry } from '../../services/audit-service.js';
@@ -9,6 +10,7 @@ import { uploadDocument, getDocumentById, readDocumentContent, type DocumentUplo
 import type { AuthenticatedUserContext } from '../../types/http.js';
 import { CATEGORIES, PERMISSIONS, STATUS_LABELS, nextAction, type Config, type Episode, type EpisodeDocument, type Investigation, type Permission, type Reassessment, type Followup, type Treatment, type TreatmentCourse, type TreatmentFraction } from './gamma-knife-types.js';
 import { actionPermission, category, clinical, config as validateConfig, date, id, record, requireStage, strings, text } from './gamma-knife-validation.js';
+import { historicalTreatments } from './historical-treatment-service.js';
 
 type Db = PoolClient | typeof pool;
 export type Actor = AuthenticatedUserContext;
@@ -27,6 +29,7 @@ export async function permissions(actor: Actor, db: Db = pool): Promise<Permissi
   return result.rows[0]?.gamma_knife_permissions ?? [];
 }
 export async function authorize(actor: Actor, permission: Permission = 'access', db: Db = pool): Promise<void> {
+  await assertModuleAccess(actor.sub, 'gamma-knife', db);
   const granted = await permissions(actor, db);
   if (!granted.includes('access') || !granted.includes(permission)) throw new HttpError(403, 'Gamma Knife assignment and permission required.');
 }
@@ -74,7 +77,9 @@ export async function saveSettings(actor: Actor, input: unknown) {
       if (!target.rows.length) throw new HttpError(400, 'User not found.');
       if ([...target.rows[0].gamma_knife_permissions].sort().join(',') === [...granted].sort().join(',')) continue;
       if (target.rows[0].role === 'super_admin' && actor.role !== 'super_admin') throw new HttpError(403, 'Cannot manage protected administrator.');
-      await client.query('update users set gamma_knife_permissions=$2::text[] where id=$1', [id(user.id), granted]);
+      if (Number(actor.sub) === id(user.id) && granted.some(p => !target.rows[0]!.gamma_knife_permissions.includes(p))) throw new HttpError(403, 'Administrators cannot grant themselves clinical permissions.');
+      await client.query('update users set gamma_knife_permissions=$2::text[],auth_version=auth_version+1 where id=$1', [id(user.id), granted]);
+      await assertUsableModuleAccess(id(user.id), client);
     }
     await client.query("update system_settings set setting_value=$1::jsonb, updated_at=now(), updated_by_user_id=$2 where category='gamma_knife' and setting_key='config'", [JSON.stringify({ ...value, revision: value.revision + 1 }), actor.sub]);
     await logAuditEntry({ entityType: 'gamma_knife_settings', actionType: 'update', changedByUserId: actor.sub, oldValues: old.rows[0]?.setting_value, newValues: { ...value, users: grants } }, client);
@@ -184,9 +189,10 @@ export async function profile(actor: Actor, episodeId: unknown) {
     from appointments_v2.bookings where patient_id=$1 and (id=any($2::bigint[]) or (exam_type_id=any($3::bigint[]) and status='scheduled' and voided_at is null))
     order by booking_date desc,id desc limit 100`, [episode.patientId, linkedBookingIds, examTypeIds]);
   const workflow = await workflowRecords(episode.id);
+  const historicalTreatment = await historicalTreatments(episode.id);
   const reassessmentReady = workflow.reassessments.some(item => item.status === 'requested');
   const granted = await permissions(actor);
-  return { episode, history: revisions.rows, episodes: past.rows.map(e => ({ ...e, id: Number(e.id) })), documents: granted.includes('documents') ? await documentsForEpisode(episode.id) : [], appointments: appointments.rows.map(a => ({ ...a, id: Number(a.id), examTypeId: Number(a.examTypeId) })), ...workflow, config, permissions: granted, gammaKnifeOnly: Boolean(actor.gammaKnifeOnly), nextAction: reassessmentReady ? 'Record MDT decision for post-treatment reassessment' : nextAction(episode) };
+  return { episode, history: revisions.rows.filter(h => granted.includes('documents') || !String(h.action).startsWith('document_')), episodes: past.rows.map(e => ({ ...e, id: Number(e.id) })), documents: granted.includes('documents') ? await documentsForEpisode(episode.id) : [], appointments: appointments.rows.map(a => ({ ...a, id: Number(a.id), examTypeId: Number(a.examTypeId) })), ...workflow, historicalTreatment, config, permissions: granted, canAccessCore: hasModuleAccess(await resolveModuleAccess(actor.sub), 'core'), nextAction: reassessmentReady ? 'Record MDT decision for post-treatment reassessment' : nextAction(episode) };
 }
 export async function investigationAssignees(actor: Actor) {
   await authorize(actor);
@@ -669,7 +675,7 @@ export async function uploadEpisodeDocument(actor: Actor, episodeId: unknown, in
   });
 }
 export async function episodeDocument(actor: Actor, episodeId: unknown, documentId: unknown) {
-  await authorize(actor); await findEpisode(episodeId);
+  await authorize(actor, 'documents'); await findEpisode(episodeId);
   const link = await pool.query('select document_id from gamma_knife_documents where episode_id=$1 and document_id=$2 and removed_at is null', [id(episodeId), id(documentId)]);
   if (!link.rows.length) throw new HttpError(404, 'Document not found.');
   return getDocumentById(id(documentId), pool, { allowGammaKnife: true });

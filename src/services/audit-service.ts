@@ -130,7 +130,7 @@ export const AUDIT_PAGE_SIZES = [25, 50, 100] as const;
 
 const CATEGORY_SQL = `case
   when lower(audit_log.action_type || ' ' || audit_log.entity_type) ~ '(report_status|pacs|orthanc|dicom|mwl|sonicdicom|notification|background|scheduled_process|poll|synchroni[sz]|auto_complete|worker)' then 'automated'
-  when lower(audit_log.action_type || ' ' || audit_log.entity_type) ~ '(^|_)(login|logout|auth|reauth|password|action_pin|pin|permission|security)(_|$)|reauth|failed_login|role_change|page_access' then 'security'
+  when lower(audit_log.action_type || ' ' || audit_log.entity_type) ~ '(^|_)(login|logout|auth|reauth|password|action_pin|pin|permission|security)(_|$)|reauth|failed_login|role_change|page_access|module_access' then 'security'
   when lower(audit_log.action_type || ' ' || audit_log.entity_type) ~ '(patient|appointment|booking|override|capacity|modality|user_(create|delete|deactivate|activate|update|role)|document|backup|restore|report_final|destructive|merge)' then 'important'
   else 'other'
 end`;

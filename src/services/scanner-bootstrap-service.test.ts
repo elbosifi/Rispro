@@ -11,7 +11,8 @@ describe("NAPS2 workstation download", () => {
     assert.doesNotMatch(script, /Invoke-WebRequest|DownloadString|DownloadFile|Stop-Process|taskkill|printing-bootstrap|qz-installer/i);
     assert.match(script, /ServerAllowAnyOrigin/);
     assert.match(script, /LocalNetworkAccessAllowedForUrls/);
-    assert.match(script, /RESULT: Ready/);
+    assert.match(script, /RESULT: Setup ready/);
+    assert.match(script, /browser verification required/);
     assert.match(script, /RESULT: Action required/);
     assert.match(script, /RESULT: Failed/);
     assert.equal(script.includes("__RISPRO_"), false);

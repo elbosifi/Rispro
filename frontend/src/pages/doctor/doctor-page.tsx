@@ -16,6 +16,7 @@ import {
 import { ActionPinSettingsButton } from "@/components/auth/action-pin-settings-button";
 import { PasskeySettingsButton } from "@/components/auth/passkey-settings-button";
 import { WorkstationPrintingButton } from "@/components/printing/workstation-printing-button";
+import WorkstationPrintingPage from '@/pages/workstation/workstation-printing-page';
 import { NoShowReviewTopBarAction, TopBar } from "@/components/layout/navigation";
 import { hasDoctorWorkspaceAccess } from "@/components/layout/navigation.helpers";
 import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
@@ -286,6 +287,7 @@ function DoctorPortalRoutes({ me,v2=false }: { me: DoctorMe;v2?:boolean }) {
 
   return (
     <Routes>
+      <Route path="workstation-printing" element={<WorkstationPrintingPage />} />
       <Route index element={<Navigate to={v2?'/doctor/home':'/doctor/my-work'} replace />} />
       <Route path="" element={<Navigate to="/doctor/my-work" replace />} />
       <Route path="dashboard" element={<Navigate to={v2?"/doctor/home":"/doctor/my-work"} replace />} />

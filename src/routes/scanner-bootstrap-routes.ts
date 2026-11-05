@@ -5,6 +5,7 @@ import { HttpError } from "../utils/http-error.js";
 import { renderNaps2WindowsSetup } from "../services/scanner-bootstrap-service.js";
 import { loadSettingsMap } from "../services/settings-service.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { getIntegrationStatus } from '../services/integration-service.js';
 
 export const scannerBootstrapRouter = express.Router();
 scannerBootstrapRouter.use(requireAuth, requireAnyRole(["receptionist", "supervisor", "modality_staff", "doctor", "super_admin"]));
@@ -13,6 +14,10 @@ scannerBootstrapRouter.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 });
+scannerBootstrapRouter.get('/settings', asyncRoute(async (_req, res) => {
+  const { scanner } = await getIntegrationStatus();
+  res.json({ scanner });
+}));
 scannerBootstrapRouter.get("/windows-setup", asyncRoute(async (req, res) => {
   const settings = await loadSettingsMap(["documents_and_uploads"]);
   const scannerSettings = settings.documents_and_uploads || {};

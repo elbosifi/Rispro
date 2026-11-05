@@ -665,7 +665,8 @@ export function mapUser(raw: RawRecord): User {
     recentSupervisorReauth: bool(raw, 'recent_supervisor_reauth', bool(raw, 'recentSupervisorReauth', false)),
     mustChangePassword: bool(raw, 'must_change_password', bool(raw, 'mustChangePassword', false)),
     canRequestSchedulingOverride: bool(raw, 'can_request_scheduling_override', bool(raw, 'canRequestSchedulingOverride', false)),
-    gammaKnifeOnly: bool(raw, 'gamma_knife_only', bool(raw, 'gammaKnifeOnly', false))
+    gammaKnifeOnly: bool(raw, 'gamma_knife_only', bool(raw, 'gammaKnifeOnly', false)),
+    moduleAccess: raw.moduleAccess as User['moduleAccess']
   };
 }
 

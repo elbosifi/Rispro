@@ -210,6 +210,10 @@ export async function fetchUserEffectiveAccess(userId: number): Promise<UserEffe
   return raw.access;
 }
 
+export async function updateUserModuleAccess(userId: number, policy: { mode: 'legacy' | 'restricted'; grants: string[]; defaultModule: string | null }) {
+  return api(`/users/${userId}/module-access`, { method: 'PUT', body: JSON.stringify(policy) });
+}
+
 export async function fetchUserSecurityActivity(
   userId: number,
   page = 1,

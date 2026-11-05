@@ -4,7 +4,7 @@ import { Input } from "@/components/shared/Input";
 import type { IntegrationStatus } from "@/lib/api/documents-printing";
 import { Button } from "@/components/shared/Button";
 import { pushToast } from "@/lib/toast";
-import { fetchIntegrationStatus } from "@/lib/api-hooks";
+import { fetchScannerWorkstationSettings } from "@/lib/api-hooks";
 import { getNaps2WebScanStatus, scanAppointmentRequest, type Naps2ScanSource, type Naps2WebScanStatus } from "@/lib/naps2-webscan";
 import QzTrayPrintingSection from "@/pages/settings/qz-tray-printing-section";
 import { useLanguage } from "@/providers/language-provider";
@@ -58,7 +58,7 @@ export function WorkstationNaps2Section() {
 
   useEffect(() => {
     let active = true;
-    void fetchIntegrationStatus().then((status) => {
+    void fetchScannerWorkstationSettings().then((status) => {
       if (active) setScanner(status.scanner);
     }).catch((error: unknown) => {
       if (active) setLoadError(error instanceof Error ? error.message : "Unable to load scanner configuration.");
