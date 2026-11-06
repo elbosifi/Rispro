@@ -64,6 +64,7 @@ function reportVariant(state: string | null | undefined): "success" | "warning" 
 function reportLabel(language: "ar" | "en", state: string | null | undefined) {
   const labels: Record<string, [string, string]> = {
     final: ["نهائي", "Final"],
+    in_review: ["\u0642\u064a\u062f \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0633\u062a\u0634\u0627\u0631\u064a", "Senior review"],
     draft: ["مسودة", "Draft"],
     no_report: ["لا يوجد تقرير", "No report"],
     study_not_found: ["الدراسة غير موجودة", "Study not found"],

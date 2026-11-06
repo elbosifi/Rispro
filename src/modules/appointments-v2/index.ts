@@ -14,6 +14,7 @@ import { readV2Router } from "./api/routes/read-v2-routes.js";
 import { schedulingOverrideRequestRouter } from "./api/routes/scheduling-override-request-routes.js";
 import { patientSelectionRouter } from "./api/routes/patient-selection-routes.js";
 import { complementaryRecallRouter } from "./api/routes/complementary-recall-routes.js";
+import { receptionReportRouter } from "../reporting/reception-report-routes.js";
 
 /**
  * Create and return the complete V2 router tree.
@@ -42,6 +43,7 @@ export function createAppointmentsV2Router(): Router {
 
   // Reader facade for appointment-facing pages (calendar/queue/print/etc.)
   v2Router.use("/read", readV2Router);
+  v2Router.use("/read/appointments", receptionReportRouter);
 
   // Deferred scheduling override approval workflow
   v2Router.use("/scheduling-override-requests", schedulingOverrideRequestRouter);

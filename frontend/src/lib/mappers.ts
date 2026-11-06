@@ -166,8 +166,11 @@ export interface AppointmentWithDetails extends Appointment {
   assignedReportingDoctorId?: number | null;
   assignedReportingDoctorName?: string | null;
   reportingAssignmentStatus?: "assigned" | "unassigned";
-  reportStatus?: "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | null;
+  reportStatus?: "final" | "draft" | "in_review" | "no_report" | "study_not_found" | "unavailable" | null;
   reportStatusCheckedAt?: string | null;
+  reportStatusSource?: "rispro" | "manual" | "sonicdicom" | null;
+  nativeReportId?: number | null;
+  canViewNativeReport?: boolean;
   reportingHold?: ReportingBoardCaseHoldSummary | null;
   complementaryImagingContext?: {
     relationship: "original_with_recall" | "additional_imaging" | null;
@@ -503,8 +506,11 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     reportingAssignmentStatus: (strOrNull(raw, "reporting_assignment_status") ?? strOrNull(raw, "reportingAssignmentStatus")) === "assigned" ? "assigned" : "unassigned",
     reportStatus: (() => {
       const value = strOrNull(raw, "report_status") ?? strOrNull(raw, "reportStatus");
-      return value === "final" || value === "draft" || value === "no_report" || value === "study_not_found" || value === "unavailable" ? value : null;
+      return value === "final" || value === "draft" || value === "in_review" || value === "no_report" || value === "study_not_found" || value === "unavailable" ? value : null;
     })(),
+    reportStatusSource: ["rispro","manual","sonicdicom"].includes(String(raw.report_status_source)) ? raw.report_status_source as "rispro"|"manual"|"sonicdicom" : null,
+    nativeReportId: numOrNull(raw, "native_report_id"),
+    canViewNativeReport: raw.can_view_native_report === true,
     reportStatusCheckedAt: strOrNull(raw, "report_status_checked_at") ?? strOrNull(raw, "reportStatusCheckedAt"),
     reportingHold: (() => {
       const id = numOrNull(raw, "reporting_hold_id") ?? numOrNull(raw, "reportingHoldId");

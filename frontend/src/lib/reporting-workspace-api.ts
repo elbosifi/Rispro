@@ -21,6 +21,7 @@ export interface WorkspaceReport {
   blockedReason?:string|null;
   finalizeReasons?:string[];
   reviewEnabled?:boolean;
+  reviewEligibility?:ReportingPolicy['reviewEligibility'];
   keyImages:{id:string;caption:string;provenance:{sourceSeriesDescription:string;sourceStudyDate:string;prior:boolean}}[];
   addenda:{id:string;text:string;author:string;signedAt:string}[];
 }

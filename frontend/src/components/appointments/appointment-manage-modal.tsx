@@ -7,10 +7,10 @@ import {
   deleteAppointment,
   fetchAppointmentLookups,
   fetchPublicSchedulingCapacitySettings,
-  fetchPublicAppointmentReportStatus,
+  fetchStaffAppointmentReportStatus,
   getAppointmentById,
   updateAppointmentStatus,
-  type PublicReportStatusResponse,
+  type StaffReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, formatDateTimeLy } from "@/lib/date-format";
@@ -82,19 +82,7 @@ const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "discontinued"]);
 const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function publicAppointmentToken(appointment: AppointmentWithDetails): string {
-  const directToken = String(appointment.publicCancelToken || "").trim();
-  if (directToken) return directToken;
 
-  const rawUrl = String(appointment.publicAppointmentUrl || "").trim();
-  if (!rawUrl) return "";
-
-  try {
-    return new URL(rawUrl).searchParams.get("t")?.trim() || "";
-  } catch {
-    return new URLSearchParams(rawUrl.split("?")[1] || "").get("t")?.trim() || "";
-  }
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
@@ -143,8 +131,8 @@ function appointmentStatusVariant(status: string): "success" | "warning" | "erro
 }
 
 function reportingStatusBadge(language: "ar" | "en", status: AppointmentWithDetails["reportStatus"]) {
-  const labels = { final: ["التقرير نهائي", "Report final"], draft: ["تقرير مسودة", "Draft report"], no_report: ["لم يصدر تقرير", "Not reported"], study_not_found: ["الدراسة غير موجودة للتقرير", "Report study not found"], unavailable: ["حالة التقرير غير متاحة", "Report status unavailable"] } as const;
-  const variants = { final: "success", draft: "warning", no_report: "neutral", study_not_found: "warning", unavailable: "neutral" } as const;
+  const labels = { in_review: ["Senior review", "Senior review"], final: ["التقرير نهائي", "Report final"], draft: ["تقرير مسودة", "Draft report"], no_report: ["لم يصدر تقرير", "Not reported"], study_not_found: ["الدراسة غير موجودة للتقرير", "Report study not found"], unavailable: ["حالة التقرير غير متاحة", "Report status unavailable"] } as const;
+  const variants = { in_review: "warning", final: "success", draft: "warning", no_report: "neutral", study_not_found: "warning", unavailable: "neutral" } as const;
   return status ? { label: chooseLocalized(language, labels[status][0], labels[status][1]), variant: variants[status] } : null;
 }
 
@@ -217,7 +205,10 @@ export function AppointmentManageModal({
   const [documentReviewExpanded, setDocumentReviewExpanded] = useState(false);
   const [protocolPanelOpen, setProtocolPanelOpen] = useState(true);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
-  const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
+  const [checkedReport, setReportStatus] = useState<(StaffReportStatusResponse & {appointmentId:number}) | null>(null);
+  const reportTarget=useRef({open,id:normalizedAppointmentId});
+  reportTarget.current={open,id:normalizedAppointmentId};
+  const reportStatus=checkedReport?.appointmentId===normalizedAppointmentId?checkedReport:null;
   const [reportError, setReportError] = useState("");
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
@@ -438,12 +429,17 @@ export function AppointmentManageModal({
   });
 
   const reportStatusMutation = useMutation({
-    mutationFn: (token: string) => fetchPublicAppointmentReportStatus(token),
-    onSuccess: (status) => {
-      setReportStatus(status);
+    mutationFn: (id: number) => fetchStaffAppointmentReportStatus(id),
+    onSuccess: (status, id) => {
+      if(!reportTarget.current.open||reportTarget.current.id!==id)return;
+      setReportStatus({...status,appointmentId:id});
+      const state:AppointmentWithDetails['reportStatus']=['final','draft','in_review','no_report','study_not_found','unavailable'].includes(status.state)?status.state as AppointmentWithDetails['reportStatus']:'unavailable';
+      queryClient.setQueryData<AppointmentWithDetails>(['appointment-manage-modal',id],current=>current?{...current,reportStatus:state,reportStatusSource:status.source,nativeReportId:status.reportId,canViewNativeReport:status.source==='rispro'&&status.canViewReport}:current);
+      void queryClient.invalidateQueries({queryKey:['registrations']});
       setReportError("");
     },
-    onError: (error) => {
+    onError: (error, id) => {
+      if(!reportTarget.current.open||reportTarget.current.id!==id)return;
       setReportStatus(null);
       setReportError(error instanceof Error ? error.message : t("registrations.reportStatusFailed"));
     },
@@ -451,13 +447,7 @@ export function AppointmentManageModal({
 
   useEffect(() => {
     if (!open || !appointment || !appointment.requiresReport || initialTab !== "report" || !checkReportOnOpen) return;
-    const token = publicAppointmentToken(appointment);
-    if (!token) {
-      setReportStatus(null);
-      setReportError(t("registrations.reportUnavailable"));
-      return;
-    }
-    reportStatusMutation.mutate(token);
+    reportStatusMutation.mutate(appointment.id);
     // The row action requests one check for the selected appointment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointment?.id, appointment?.requiresReport, checkReportOnOpen, initialTab, open]);
@@ -659,25 +649,14 @@ export function AppointmentManageModal({
 
   const checkReportStatus = () => {
     if (!appointment) return;
-    const token = publicAppointmentToken(appointment);
-    if (!token) {
-      setReportStatus(null);
-      setReportError(t("registrations.reportUnavailable"));
-      return;
-    }
-    reportStatusMutation.mutate(token);
+    reportStatusMutation.mutate(appointment.id);
   };
 
   const openReport = () => {
-    if (!appointment) return;
-    const token = publicAppointmentToken(appointment);
-    if (token) {
-      window.open(
-        `/api/public/appointments/report-open?t=${encodeURIComponent(token)}`,
-        "_blank",
-        "noopener,noreferrer",
-      );
-    }
+    if(appointment && reportStatus?.canViewReport)window.open(`/api/v2/read/appointments/${appointment.id}/report`, "_blank", "noopener,noreferrer");
+  };
+  const printReport = () => {
+    if(appointment && reportStatus?.canPrintReport)window.open(`/api/v2/read/appointments/${appointment.id}/report/print`, "_blank", "noopener,noreferrer");
   };
 
   useEffect(() => {
@@ -781,12 +760,15 @@ export function AppointmentManageModal({
   const dialogTitle = appointment ? chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName) : t("registrations.manage");
   const reactivatingDiscontinued = Boolean(appointment && appointment.status === "discontinued" && manualStatus !== "discontinued");
   const statusReasonRequired = Boolean(appointment && (STATUS_REASON_REQUIRED.has(manualStatus) || (appointment.status === "completed" && manualStatus === "arrived") || reactivatingDiscontinued));
+  const source=reportStatus?.source??appointment?.reportStatusSource;
+  const sourceLabel=source==='rispro'?'RISpro native':source==='manual'?'Manual final':source==='sonicdicom'?'SonicDICOM':'No report source';
   const reportPanel = appointment?.requiresReport ? (
     <section className="rounded-xl border border-border bg-background p-2 md:p-3">
       <div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold">{chooseLocalized(language, "الصور والتقرير", "Images and report")}</h3><p className="mt-1 text-[11px] text-muted-foreground"><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span> · {chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)}</p></div><FileText size={17} className="text-muted-foreground" aria-hidden="true" /></div>
       <div className="mt-2 md:mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-xs"><span className="text-muted-foreground">{appointment.studyInstanceUid ? chooseLocalized(language, "الدراسة مرتبطة", "Study linked") : chooseLocalized(language, "الدراسة غير متاحة", "Study unavailable")}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${reportStatus?.canViewReport ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{reportStatus?.canViewReport ? chooseLocalized(language, "جاهز", "Ready") : chooseLocalized(language, "غير مفحوص", "Not checked")}</span></div>
+      <p className="mt-2 text-xs" aria-label="Report source">{sourceLabel}{(reportStatus?.state??appointment.reportStatus) ? ` / ${(reportStatus?.state??appointment.reportStatus)!.replaceAll('_',' ')}` : ''}</p>
       {reportError ? <p className="mt-2 text-xs text-red-700" role="alert">{reportError}</p> : <p className="mt-2 text-xs leading-5 text-muted-foreground">{reportStatus?.message || t("registrations.reportHint")}</p>}
-      <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" className="min-h-9 flex-1 text-xs" disabled={!publicAppointmentToken(appointment) || reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : null}{reportStatusMutation.isPending ? t("registrations.reportChecking") : t("registrations.reportCheck")}</Button>{reportStatus?.canViewReport ? <Button type="button" size="sm" className="min-h-9 flex-1 text-xs" onClick={openReport}><ExternalLink size={14} className="me-1.5" aria-hidden="true" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button> : null}</div>
+      <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" className="min-h-9 flex-1 text-xs" disabled={reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <Loader2 size={14} className="me-1.5 animate-spin" aria-hidden="true" /> : null}{reportStatusMutation.isPending ? t("registrations.reportChecking") : t("registrations.reportCheck")}</Button>{reportStatus?.canViewReport ? <Button type="button" size="sm" className="min-h-9 flex-1 text-xs" onClick={openReport}><ExternalLink size={14} className="me-1.5" aria-hidden="true" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button> : null}{reportStatus?.canPrintReport ? <Button type="button" size="sm" variant="secondary" onClick={printReport}><Printer size={14} className="me-1.5" aria-hidden="true" />{chooseLocalized(language,"\u0637\u0628\u0627\u0639\u0629 \u0627\u0644\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0646\u0647\u0627\u0626\u064a","Print final report")}</Button> : null}</div>
     </section>
   ) : null;
   const supplementaryRecallContext = appointment && appointment.complementaryImagingContext?.relationship ? (() => {
@@ -932,9 +914,10 @@ export function AppointmentManageModal({
             <div className="absolute inset-2 z-20 overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl sm:inset-3 sm:p-5">
               <div className="mb-3"><h4 className="text-sm font-semibold">{t("registrations.report")}</h4><p className="mt-1 text-xs text-muted-foreground"><span dir="ltr" className="font-mono-data">{appointment.accessionNumber}</span> • {chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn)}</p></div>
               {appointment.sonicDicomStudyNote?.trim() ? <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-sm" title={`PACS note: ${appointment.sonicDicomStudyNote.trim()}`}><p className="text-xs font-semibold uppercase text-amber-700">PACS note</p><p className="mt-1 text-amber-900" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{appointment.sonicDicomStudyNote.trim()}</p></div> : null}
+              <p className="mb-2 text-xs" aria-label="Report source">{sourceLabel} / {reportStatus?.state??appointment.reportStatus??'no_report'}</p>
               <div className="rounded-xl border border-border bg-background p-3 text-sm">{reportError ? <p className="text-red-700">{reportError}</p> : reportStatus ? <p className="text-muted-foreground">{reportStatus.message}</p> : <p className="text-muted-foreground">{t("registrations.reportHint")}</p>}</div>
-              <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}><Button type="button" size="sm" disabled={!publicAppointmentToken(appointment) || reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{t("registrations.reportChecking")}</span> : t("registrations.reportCheck")}</Button></div>
-              {reportStatus?.canViewReport ? <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}><Button type="button" size="sm" variant="secondary" onClick={openReport}><ExternalLink size={14} className="me-2" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button></div> : null}
+              <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}><Button type="button" size="sm" disabled={reportStatusMutation.isPending} onClick={checkReportStatus}>{reportStatusMutation.isPending ? <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" />{t("registrations.reportChecking")}</span> : t("registrations.reportCheck")}</Button></div>
+              {reportStatus?.canViewReport ? <div className="mt-3 flex flex-wrap gap-2">{reportStatus.canPrintReport&&<Button type="button" size="sm" variant="secondary" onClick={printReport}><Printer size={14} className="me-1.5" />{chooseLocalized(language,"\u0637\u0628\u0627\u0639\u0629 \u0627\u0644\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0646\u0647\u0627\u0626\u064a","Print final report")}</Button>}<Button type="button" size="sm" variant="secondary" onClick={openReport}><ExternalLink size={14} className="me-2" />{reportStatus.viewButtonLabel || t("registrations.reportOpen")}</Button></div> : null}
             </div>
           ) : null}
 

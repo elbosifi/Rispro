@@ -14,7 +14,7 @@ const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientIdentifierTypesMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
-const fetchPublicAppointmentReportStatusMock = vi.fn();
+const fetchStaffAppointmentReportStatusMock = vi.fn();
 const fetchPublicSchedulingCapacitySettingsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
 const sendPatientWebPushNotificationMock = vi.fn();
@@ -56,7 +56,7 @@ vi.mock("@/lib/api-hooks", () => ({
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
   fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => fetchPublicSchedulingCapacitySettingsMock(...args),
-  fetchPublicAppointmentReportStatus: (...args: unknown[]) => fetchPublicAppointmentReportStatusMock(...args),
+  fetchStaffAppointmentReportStatus: (...args: unknown[]) => fetchStaffAppointmentReportStatusMock(...args),
   sendPatientWebPushNotification: (...args: unknown[]) => sendPatientWebPushNotificationMock(...args),
 }));
 
@@ -177,13 +177,13 @@ describe("RegistrationsPage print actions", () => {
     sendPatientWebPushNotificationMock.mockResolvedValue({});
     uploadAppointmentDocumentMock.mockReset();
     uploadAppointmentDocumentMock.mockResolvedValue({ id: 101 });
-    fetchPublicAppointmentReportStatusMock.mockReset();
+    fetchStaffAppointmentReportStatusMock.mockReset();
     fetchPublicSchedulingCapacitySettingsMock.mockReset();
     fetchPublicSchedulingCapacitySettingsMock.mockReturnValue({
       allow_reception_override_requests_from_availability: "enabled",
       can_request_scheduling_override: "enabled",
     });
-    fetchPublicAppointmentReportStatusMock.mockResolvedValue({
+    fetchStaffAppointmentReportStatusMock.mockResolvedValue({
       enabled: true,
       state: "final",
       canViewReport: true,
@@ -1319,7 +1319,7 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Report" }));
 
     await waitFor(() => {
-      expect(fetchPublicAppointmentReportStatusMock).toHaveBeenCalledWith("sample-token");
+      expect(fetchStaffAppointmentReportStatusMock).toHaveBeenCalledWith(appointment.id);
       expect(screen.getByText("Report is ready.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Open report" })).toBeTruthy();
     });
@@ -1343,7 +1343,7 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Report" }));
 
     await waitFor(() => {
-      expect(fetchPublicAppointmentReportStatusMock).toHaveBeenCalledWith("sample-token");
+      expect(fetchStaffAppointmentReportStatusMock).toHaveBeenCalledWith(appointment.id);
       expect(screen.getByText("Report is ready.")).toBeTruthy();
     });
     const pacsNote = screen.getByTitle("PACS note: mwa prior study note with enough text to preview compactly");
@@ -1373,7 +1373,7 @@ describe("RegistrationsPage print actions", () => {
     const appointment = registrationAppointment({ requiresReport: true });
     fetchAppointmentsMock.mockResolvedValue([appointment]);
     getAppointmentByIdMock.mockResolvedValue(appointment);
-    fetchPublicAppointmentReportStatusMock.mockResolvedValue({
+    fetchStaffAppointmentReportStatusMock.mockResolvedValue({
       enabled: true,
       state: "draft",
       canViewReport: false,

@@ -41,6 +41,7 @@ import { asString } from "../../../../utils/request-coercion.js";
 import { getModalityHistoricalPacsCandidates, getModalityPatientHistory, getModalitySonicDicomRedirect, recordModalityHistoricalPacsPatientAttestation, searchModalityHistoricalPacsPatientId } from "../../../doctor-portal/protocoling-repository.js";
 import { loadAppointmentAcquisitionSummaries } from "../../../../services/appointment-acquisition-summary.js";
 import { getVerifiedPatientIds } from "../../../../services/patient-identity-document-service.js";
+import {receptionReportStatuses,type ReceptionReportStatus} from '../../../reporting/reception-report-service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -58,6 +59,9 @@ type AppointmentReadRow = Record<string, unknown> & {
   accession_number?: string | null;
   study_instance_uid?: string | null;
 };
+function receptionStatusFields(status:ReceptionReportStatus|undefined) {
+  return {report_status:status?.state??'unavailable',report_status_source:status?.source??null,report_status_checked_at:status?.checkedAt??null,native_report_id:status?.reportId??null,can_view_native_report:status?.source==='rispro'&&status.canViewReport};
+}
 
 const PROTOCOL_ASSIGNMENT_SELECT = `
           protocol_assignment.assignment_id as protocol_assignment_id,
@@ -555,10 +559,11 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const [rowsWithNotes, acquisitionSummaries, verifiedPatientIds] = await Promise.all([
+    const [rowsWithNotes, acquisitionSummaries, verifiedPatientIds, reportStatuses] = await Promise.all([
       attachSonicDicomStudyNotesToAppointments(result.rows),
       loadAppointmentAcquisitionSummaries(result.rows.map((row) => Number(row.id))),
       getVerifiedPatientIds(result.rows.map((row) => Number(row.patient_id))),
+      receptionReportStatuses(result.rows.map(row=>Number(row.id))),
     ]);
     let publicBaseUrl: string | null = null;
     try { publicBaseUrl = await getPublicAppBaseUrl(); } catch { /* URL field remains unavailable until configured. */ }
@@ -569,6 +574,7 @@ router.get(
           : null;
       return {
         ...row,
+        ...receptionStatusFields(reportStatuses.get(Number(row.id))),
         identity_document_verified: verifiedPatientIds.has(Number(row.patient_id)),
         acquisitionSummary: acquisitionSummaries.get(Number(row.id)) ?? null,
         public_cancel_token: publicCancelToken,
@@ -754,9 +760,10 @@ router.get(
     `, [bookingId]);
     const safety = safetyResult.rows[0];
 
-    const [[appointmentWithNote], acquisitionSummaries] = await Promise.all([
+    const [[appointmentWithNote], acquisitionSummaries, reportStatuses] = await Promise.all([
       attachSonicDicomStudyNotesToAppointments([appointment]),
       loadAppointmentAcquisitionSummaries([bookingId]),
+      receptionReportStatuses([bookingId]),
     ]);
     const publicCancelToken =
       patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
@@ -768,6 +775,7 @@ router.get(
     res.json({
       appointment: {
         ...appointmentWithNote,
+        ...receptionStatusFields(reportStatuses.get(bookingId)),
         identity_document_verified: verifiedPatientIds.has(Number(appointment.patient_id)),
         acquisitionSummary: acquisitionSummaries.get(bookingId) ?? null,
         modality_safety_workflow_type: safety?.modality_safety_workflow_type ?? "standard_acknowledgement",

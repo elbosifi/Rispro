@@ -216,6 +216,9 @@ test('backend signing explanations agree with eligibility for permission, policy
   policy=await updateReportingPolicy(manager,{...policy,enabled:false});
   read=await getWorkspaceReport(noSign,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/disabled by reporting policy/);
   policy=await updateReportingPolicy(manager,{...policy,enabled:true,signing:'permission',reviewEligibility:'designated'});
+  await assert.rejects(()=>reviewWorkspaceReport(noSign,draft.id,{expectedRevision:draft.revision,action:'submit'}),/Select an eligible senior reviewer/);
+  await assert.rejects(()=>reviewWorkspaceReport(noSign,draft.id,{expectedRevision:draft.revision,action:'submit',preferredReviewerId:null}),/Select an eligible senior reviewer/);
+  assert.equal((await getWorkspaceReport(noSign,draft.id)).revision,draft.revision);
   const reviewer=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[other.userId])).rows[0].id;
   await reviewWorkspaceReport(noSign,draft.id,{expectedRevision:draft.revision,action:'submit',preferredReviewerId:Number(reviewer)});
   read=await getWorkspaceReport(doctor,draft.id);assert.equal(read.canFinalize,false);assert.match(read.finalizeReasons.join(' '),/designated reviewer/);
@@ -912,4 +915,12 @@ test('final signing freezes institutional text and logo while new documents use 
     assert.match(preview,/Synthetic Hospital B/);assert.match(preview,/DRAFT \/ UNSIGNED/);
     assert.equal(retained.revision,signed.revision);assert.deepEqual(retained.sections,content);
   } finally {await upsertSettings('deployment_identity',[{key:'institution',value:original}],manager.userId);}
+});
+
+import {templateSections} from './reporting-templates.js';
+
+test('built-in templates reject inherited object properties',()=>{
+  for(const name of ['constructor','toString','__proto__','hasOwnProperty'])assert.throws(()=>templateSections(name),/Unknown report template/);
+  assert.ok(Object.values(templateSections('blank')).every(text=>text===''));
+  assert.ok(templateSections('structured').findings);
 });

@@ -83,7 +83,7 @@ async function view(db:Pick<PoolClient,'query'>,report:ReportRow,a:Access,studyK
   return {...await response(db,report,loaded),studyKey,status:report.status==='draft'&&report.review_requested_at?'in_review':report.status,
     creatorId:Number(report.author_user_id),reportType:report.report_type,mode:report.collaboration_mode,isPrimary:report.status==='final'&&report.is_primary&&report.report_type==='primary',
     contributors,lastEditor:report.last_editor_name||report.author_name,createdAt:report.created_at,deletedAt:report.deleted_at,
-    reviewRequestedBy:report.review_requested_by,reviewRequestedAt:report.review_requested_at,preferredReviewerId:report.preferred_reviewer_id,
+    reviewRequestedBy:report.review_requested_by,reviewRequestedAt:report.review_requested_at,preferredReviewerId:report.preferred_reviewer_id,reviewEligibility:a.policy.reviewEligibility,
     reviewEnabled:a.policy.enabled&&!a.associationIssue&&(a.policy.review!=='none'||Boolean(report.review_requested_at)),blockedReason:a.associationIssue||(a.freshness.fresh?null:'Archive verification is unavailable or stale. The preserved report is read-only.'),
     canEdit:canEdit(a,report),canFinalize:canSign(a,report),finalizeReasons:workspaceSigningReasons(a,report),canReview:canReview(a,report),canDelete:canDelete(a,report,contributors.length)&&a.freshness.fresh,canRecover:supervisor(a.me)&&Boolean(report.deleted_at)&&a.policy.enabled&&a.freshness.fresh&&!a.associationIssue,canRestoreRevision:a.policy.restoreRevisions&&canEdit(a,report)&&!report.review_requested_at};
 }
@@ -236,6 +236,7 @@ export async function reviewWorkspaceReport(actor:Actor,id:number,body:Record<st
     if(action==='submit'&&(!canEdit(a,report)||report.review_requested_at)) throw new HttpError(403,'Only an editable active draft can be submitted.');
     if(action!=='submit'&&(!report.review_requested_at||action==='withdraw'&&Number(report.review_requested_by)!==Number(actor.userId)&&!supervisor(a.me)||action!=='withdraw'&&!canReview(a,report))) throw new HttpError(403,'You are not eligible to perform this review action.');
     const preferred=body.preferredReviewerId==null?null:Number(body.preferredReviewerId);
+    if(action==='submit'&&a.policy.reviewEligibility==='designated'&&preferred===null)throw new HttpError(400,'Select an eligible senior reviewer under designated-review policy.');
     if(preferred!==null&&(!Number.isSafeInteger(preferred)||preferred<1))throw new HttpError(400,'Invalid preferred reviewer.');
     if(preferred!==null) {
       const reviewer=(await db.query(`select d.id,d.user_id from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where d.id=$1 and d.active and u.is_active and u.role in ('doctor','supervisor','super_admin') and d.doctor_role=any($3::text[])

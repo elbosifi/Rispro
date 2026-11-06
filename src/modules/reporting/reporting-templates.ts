@@ -138,6 +138,6 @@ export async function personalTemplateSections(db: Pick<PoolClient,'query'>,owne
 
 export function templateSections(id:unknown): ReportSections {
   const key=String(id||'blank');
-  if (!(key in REPORT_TEMPLATES)) throw new HttpError(400,'Unknown report template.');
+  if (!Object.hasOwn(REPORT_TEMPLATES,key)) throw new HttpError(400,'Unknown report template.');
   return {...REPORT_TEMPLATES[key as keyof typeof REPORT_TEMPLATES].sections};
 }

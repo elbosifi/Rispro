@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getAppointmentById: vi.fn(),
   fetchAppointmentLookups: vi.fn(),
   fetchPatientDirectorySummary: vi.fn(),
-  fetchPublicAppointmentReportStatus: vi.fn(),
+  fetchStaffAppointmentReportStatus: vi.fn(),
   fetchPublicSchedulingCapacitySettings: vi.fn(),
   createSchedulingOverrideRequest: vi.fn(),
   listEligibleDoctorOverbookingApprovers: vi.fn(),
@@ -31,7 +31,7 @@ vi.mock("@/lib/api-hooks", () => ({
   deleteAppointment: (...args: unknown[]) => mocks.deleteAppointment(...args),
   fetchAppointmentLookups: (...args: unknown[]) => mocks.fetchAppointmentLookups(...args),
   fetchPatientDirectorySummary: (...args: unknown[]) => mocks.fetchPatientDirectorySummary(...args),
-  fetchPublicAppointmentReportStatus: (...args: unknown[]) => mocks.fetchPublicAppointmentReportStatus(...args),
+  fetchStaffAppointmentReportStatus: (...args: unknown[]) => mocks.fetchStaffAppointmentReportStatus(...args),
   fetchPublicSchedulingCapacitySettings: (...args: unknown[]) => mocks.fetchPublicSchedulingCapacitySettings(...args),
   getAppointmentById: (...args: unknown[]) => mocks.getAppointmentById(...args),
   updateAppointmentStatus: (...args: unknown[]) => mocks.updateAppointmentStatus(...args),
@@ -173,8 +173,8 @@ beforeEach(() => {
     recentAppointments: [],
     noShow: { noShowCount: 0, bookingRestricted: false, lastNoShowAppointment: null, lastAuthorizationUser: null, lastAuthorizationDate: null, lastAuthorizationReason: null },
   });
-  mocks.fetchPublicAppointmentReportStatus.mockReset();
-  mocks.fetchPublicAppointmentReportStatus.mockResolvedValue({ enabled: true, state: "final", canViewReport: true, message: "Report is ready.", checkButtonLabel: "Check report status", viewButtonLabel: "Open report" });
+  mocks.fetchStaffAppointmentReportStatus.mockReset();
+  mocks.fetchStaffAppointmentReportStatus.mockResolvedValue({ enabled: true, state: "final", canViewReport: true, message: "Report is ready.", checkButtonLabel: "Check report status", viewButtonLabel: "Open report" });
   mocks.fetchPublicSchedulingCapacitySettings.mockReset();
   mocks.fetchPublicSchedulingCapacitySettings.mockImplementation(async () => ({
     allow_reception_override_requests_from_availability: mocks.availabilitySettings,
@@ -318,7 +318,7 @@ describe("AppointmentManageModal", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Open report" }));
 
     expect(openSpy).toHaveBeenCalledWith(
-      "/api/public/appointments/report-open?t=report-token",
+      "/api/v2/read/appointments/42/report",
       "_blank",
       "noopener,noreferrer",
     );
@@ -326,6 +326,19 @@ describe("AppointmentManageModal", () => {
     expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
   });
 
+  it("opens and prints a signed native report without a patient QR token",async()=>{
+    const openSpy=vi.spyOn(window,"open").mockImplementation(()=>null);
+    mocks.getAppointmentById.mockResolvedValueOnce({...appointment,requiresReport:true,publicCancelToken:null,publicAppointmentUrl:null,reportStatus:"final",reportStatusSource:"rispro",canViewNativeReport:true});
+    mocks.fetchStaffAppointmentReportStatus.mockResolvedValueOnce({enabled:true,state:"final",source:"rispro",reportId:900,canPrintReport:true,canViewReport:true,message:"Signed native primary report available.",viewButtonLabel:"Open final report"});
+    renderModal({initialTab:"report",checkReportOnOpen:true});await screen.findByText("Signed native primary report available.");expect(mocks.fetchStaffAppointmentReportStatus).toHaveBeenCalledWith(42);expect(screen.getByLabelText("Report source").textContent).toContain("RISpro native");
+    await userEvent.click(screen.getByRole("button",{name:"Open final report"}));await userEvent.click(screen.getByRole("button",{name:"Print final report"}));expect(openSpy).toHaveBeenCalledWith("/api/v2/read/appointments/42/report","_blank","noopener,noreferrer");expect(openSpy).toHaveBeenCalledWith("/api/v2/read/appointments/42/report/print","_blank","noopener,noreferrer");
+  });
+  it.each(["draft","in_review","no_report"])("hides final delivery actions for native %s despite a stale final row",async state=>{
+    mocks.getAppointmentById.mockResolvedValueOnce({...appointment,requiresReport:true,reportStatus:"final",reportStatusSource:"sonicdicom"});mocks.fetchStaffAppointmentReportStatus.mockResolvedValueOnce({enabled:true,state,source:"rispro",canViewReport:false,message:"No signed native primary report is available."});renderModal({initialTab:"report",checkReportOnOpen:true});await screen.findByText("No signed native primary report is available.");expect(screen.queryByRole("button",{name:/Open.*report/i})).toBeNull();expect(screen.queryByRole("button",{name:"Print final report"})).toBeNull();expect(screen.queryByText("Report final")).toBeNull();
+  });
+  it("ignores a delayed report-status response after changing appointments",async()=>{
+    let resolveStatus!:(value:unknown)=>void;mocks.getAppointmentById.mockResolvedValueOnce({...appointment,requiresReport:true});mocks.fetchStaffAppointmentReportStatus.mockImplementationOnce(()=>new Promise(done=>{resolveStatus=done;}));const view=renderModal({initialTab:"documents"});await userEvent.click(await screen.findByRole("button",{name:/Check report/i}));mocks.getAppointmentById.mockResolvedValueOnce({...appointment,id:99,requiresReport:true,accessionNumber:"ACC-99"});view.rerender(<LanguageProvider><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><AppointmentManageModal appointmentId={99} open onClose={vi.fn()}/></QueryClientProvider></LanguageProvider>);await screen.findAllByText("ACC-99");await act(async()=>resolveStatus({state:"final",source:"rispro",canViewReport:true,message:"OLD APPOINTMENT FINAL",viewButtonLabel:"Open old report"}));expect(screen.queryByText("OLD APPOINTMENT FINAL")).toBeNull();expect(screen.queryByRole("button",{name:"Open old report"})).toBeNull();
+  });
   it("makes mobile Documents the modal scroll owner without constraining its wrapper", async () => {
     vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     renderModal({ initialTab: "documents" });

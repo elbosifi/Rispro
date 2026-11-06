@@ -213,6 +213,15 @@ export async function fetchPublicAppointmentReportStatus(token: string): Promise
   const query = new URLSearchParams({ t: token });
   return api<PublicReportStatusResponse>(`/public/appointments/report-status?${query.toString()}`);
 }
+export interface StaffReportStatusResponse extends Omit<PublicReportStatusResponse,'state'> {
+  state:PublicReportStatusResponse['state']|'in_review';
+  source:'rispro'|'manual'|'sonicdicom'|null;
+  reportId:number|null;
+  canPrintReport:boolean;
+}
+export function fetchStaffAppointmentReportStatus(id:number):Promise<StaffReportStatusResponse> {
+  return api<StaffReportStatusResponse>(`/v2/read/appointments/${id}/report-status`);
+}
 
 export interface PatientPushPreferences {
   appointmentReminder24h: boolean;

@@ -209,3 +209,7 @@ describe("workflow timestamp mapping", () => {
     expect(snapshot.queueEntries[0].completedAt).toBeNull();
   });
 });
+
+it("preserves native report source and in-review state without marking it final",()=>{
+ const mapped=mapAppointmentWithDetails({id:42,report_status:'in_review',report_status_source:'rispro',native_report_id:null,can_view_native_report:false});expect(mapped.reportStatus).toBe('in_review');expect(mapped.reportStatusSource).toBe('rispro');expect(mapped.canViewNativeReport).toBe(false);
+});

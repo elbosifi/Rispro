@@ -15,7 +15,7 @@ export default function ReportPanel({store}:{store:ReportStore}) {
   const saveStatus=s.connection==='authentication-required'?'Authentication required':s.connection==='reconnecting'?'Reconnecting':s.connection==='denied'?'Save failed':s.saving?'Saving…':s.aiSaveRequired&&s.dirty?'AI changes awaiting explicit Save':s.error && unsaved?'Save failed':unsaved?'Unsaved changes':'Saved';
   const run=work=>Promise.resolve().then(work).catch(store.setError);
   const report=s.report,identity=s.context?.identity?{...report?.identity,...s.context.identity}:report?.identity;
-  const editable=(report?.canEdit??s.context?.canEdit) && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
+  const editable=(report?.canEdit??s.context?.canEdit) && s.connection==='connected' && ['draft','in_review'].includes(report?.status) && !s.busy && !s.conflict && !report?.deletedAt;
   const finalizeReasons=finalizeDisabledReasons(s),age=ageAtExamination(identity?.birthDate,identity?.studyDate);
   const dictationContext=JSON.stringify([s.context?.contextId,s.context?.primaryStudyUid,identity?.patientIdentifier,identity?.accession,report?.id,report?.status]);
   useEffect(()=>{setConfirm(null);setTab('report');},[dictationContext]);

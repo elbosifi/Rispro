@@ -38,7 +38,7 @@ function cssString(value: string): string {
   return '"' + value.replace(/[\\"\n\r<>]/g, char => "\\" + char.charCodeAt(0).toString(16) + " ") + '"';
 }
 
-export function buildNativeReportHtml(report: NativeReportPrintData): string {
+export function buildNativeReportHtml(report: NativeReportPrintData, resources: {imageUrl?:(id:string)=>string;fontBaseUrl?:string;printScriptUrl?:string} = {}): string {
   const e = escapeHtml, institution = report.institution, identity = report.identity;
   const final = report.status === "final";
   const labels = { clinicalHistory:"Clinical Data", technique:"Protocol / Technique", comparison:"Comparison", findings:"Findings", impression:"Impression" };
@@ -56,8 +56,8 @@ export function buildNativeReportHtml(report: NativeReportPrintData): string {
   const footer = institution ? [institution.hospitalNameEn || institution.hospitalNameAr, institution.website].filter(Boolean).join(" | ") : "";
   const logo = (src: string, alt: string) => src && (src === "/assets/nccb-logo.png" || /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(src)) ? `<img src="${e(src)}" alt="${alt}">` : "";
   return `<!doctype html><html lang="en" dir="ltr"><head><meta charset="utf-8"><title>Radiology report</title><style>
-    @font-face{font-family:"${SERVER_PRINT_FONT_FAMILY}";src:url('/api/native-reporting/print-font/regular') format('truetype');font-weight:400}
-    @font-face{font-family:"${SERVER_PRINT_FONT_FAMILY}";src:url('/api/native-reporting/print-font/bold') format('truetype');font-weight:700}
+    @font-face{font-family:"${SERVER_PRINT_FONT_FAMILY}";src:url('${e(resources.fontBaseUrl||'/api/native-reporting/print-font')}/regular') format('truetype');font-weight:400}
+    @font-face{font-family:"${SERVER_PRINT_FONT_FAMILY}";src:url('${e(resources.fontBaseUrl||'/api/native-reporting/print-font')}/bold') format('truetype');font-weight:700}
     @page{size:A4 portrait;margin:12mm 12mm 17mm;@bottom-center{content:${cssString(footer)};font:7pt Arial,"${SERVER_PRINT_FONT_FAMILY}",sans-serif;white-space:pre-wrap}@bottom-right{content:counter(page) " / " counter(pages);font:7pt Arial,sans-serif}}
     *{box-sizing:border-box}body{margin:0;color:#000;background:#fff;font:10.5pt/1.28 Arial,"${SERVER_PRINT_FONT_FAMILY}",sans-serif;overflow-wrap:anywhere}
     .report-document{width:100%;border-collapse:collapse;table-layout:fixed}.report-document>thead{display:table-header-group}.report-body{padding:0;vertical-align:top}
@@ -75,9 +75,9 @@ export function buildNativeReportHtml(report: NativeReportPrintData): string {
     ${metadata.length ? `<table class="metadata" aria-label="Patient and examination information">${metaRows.map(row=>`<tr>${row.map(([label,value])=>`<td colspan="${row.length===3 && label==='Accession number'?3:1}"><span>${e(label)}</span><bdi>${e(value)}</bdi></td>`).join("")}</tr>`).join("")}</table>` : ""}
     ${Object.entries(labels).filter(([key])=>report.sections[key]?.trim()).map(([key,label])=>`<section><h2>${label}</h2><p class="narrative" dir="auto">${e(report.sections[key])}</p></section>`).join("")}
     ${report.addenda.map(a=>`<section><h2>Signed addendum</h2><p class="narrative" dir="auto">${e(a.text)}</p><p>${e(a.author)} | ${e(reportTimestamp(a.signedAt))}</p></section>`).join("")}
-    ${report.keyImages.length ? `<section class="key-images"><h2>Key images</h2><div class="image-grid">${Array.from({length:Math.ceil(report.keyImages.length/3)},(_,row)=>`<div class="image-row">${report.keyImages.slice(row*3,row*3+3).map((image,index)=>`<figure><img alt="Report illustration ${row*3+index+1}" src="/api/native-reporting/${report.studyKey && report.id ? "reports/"+report.id : "appointments/"+report.appointmentId}/images/${encodeURIComponent(image.id)}"><figcaption dir="auto">${e(image.caption)}${image.provenance.prior ? ' (prior study)' : ''}</figcaption></figure>`).join("")}</div>`).join("")}</div></section>` : ""}
+    ${report.keyImages.length ? `<section class="key-images"><h2>Key images</h2><div class="image-grid">${Array.from({length:Math.ceil(report.keyImages.length/3)},(_,row)=>`<div class="image-row">${report.keyImages.slice(row*3,row*3+3).map((image,index)=>`<figure><img alt="Report illustration ${row*3+index+1}" src="${e(resources.imageUrl?.(image.id) || `/api/native-reporting/${report.studyKey && report.id ? "reports/"+report.id : "appointments/"+report.appointmentId}/images/${encodeURIComponent(image.id)}`)}"><figcaption dir="auto">${e(image.caption)}${image.provenance.prior ? ' (prior study)' : ''}</figcaption></figure>`).join("")}</div>`).join("")}</div></section>` : ""}
     <div class="signoff"><span dir="auto">${e(final ? report.finalizer : report.author)}</span><span>${final ? e(reportTimestamp(report.finalizedAt)) : ""}</span><span>${final ? 'FINAL / SIGNED' : 'DRAFT / UNSIGNED'}</span></div>
-    </td></tr></tbody></table></body></html>`;
+    </td></tr></tbody></table>${resources.printScriptUrl ? `<script src="${e(resources.printScriptUrl)}" defer></script>` : ""}</body></html>`;
 }
 
 function escapeHtml(value: unknown): string {
