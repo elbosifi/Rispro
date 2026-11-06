@@ -395,6 +395,73 @@ test('template prompts cannot be signed; reports remain readable during catalogu
   const preserved=await getWorkspaceReport(doctor,r.id);assert.equal(preserved.id,r.id);assert.equal(preserved.canEdit,false);
   await pool.query('update historical_pacs_sync_state set source_archive_key=$1,last_success_at=now(),last_error=null',[authoritativeOrthancArchiveKey(settings)]);
 });
+test('personal reporting templates are owner-scoped snapshots and review APIs enforce senior roles',async()=>{
+  const app=express();app.use(express.json(),cookieParser());app.use('/api/native-reporting',nativeReportingRouter);app.use(errorHandler);
+  const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
+  const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
+  const request=(path:string,actor:Actor|null=doctor,method='GET',body?:unknown)=>fetch(origin+'/api/native-reporting'+path,{method,headers:{'Content-Type':'application/json',...(actor?{cookie:env.cookieName+'='+jwt.sign({sub:Number(actor.userId),role:actor.appRole},env.jwtSecret,{expiresIn:'5m'})}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  const originalPolicy=(await pool.query("select setting_value from system_settings where category='doctor_workspace' and setting_key='reporting_policy'")).rows[0].setting_value;
+  try {
+    assert.equal((await request('/workspace/templates',null)).status,401);
+    const empty=await request('/workspace/templates');assert.equal(empty.status,200);
+    const initial=await empty.json();assert.deepEqual(initial.builtins.map((t:{id:string})=>t.id),['blank','structured']);
+    const reusable={clinicalHistory:'Clinical context: reusable placeholder',comparison:'',technique:'',findings:'Reusable normal findings',impression:'Reusable impression'};
+    const createdResponse=await request('/workspace/templates',doctor,'POST',{name:'CT baseline',sections:reusable});assert.equal(createdResponse.status,201);
+    const created=await createdResponse.json();assert.deepEqual(created.sections,reusable);
+    const listed=await (await request('/workspace/templates')).json();assert.equal(listed.templates.length,1);assert.equal('sections' in listed.templates[0],false);
+    assert.equal((await request('/workspace/templates/'+created.id,other)).status,404);
+    assert.equal((await request('/workspace/templates/'+created.id,other,'PUT',{name:'Private edit',sections:reusable})).status,404);
+    assert.equal((await request('/workspace/templates/'+created.id,other,'DELETE')).status,404);
+    assert.equal((await request('/workspace/templates',doctor,'POST',{name:' ct BASELINE ',sections:reusable})).status,409);
+    assert.equal((await request('/workspace/templates',doctor,'POST',{name:'Patient data',patientId:'synthetic',sections:reusable})).status,400);
+    assert.equal((await request('/workspace/templates',doctor,'POST',{name:'Oversized',sections:{...reusable,findings:'x'.repeat(20_001)}})).status,400);
+    const reportResponse=await request('/workspace/studies/'+studies[150].orthancStudyId+'/reports',doctor,'POST',{mode:'independent',reportType:'primary',requestId:randomUUID(),templateId:created.id});assert.equal(reportResponse.status,201);
+    const templateReport=await reportResponse.json();assert.deepEqual(templateReport.sections,reusable);
+    const changed={...reusable,findings:'Updated reusable text'};
+    assert.equal((await request('/workspace/templates/'+created.id,doctor,'PUT',{name:'CT baseline revised',sections:changed})).status,200);
+    assert.deepEqual((await (await request('/reports/'+templateReport.id)).json()).sections,reusable,'Updating the template leaves its report snapshot unchanged');
+    assert.equal((await request('/workspace/studies/'+studies[151].orthancStudyId+'/reports',other,'POST',{mode:'independent',reportType:'primary',requestId:randomUUID(),templateId:created.id})).status,404);
+    assert.equal((await request('/workspace/templates/'+created.id,doctor,'DELETE')).status,204);
+    assert.deepEqual((await (await request('/reports/'+templateReport.id)).json()).sections,reusable,'Deleting the template leaves its report snapshot unchanged');
+
+    const priorPolicyRow=originalPolicy as Record<string,unknown>,legacyPolicy={...priorPolicyRow};delete legacyPolicy.reviewerDoctorRoles;
+    await pool.query("update system_settings set setting_value=$1 where category='doctor_workspace' and setting_key='reporting_policy'",[JSON.stringify(legacyPolicy)]);
+    const policyResponse=await request('/workspace/policies',manager);assert.equal(policyResponse.status,200);
+    const policyPayload=await policyResponse.json();assert.deepEqual(policyPayload.policy.reviewerDoctorRoles,['consultant','specialist']);
+    assert.deepEqual(policyPayload.reviewerRoleOptions,['consultant','specialist']);
+    assert.deepEqual(policyPayload.doctorRoleOptions,['consultant','specialist','senior_house_officer','resident']);
+    assert.deepEqual((await pool.query("select setting_value from system_settings where category='doctor_workspace' and setting_key='reporting_policy'")).rows[0].setting_value,legacyPolicy,'Reading an older policy does not rewrite the stored configuration');
+    await assert.rejects(()=>updateReportingPolicy(manager,{...policyPayload.policy,reviewerDoctorRoles:['resident']}),/Invalid reporting policy values/);
+
+    await updateReportingPolicy(manager,{...policyPayload.policy,review:'mandatory',mandatoryReviewRoles:['consultant'],reviewerDoctorRoles:['consultant'],reviewEligibility:'open',signing:'permission'});
+    const reviewDraftResponse=await request('/workspace/studies/'+studies[152].orthancStudyId+'/reports',doctor,'POST',{mode:'independent',reportType:'primary',requestId:randomUUID()});assert.equal(reviewDraftResponse.status,201);
+    let reviewDraft=await reviewDraftResponse.json();
+    const saved=await request('/reports/'+reviewDraft.id+'/draft',doctor,'PUT',{expectedRevision:reviewDraft.revision,sections:content});assert.equal(saved.status,200);reviewDraft=await saved.json();
+    const doctorProfile=Number((await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[doctor.userId])).rows[0].id);
+    const reviewersResponse=await request('/reports/'+reviewDraft.id+'/reviewers');assert.equal(reviewersResponse.status,200);
+    const reviewers=(await reviewersResponse.json()).reviewers as {id:number}[];
+    const noSignProfile=Number((await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[noSign.userId])).rows[0].id);
+    assert.equal(reviewers.some(r=>r.id===doctorProfile),false,'The author is excluded when independent review is mandatory');
+    assert.equal(reviewers.some(r=>r.id===noSignProfile),true,'Review eligibility does not depend on final-signing permission');
+    await pool.query("update doctor_portal.doctor_profiles set doctor_role='resident' where user_id=$1",[noSign.userId]);
+    assert.equal((await request('/reports/'+reviewDraft.id+'/review',doctor,'POST',{expectedRevision:reviewDraft.revision,action:'submit',preferredReviewerId:noSignProfile})).status,400,'A junior role cannot be designated as senior reviewer');
+    await pool.query("update doctor_portal.doctor_profiles set doctor_role='consultant' where user_id=$1",[noSign.userId]);
+    assert.equal((await request('/reports/'+reviewDraft.id+'/review',doctor,'POST',{expectedRevision:reviewDraft.revision,action:'submit',preferredReviewerId:doctorProfile})).status,400);
+    const submitted=await request('/reports/'+reviewDraft.id+'/review',doctor,'POST',{expectedRevision:reviewDraft.revision,action:'submit'});assert.equal(submitted.status,200);reviewDraft=await submitted.json();
+    assert.equal((await request('/reports/'+reviewDraft.id+'/review',doctor,'POST',{expectedRevision:reviewDraft.revision,action:'feedback',comment:'Self-review attempt'})).status,403);
+    const feedback=await request('/reports/'+reviewDraft.id+'/review',noSign,'POST',{expectedRevision:reviewDraft.revision,action:'feedback',comment:'Reviewed by authorized senior'});assert.equal(feedback.status,200);reviewDraft=await feedback.json();
+    await pool.query("update doctor_portal.doctor_profiles set doctor_role='resident' where user_id=$1",[noSign.userId]);
+    assert.equal((await request('/reports/'+reviewDraft.id+'/review',noSign,'POST',{expectedRevision:reviewDraft.revision,action:'feedback',comment:'Junior review attempt'})).status,403);
+    assert.equal((await request('/reports/'+reviewDraft.id+'/review',noSign,'POST',{expectedRevision:reviewDraft.revision,action:'return',comment:'Junior return attempt'})).status,403);
+    await pool.query("update doctor_portal.doctor_profiles set doctor_role='consultant' where user_id=$1",[noSign.userId]);
+    assert.equal((await request('/reports/'+reviewDraft.id+'/finalize',noSign,'POST',{expectedRevision:reviewDraft.revision,confirmed:true,requestId:randomUUID(),signerUserId:noSign.userId})).status,403,'Review permission does not grant final-signing permission');
+    const finalized=await request('/reports/'+reviewDraft.id+'/finalize',other,'POST',{expectedRevision:reviewDraft.revision,confirmed:true,requestId:randomUUID(),signerUserId:other.userId});assert.equal(finalized.status,200);
+  } finally {
+    await pool.query("update doctor_portal.doctor_profiles set doctor_role='consultant' where user_id=any($1::bigint[])",[[doctor.userId,other.userId,noSign.userId]]);
+    await pool.query("update system_settings set setting_value=$1 where category='doctor_workspace' and setting_key='reporting_policy'",[JSON.stringify(originalPolicy)]);
+    await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+  }
+});
 test('verified assigned examinations use authoritative study finality and credit the actual signer',async()=>{
   const {s,ct,booking}=await bookedStudy(13);
   const doctorId=(await pool.query('select id from doctor_portal.doctor_profiles where user_id=$1',[doctor.userId])).rows[0].id;

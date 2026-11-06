@@ -9,6 +9,8 @@ import { buildNativeReportHtml } from "../../services/generated-print-html-servi
 import { readInstitutionIdentity } from "../../services/institution-identity-service.js";
 import { resolveReportContext, getReport, createReport, saveDraft, finalizeReport, addAddendum, getReportHistory, uploadKeyImage, updateKeyImages, getKeyImage } from "./reporting-service.js";
 import { readReportingPolicy,updateReportingPolicy,REPORTING_PRESETS } from './reporting-policy.js';
+import { DOCTOR_ROLE_VALUES,SENIOR_REPORTING_DOCTOR_ROLE_VALUES } from '../doctor-portal/profile-repository.js';
+import { listWorkspaceTemplates,getWorkspaceTemplate,createWorkspaceTemplate,updateWorkspaceTemplate,deleteWorkspaceTemplate } from './reporting-templates.js';
 import { listWorkspaceStudies,archiveStatus,backfillWorkspaceExternalStatus } from './workspace-study-service.js';
 import { getDoctorReportingAppointments } from '../doctor-portal/cases-service.js';
 import { doctorDashboard,assignedWork } from './workspace-dashboard-service.js';
@@ -42,8 +44,13 @@ function id(req: Request) {
 const context = (req: Request) => String(req.get("X-RISpro-Viewer-Context") || "");
 function reportId(req:Request) {const n=Number(req.params.reportId);if(!Number.isSafeInteger(n)||n<1)throw new HttpError(400,'Invalid report identifier.');return n;}
 nativeReportingRouter.get('/workspace/config',asyncRoute(async(_req,res)=>{const p=await readReportingPolicy();res.json({enabled:p.enabled});}));
-nativeReportingRouter.get('/workspace/policies',requireSupervisor,asyncRoute(async(_req,res)=>res.json({policy:await readReportingPolicy(),presets:REPORTING_PRESETS})));
+nativeReportingRouter.get('/workspace/policies',requireSupervisor,asyncRoute(async(_req,res)=>res.json({policy:await readReportingPolicy(),presets:REPORTING_PRESETS,doctorRoleOptions:DOCTOR_ROLE_VALUES,reviewerRoleOptions:SENIOR_REPORTING_DOCTOR_ROLE_VALUES})));
 nativeReportingRouter.put('/workspace/policies',requireSupervisor,requireRecentSupervisorReauth,asyncRoute(async(req,res)=>res.json({policy:await updateReportingPolicy(actor(req),req.body)})));
+nativeReportingRouter.get('/workspace/templates',asyncRoute(async(req,res)=>res.json(await listWorkspaceTemplates(actor(req)))));
+nativeReportingRouter.post('/workspace/templates',asyncRoute(async(req,res)=>res.status(201).json(await createWorkspaceTemplate(actor(req),asUnknownRecord(req.body)))));
+nativeReportingRouter.get('/workspace/templates/:templateId',asyncRoute(async(req,res)=>res.json(await getWorkspaceTemplate(actor(req),req.params.templateId))));
+nativeReportingRouter.put('/workspace/templates/:templateId',asyncRoute(async(req,res)=>res.json(await updateWorkspaceTemplate(actor(req),req.params.templateId,asUnknownRecord(req.body)))));
+nativeReportingRouter.delete('/workspace/templates/:templateId',asyncRoute(async(req,res)=>{await deleteWorkspaceTemplate(actor(req),req.params.templateId);res.status(204).end();}));
 nativeReportingRouter.get('/workspace/studies',asyncRoute(async(req,res)=>res.json(await listWorkspaceStudies(actor(req),req.query))));
 nativeReportingRouter.post('/workspace/external-status/backfill',requireSupervisor,asyncRoute(async(req,res)=>res.json(await backfillWorkspaceExternalStatus(actor(req),asUnknownRecord(req.body)))));
 nativeReportingRouter.get('/workspace/appointments',asyncRoute(async(req,res)=>{

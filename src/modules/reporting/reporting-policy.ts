@@ -3,6 +3,7 @@ import { pool } from '../../db/pool.js';
 import { HttpError } from '../../utils/http-error.js';
 import { logAuditEntry } from '../../services/audit-service.js';
 import type { Actor } from '../doctor-portal/reporting-board-service.js';
+import { DOCTOR_ROLE_VALUES, SENIOR_REPORTING_DOCTOR_ROLE_VALUES, type DoctorRole } from '../doctor-portal/profile-repository.js';
 
 export const REPORT_TYPES = ['primary','second_opinion','additional_interpretation','peer_review'] as const;
 export interface ReportingPolicy {
@@ -10,6 +11,7 @@ export interface ReportingPolicy {
   creation: 'assigned'|'assigned_permission'|'accessible';
   collaboration: 'independent'|'shared'|'both';
   review: 'none'|'optional'|'mandatory'; mandatoryReviewRoles: string[];
+  reviewerDoctorRoles: DoctorRole[];
   reviewEligibility: 'authorized'|'designated'|'open';
   signing: 'permission'|'qualified'|'review';
   additional: 'typed'|'unrestricted'|'addenda'; allowedTypes: string[];
@@ -17,7 +19,7 @@ export interface ReportingPolicy {
 }
 export const DEFAULT_REPORTING_POLICY: ReportingPolicy = {
   enabled:false,version:1,creation:'accessible',collaboration:'both',review:'optional',
-  mandatoryReviewRoles:['resident','senior_house_officer'],reviewEligibility:'open',signing:'permission',
+  mandatoryReviewRoles:['resident','senior_house_officer'],reviewerDoctorRoles:[...SENIOR_REPORTING_DOCTOR_ROLE_VALUES],reviewEligibility:'open',signing:'permission',
   additional:'typed',allowedTypes:[...REPORT_TYPES],deletion:'creator',restoreRevisions:true,
 };
 export const REPORTING_PRESETS = {
@@ -28,11 +30,15 @@ export const REPORTING_PRESETS = {
 export function validateReportingPolicy(input: unknown): ReportingPolicy {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400,'Invalid reporting policy.');
   const p = input as ReportingPolicy;
+  // Existing saved settings predate reviewerDoctorRoles. Normalize them without
+  // rewriting or otherwise changing the persisted institutional policy.
+  const reviewerDoctorRoles = (p as Partial<ReportingPolicy>).reviewerDoctorRoles ?? [...SENIOR_REPORTING_DOCTOR_ROLE_VALUES];
   const options = {creation:['assigned','assigned_permission','accessible'],collaboration:['independent','shared','both'],review:['none','optional','mandatory'],reviewEligibility:['authorized','designated','open'],signing:['permission','qualified','review'],additional:['typed','unrestricted','addenda'],deletion:['creator','supervisor','disabled']};
   for (const [key,values] of Object.entries(options)) if (!values.includes(String(p[key as keyof ReportingPolicy]))) throw new HttpError(400,`Invalid policy option: ${key}.`);
   if (!Number.isSafeInteger(p.version)||p.version<1||typeof p.enabled!=='boolean' || typeof p.restoreRevisions!=='boolean' || !Array.isArray(p.allowedTypes) || !p.allowedTypes.length || p.allowedTypes.some(t=>!REPORT_TYPES.includes(t as typeof REPORT_TYPES[number]))
-    || !Array.isArray(p.mandatoryReviewRoles) || p.mandatoryReviewRoles.some(r=>!['consultant','specialist','resident','senior_house_officer'].includes(r))) throw new HttpError(400,'Invalid reporting policy values.');
-  return {enabled:p.enabled,version:Number(p.version),creation:p.creation,collaboration:p.collaboration,review:p.review,mandatoryReviewRoles:[...new Set(p.mandatoryReviewRoles)],reviewEligibility:p.reviewEligibility,signing:p.signing,additional:p.additional,allowedTypes:[...new Set(p.allowedTypes)],deletion:p.deletion,restoreRevisions:p.restoreRevisions};
+    || !Array.isArray(p.mandatoryReviewRoles) || p.mandatoryReviewRoles.some(r=>!DOCTOR_ROLE_VALUES.includes(r as DoctorRole))
+    || !Array.isArray(reviewerDoctorRoles) || !reviewerDoctorRoles.length || reviewerDoctorRoles.some(r=>!SENIOR_REPORTING_DOCTOR_ROLE_VALUES.includes(r as typeof SENIOR_REPORTING_DOCTOR_ROLE_VALUES[number]))) throw new HttpError(400,'Invalid reporting policy values.');
+  return {enabled:p.enabled,version:Number(p.version),creation:p.creation,collaboration:p.collaboration,review:p.review,mandatoryReviewRoles:[...new Set(p.mandatoryReviewRoles)],reviewerDoctorRoles:[...new Set(reviewerDoctorRoles)],reviewEligibility:p.reviewEligibility,signing:p.signing,additional:p.additional,allowedTypes:[...new Set(p.allowedTypes)],deletion:p.deletion,restoreRevisions:p.restoreRevisions};
 }
 export async function readReportingPolicy(db: Pick<PoolClient,'query'> = pool, lock:boolean|'share'=false): Promise<ReportingPolicy> {
   const row=(await db.query("select setting_value from system_settings where category='doctor_workspace' and setting_key='reporting_policy'"+(lock==='share'?' for share':lock?' for update':''))).rows[0];

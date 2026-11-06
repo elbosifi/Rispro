@@ -2,11 +2,15 @@ import {api} from './api-client';
 import type {QueryClient} from '@tanstack/react-query';
 export type ReportSections=Record<'clinicalHistory'|'comparison'|'technique'|'findings'|'impression',string>;
 export const REPORT_FIELDS:Record<keyof ReportSections,string>={clinicalHistory:'Clinical History',comparison:'Comparison',technique:'Technique',findings:'Findings',impression:'Impression'};
+export type ReportingDoctorRole='consultant'|'specialist'|'senior_house_officer'|'resident';
 export interface ReportingPolicy {
   enabled:boolean;version:number;creation:'assigned'|'assigned_permission'|'accessible';collaboration:'independent'|'shared'|'both';
-  review:'none'|'optional'|'mandatory';mandatoryReviewRoles:string[];reviewEligibility:'authorized'|'designated'|'open';
+  review:'none'|'optional'|'mandatory';mandatoryReviewRoles:ReportingDoctorRole[];reviewerDoctorRoles:('consultant'|'specialist')[];reviewEligibility:'authorized'|'designated'|'open';
   signing:'permission'|'qualified'|'review';additional:'typed'|'unrestricted'|'addenda';allowedTypes:string[];deletion:'creator'|'supervisor'|'disabled';restoreRevisions:boolean;
 }
+export interface ReportingTemplate {id:number;name:string;sections:ReportSections;createdAt:string;updatedAt:string}
+export interface ReportingTemplateList {builtins:{id:'blank'|'structured';name:string}[];templates:{id:number;name:string;createdAt:string;updatedAt:string}[]}
+export type ReportingTemplateInput={name:string;sections:ReportSections};
 export interface ReportIdentity {patientName:string;patientIdentifier:string;accession:string;examination:string;studyDate:string}
 export interface WorkspaceReport {
   id:number;appointmentId:number|null;studyKey:string;revision:number;status:'draft'|'in_review'|'final';sections:ReportSections;identity:ReportIdentity;
@@ -81,8 +85,14 @@ export function refreshReportingQueries(client:QueryClient,report:WorkspaceRepor
   }});
 }
 export const workspaceBase='/native-reporting/workspace';
+export const reportingTemplatesBase=workspaceBase+'/templates';
 export const reportBase=(id:number|string)=>'/native-reporting/reports/'+id;
 export const post=<T>(path:string,body:unknown)=>api<T>(path,{method:'POST',body:JSON.stringify(body)});
+export const listReportingTemplates=()=>api<ReportingTemplateList>(reportingTemplatesBase);
+export const getReportingTemplate=(id:number)=>api<ReportingTemplate>(reportingTemplatesBase+'/'+id);
+export const createReportingTemplate=(input:ReportingTemplateInput)=>post<ReportingTemplate>(reportingTemplatesBase,input);
+export const updateReportingTemplate=(id:number,input:ReportingTemplateInput)=>api<ReportingTemplate>(reportingTemplatesBase+'/'+id,{method:'PUT',body:JSON.stringify(input)});
+export const deleteReportingTemplate=(id:number)=>api<void>(reportingTemplatesBase+'/'+id,{method:'DELETE'});
 export const reportTypes:Record<string,string>={primary:'Primary Interpretation',second_opinion:'Second Opinion',additional_interpretation:'Additional Interpretation',peer_review:'Peer Review'};
 export function requestId() {const b=crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;}
 export function reportingReturn(value:string|null) {return value&&/^\/doctor\/(reporting|my-work)(\?|$)/.test(value)?value:'/doctor/reporting';}

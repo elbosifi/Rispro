@@ -9,7 +9,7 @@ import { EMPTY_SECTIONS,sections,revision,uuid } from './reporting-validation.js
 import { transaction,response,history,audit,images,type ReportRow,type ReportResponseCache } from './reporting-service.js';
 import { reportingDoctor,requireStudy,supervisor,verifyLiveStudy,verifyExternalOwnership,archiveStatus,modality } from './workspace-study-service.js';
 import {readReportingPolicy} from './reporting-policy.js';
-import {templateSections} from './reporting-templates.js';
+import {personalTemplateSections,templateSections} from './reporting-templates.js';
 
 type Access=Awaited<ReturnType<typeof requireStudy>>;
 interface StudyRecord {id:string;primary_report_id:string|null;orthanc_study_id:string;source_archive_key:string;study_instance_uid:string;modalities:string[];identity:ReportRow['identity']}
@@ -40,7 +40,12 @@ export async function workspaceStudyRegistry(db:PoolClient,a:Access,adoptLegacy=
   return record;
 }
 const registry=workspaceStudyRegistry;
+function independentReviewRequired(a:Access,report:ReportRow) {
+  return a.policy.signing==='review'||a.policy.review==='mandatory'&&a.policy.mandatoryReviewRoles.includes(report.author_doctor_role||a.me.doctorRole||'');
+}
 function canReview(a:Access,report:ReportRow) {
+  if(!a.me.doctorRole||!a.policy.reviewerDoctorRoles.includes(a.me.doctorRole))return false;
+  if(independentReviewRequired(a,report)&&(Number(report.author_user_id)===Number(a.me.profile!.userId)||Number(report.review_requested_by)===Number(a.me.profile!.userId)))return false;
   return a.policy.reviewEligibility!=='designated' || supervisor(a.me) || Number(report.preferred_reviewer_id)===Number(a.me.profile!.id);
 }
 export function canEditWorkspaceReport(a:Access,report:ReportRow) {
@@ -60,7 +65,7 @@ export function workspaceSigningReasons(a:Access,report:ReportRow):string[] {
   // A signed addendum corrects an immutable final; draft review transitions cannot
   // be applied retroactively to that already completed signature.
   if(report.status==='final')return reasons;
-  const reviewRequired=a.policy.signing==='review'||a.policy.review==='mandatory'&&a.policy.mandatoryReviewRoles.includes(report.author_doctor_role||a.me.doctorRole||'');
+  const reviewRequired=independentReviewRequired(a,report);
   if(reviewRequired&&!report.review_requested_at) reasons.push('An independent review must be requested before signing under the current reporting policy.');
   else if(reviewRequired&&Number(report.review_requested_by)===Number(a.me.profile!.userId)) reasons.push('An independent reviewer must sign this report; the review requester cannot sign it.');
   if(report.review_requested_at&&!canReview(a,report)) reasons.push('Only the designated reviewer or a reporting supervisor can sign this submitted report.');
@@ -131,7 +136,7 @@ export async function createWorkspaceReport(actor:Actor,key:string,body:Record<s
     const report=(await db.query<ReportRow>(`insert into native_reports(appointment_id,patient_id,primary_study_uid,imaging_source,identity,sections,author_user_id,author_name,legacy_primary,report_type,collaboration_mode,is_primary,policy_version)
       values($1,$2,$3,$4,$5,$6,$7,$8,not exists(select 1 from native_reports where appointment_id=$1 and legacy_primary and deleted_at is null),$9,$10,false,$11) returning *`,
     [current.appointment?.id??null,current.appointment?.patient_id??null,current.study.study_instance_uid,
-      JSON.stringify({accessStrategy:'authoritative_orthanc',sourcePacsNodeId:null,archiveKey:current.freshness.archiveKey}),JSON.stringify(current.identity),JSON.stringify(templateSections(body.template)),actor.userId,current.me.profile!.displayName,type,mode,current.policy.version])).rows[0];
+      JSON.stringify({accessStrategy:'authoritative_orthanc',sourcePacsNodeId:null,archiveKey:current.freshness.archiveKey}),JSON.stringify(current.identity),JSON.stringify(body.templateId==null?templateSections(body.template):await personalTemplateSections(db,Number(current.me.profile!.userId),body.templateId)),actor.userId,current.me.profile!.displayName,type,mode,current.policy.version])).rows[0];
     await db.query('insert into native_report_study_links(report_id,study_id) values($1,$2)',[report.id,record.id]);
     await db.query('insert into native_report_contributors(report_id,user_id,display_name) values($1,$2,$3)',[report.id,actor.userId,current.me.profile!.displayName]);
     await history(db,report,actor,current.me.profile!.displayName,'draft',requestId);
@@ -233,9 +238,10 @@ export async function reviewWorkspaceReport(actor:Actor,id:number,body:Record<st
     const preferred=body.preferredReviewerId==null?null:Number(body.preferredReviewerId);
     if(preferred!==null&&(!Number.isSafeInteger(preferred)||preferred<1))throw new HttpError(400,'Invalid preferred reviewer.');
     if(preferred!==null) {
-      const reviewer=(await db.query(`select d.id from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where d.id=$1 and d.active and u.is_active and u.role in ('doctor','supervisor','super_admin')
-        and not exists(select 1 from unnest($2::text[]) as diagnostic(code) where diagnostic.code not in ('SR','PR','SEG','KO','DOC') and not exists(select 1 from doctor_portal.doctor_modality_permissions p join modalities m on m.id=p.modality_id where p.doctor_id=d.id and p.active and p.can_report and m.code=(case when diagnostic.code='MRI' then 'MR' else diagnostic.code end)))`,[preferred,a.study.modalities_in_study])).rows[0];
-      if(!reviewer) throw new HttpError(400,'Preferred reviewer must be an active qualified reporting doctor.');
+      const reviewer=(await db.query(`select d.id,d.user_id from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where d.id=$1 and d.active and u.is_active and u.role in ('doctor','supervisor','super_admin') and d.doctor_role=any($3::text[])
+        and not exists(select 1 from unnest($2::text[]) as diagnostic(code) where diagnostic.code not in ('SR','PR','SEG','KO','DOC') and not exists(select 1 from doctor_portal.doctor_modality_permissions p join modalities m on m.id=p.modality_id where p.doctor_id=d.id and p.active and p.can_report and m.code=(case when diagnostic.code='MRI' then 'MR' else diagnostic.code end)))`,[preferred,a.study.modalities_in_study,a.policy.reviewerDoctorRoles])).rows[0];
+      if(!reviewer) throw new HttpError(400,'Preferred reviewer must be an active senior reporting doctor authorized for this study.');
+      if(independentReviewRequired(a,report)&&(Number(reviewer.user_id)===Number(report.author_user_id)||Number(reviewer.user_id)===Number(actor.userId)))throw new HttpError(400,'Independent review requires a reviewer other than the report author and requester.');
     }
     await db.query('insert into native_report_review_events(report_id,event_type,actor_user_id,actor_name,comment,preferred_reviewer_id) values($1,$2,$3,$4,$5,$6)',[id,action,actor.userId,a.me.profile!.displayName,comment,preferred]);
     const saved=(await db.query<ReportRow>(`update native_reports set revision=revision+1,updated_at=now(),
@@ -273,9 +279,21 @@ export async function workspaceHistory(actor:Actor,id:number) {
 }
 export async function workspaceReviewers(actor:Actor,id:number) {
   const report=await getWorkspaceReport(actor,id);
-  const study=(await pool.query('select s.modalities from native_reporting_studies s join native_report_study_links l on l.study_id=s.id where l.report_id=$1',[report.id])).rows[0];
-  return (await pool.query(`select d.id,d.display_name as name from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where d.active and u.is_active and u.role in ('doctor','supervisor','super_admin')
-    and not exists(select 1 from unnest($1::text[]) as diagnostic(code) where diagnostic.code not in ('SR','PR','SEG','KO','DOC') and not exists(select 1 from doctor_portal.doctor_modality_permissions p join modalities m on m.id=p.modality_id where p.doctor_id=d.id and p.active and p.can_report and m.code=(case when diagnostic.code='MRI' then 'MR' else diagnostic.code end))) order by d.display_name,d.id`,[study.modalities])).rows;
+  const [study,source,policy]=await Promise.all([
+    pool.query('select s.modalities from native_reporting_studies s join native_report_study_links l on l.study_id=s.id where l.report_id=$1',[report.id]),
+    pool.query(`select n.author_user_id,n.review_requested_by,p.doctor_role as author_doctor_role from native_reports n left join doctor_portal.doctor_profiles p on p.user_id=n.author_user_id where n.id=$1`,[report.id]),
+    readReportingPolicy(),
+  ]);
+  const modalities=study.rows[0]?.modalities;
+  if(!modalities)throw new HttpError(404,'Report study association not found.');
+  const sourceReport=source.rows[0];
+  const independentRequired=policy.signing==='review'||policy.review==='mandatory'&&policy.mandatoryReviewRoles.includes(sourceReport.author_doctor_role||'');
+  const excludedUserIds=independentRequired?[sourceReport.author_user_id,sourceReport.review_requested_by].filter((value):value is string=>value!=null):[];
+  const designatedReviewerId=policy.reviewEligibility==='designated'&&report.preferredReviewerId?report.preferredReviewerId:null;
+  const rows=(await pool.query<{id:string|number;name:string}>(`select d.id,d.display_name as name from doctor_portal.doctor_profiles d join users u on u.id=d.user_id where d.active and u.is_active and u.role in ('doctor','supervisor','super_admin') and d.doctor_role=any($2::text[])
+    and not(d.user_id=any($3::bigint[])) and ($4::bigint is null or d.id=$4)
+    and not exists(select 1 from unnest($1::text[]) as diagnostic(code) where diagnostic.code not in ('SR','PR','SEG','KO','DOC') and not exists(select 1 from doctor_portal.doctor_modality_permissions p join modalities m on m.id=p.modality_id where p.doctor_id=d.id and p.active and p.can_report and m.code=(case when diagnostic.code='MRI' then 'MR' else diagnostic.code end))) order by d.display_name,d.id`,[modalities,policy.reviewerDoctorRoles,excludedUserIds,designatedReviewerId])).rows;
+  return rows.map(row=>({...row,id:Number(row.id)}));
 }
 export async function restoreWorkspaceRevision(actor:Actor,id:number,body:Record<string,unknown>) {
   return withWorkspaceReport(actor,id,body.expectedRevision,async(db,report,a,study)=>{

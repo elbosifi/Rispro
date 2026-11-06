@@ -2,7 +2,9 @@ import { pool } from "../../db/pool.js";
 import type { PoolClient } from "pg";
 import type { UserId } from "../../types/http.js";
 
-export type DoctorRole = "consultant" | "specialist" | "senior_house_officer" | "resident";
+export const DOCTOR_ROLE_VALUES = ["consultant", "specialist", "senior_house_officer", "resident"] as const;
+export type DoctorRole = typeof DOCTOR_ROLE_VALUES[number];
+export const SENIOR_REPORTING_DOCTOR_ROLE_VALUES = ["consultant", "specialist"] as const satisfies readonly DoctorRole[];
 
 export interface DoctorProfileRow {
   id: number;
