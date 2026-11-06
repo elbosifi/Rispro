@@ -12,11 +12,11 @@ export type DiagnosisClinicalDetails =
 export type Clinical = { history: string; examination: string; imaging: string; assessment: string; priorTreatment: string; diagnosisDetails: string; priorTreatmentUnavailable: boolean; structuredDetails?: DiagnosisClinicalDetails };
 export type AppointmentLink = { bookingId: number; confirmed: boolean; postponed: boolean };
 export type ReferralInfo = { details: string; administrativeNotes: string; source: string; referringPhysician: string };
-export type PatientIdentityCorrectionRequest = { id: number; episodeId: number; patientId: number; requestedFields: Record<string, string>; reason: string; status: 'pending' | 'approved' | 'rejected'; requestedBy: string; createdAt: string; decidedBy?: string | null; decisionReason?: string | null; decidedAt?: string | null };
+export type PatientIdentityCorrectionRequest = { id: number; episodeId: number; patientId: number; requestedFields: Record<string, string>; reason: string; status: 'pending' | 'approved' | 'rejected'; requestedBy: string; createdAt: string; decidedBy?: string | null; decisionReason?: string | null; decidedAt?: string | null; patientUpdateCompletedAt?: string | null; patientUpdateCompletedBy?: string | null };
 export type PostClosureCorrection = { id: number; kind: 'clinical_addendum' | 'administrative_correction'; affectedRecord: string; reason: string; previousContent: unknown; correctedContent: unknown; author: string; createdAt: string };
 export type ReadinessItem = { id: number; episodeId: number; itemKey: string; label: string; required: boolean; status: 'pending' | 'in_progress' | 'completed'; responsibleUserId: number | null; responsibleName: string | null; dueDate: string | null; priority: 'low' | 'normal' | 'high' | 'urgent'; notes: string; completedAt: string | null; completedBy: string | null };
 export type PatientCommunication = { id: number; episodeId: number; kind: 'telephone_attempt' | 'successful_contact' | 'appointment_confirmed' | 'unreachable' | 'postponement_requested' | 'treatment_declined' | 'followup_reminder'; outcome: string; notes: string; nextAction: string | null; nextActionDate: string | null; createdBy: string; createdAt: string };
-export type OperationsTask = { episodeId: number; episodeRevision: number; ownerUserId?: number | null; patientName: string; patientArabicName?: string | null; patientEnglishName?: string | null; mrn: string; taskKey: string; task: string; owner: string | null; dueDate: string | null; priority: 'low' | 'normal' | 'high' | 'urgent'; status: string; bookingId?: number | null; appointmentDate?: string | null; appointmentTime?: string | null; ready?: boolean; nextAction?: string };
+export type OperationsTask = { episodeId: number; episodeRevision: number; ownerUserId?: number | null; patientName: string; patientArabicName?: string | null; patientEnglishName?: string | null; mrn: string; taskKey: string; task: string; owner: string | null; dueDate: string | null; priority: 'low' | 'normal' | 'high' | 'urgent'; status: string; assignmentStatus?: 'open' | 'in_progress' | 'resolved' | 'cancelled'; bookingId?: number | null; appointmentDate?: string | null; appointmentTime?: string | null; ready?: boolean; nextAction?: string };
 export type Preparation = { consent: boolean; imaging: boolean; clinicalReady: boolean; notes: string; instructions: string; actions: string; ready: boolean };
 export type Treatment = { date: string; immobilization: 'frame' | 'mask'; fractions: number; team: string[]; completed: boolean; reportId: number | null; finalized: boolean };
 export type Mdt = { decision: 'approved' | 'additional_information' | 'deferred' | 'not_suitable'; consultants: string[]; assessment: string; notes: string; investigations: string; assessmentRevision: number };
@@ -32,6 +32,8 @@ export type EpisodeData = {
   clinical?: Clinical; assessmentStatus?: 'draft' | 'provisional' | 'finalized'; assessmentRevision?: number;
   mdt?: Mdt; preparation?: Preparation; treatment?: Treatment; followups?: Followup[];
   treatmentAppointment?: AppointmentLink; followupAppointment?: AppointmentLink;
+  nextFollowupDate?: string | null;
+  appointmentReconciliation?: Array<{ purpose: 'treatment' | 'followup'; bookingId: number; status: 'required' | 'resolved'; reason: string }>;
   checklist?: string[]; investigationsPending?: boolean; postponementReason?: string; closureReason?: string;
   legacyTreatmentSummarized?: boolean;
 };

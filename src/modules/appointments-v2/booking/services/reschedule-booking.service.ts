@@ -179,7 +179,8 @@ export async function rescheduleBooking(
   doctorProtocolReportUpdateAuthorized: boolean = false,
   doctorProtocolExamTypeUpdateAuthorized: boolean = false,
   directedDoctorOverbookingApprovalAuthorized: boolean = false,
-  transactionalAfterReschedule?: (client: PoolClient, result: RescheduleBookingResult) => Promise<void>
+  transactionalAfterReschedule?: (client: PoolClient, result: RescheduleBookingResult) => Promise<void>,
+  expectedUpdatedAt?: string
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
     const rescheduled = await rescheduleBookingInternal(
@@ -204,7 +205,8 @@ export async function rescheduleBooking(
       approvedOverrideContext,
       doctorProtocolReportUpdateAuthorized,
       doctorProtocolExamTypeUpdateAuthorized,
-      directedDoctorOverbookingApprovalAuthorized
+      directedDoctorOverbookingApprovalAuthorized,
+      expectedUpdatedAt
     );
     await transactionalAfterReschedule?.(client, rescheduled);
     return rescheduled;
@@ -252,12 +254,17 @@ export async function rescheduleBookingInternal(
   approvedOverrideContext?: AuthorizedOverrideContext,
   doctorProtocolReportUpdateAuthorized: boolean = false,
   doctorProtocolExamTypeUpdateAuthorized: boolean = false,
-  directedDoctorOverbookingApprovalAuthorized: boolean = false
+  directedDoctorOverbookingApprovalAuthorized: boolean = false,
+  expectedUpdatedAt?: string
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
   const booking = await findBookingByIdForUpdate(client, bookingId);
   if (!booking) {
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
+  }
+  if (expectedUpdatedAt) {
+    const version = await client.query<{ updated_at: string }>('select updated_at::text from appointments_v2.bookings where id=$1', [bookingId]);
+    if (version.rows[0]?.updated_at !== expectedUpdatedAt) throw new SchedulingError(409, 'The RISpro appointment changed while this action was open. Reload the episode and review it again.', ['stale_booking_revision']);
   }
   const isDoctorProtocolReportOnlyUpdate =
     doctorProtocolReportUpdateAuthorized === true &&

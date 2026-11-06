@@ -84,6 +84,7 @@ describe('module admission on createApp real routing, sessions and services', { 
     if (bookingId) await pool.query('delete from appointments_v2.bookings where id=$1',[bookingId]);
     if (episodeId) {
       await pool.query('delete from gamma_knife_documents where episode_id=$1',[episodeId]);
+      await pool.query('delete from gamma_knife_readiness_items where episode_id=$1',[episodeId]);
       await pool.query('delete from gamma_knife_history where episode_id=$1',[episodeId]);
       await pool.query('delete from gamma_knife_episodes where id=$1',[episodeId]);
     }
@@ -101,6 +102,19 @@ describe('module admission on createApp real routing, sessions and services', { 
     await pool.query('delete from users where id=any($1::bigint[])',[ids]);
     if (fixture) await cleanupTestData(prefix);
     await pool.end();
+  });
+
+  it('keeps Reporting Board, mobile summary, and public appointment API boundaries correctly classified', async () => {
+    const coreOnly = await resolveModuleAccess(accounts.get('reception')!.id);
+    const doctorAndGammaKnife = await resolveModuleAccess(accounts.get('radio_gk')!.id);
+    assert.equal(requiredModulesForApi('GET','/reporting/saved-views/public',coreOnly),'shared');
+    assert.equal(requiredModulesForApi('POST','/reporting/saved-views/public',coreOnly),'shared');
+    assert.equal(requiredModulesForApi('GET','/mobile/operations-summary',coreOnly),'shared');
+    assert.equal(requiredModulesForApi('POST','/public/appointments/123/cancel',coreOnly),'shared');
+    assert.deepEqual(requiredModulesForApi('GET','/doctor/reporting-board',coreOnly),['doctor']);
+    assert.equal(coreOnly.modules.some(module => module.id === 'doctor' && module.effective),false);
+    assert.deepEqual(requiredModulesForApi('GET','/doctor/reporting-board',doctorAndGammaKnife),['doctor']);
+    assert.equal(doctorAndGammaKnife.modules.some(module => module.id === 'doctor' && module.effective),true);
   });
 
   for (const name of ['neurosurgeon','reception','radiologist','coordinator','radio_gk','learner','multiple']) {

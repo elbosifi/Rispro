@@ -10,7 +10,9 @@ import { uploadDocument, getDocumentById, readDocumentContent, type DocumentUplo
 import { getPatientById, updatePatientContactDetails } from '../../services/patient-service.js';
 import { isPatientIdentityVerificationRequired, maskPatientIdentifier, resolvePatientIdentityRisk, resolvePatientIdentityVerificationMode, verifyPatientIdentityEvidence } from '../../services/patient-selection-safety-service.js';
 import { createBooking } from '../appointments-v2/booking/services/create-booking.service.js';
+import { cancelBooking } from '../appointments-v2/booking/services/cancel-booking.service.js';
 import { rescheduleBooking } from '../appointments-v2/booking/services/reschedule-booking.service.js';
+import { SchedulingError } from '../appointments-v2/shared/errors/scheduling-error.js';
 import type { CreateBookingPayload } from '../appointments-v2/booking/models/booking.js';
 import type { AuthenticatedUserContext } from '../../types/http.js';
 import { CATEGORIES, PERMISSIONS, STATUS_LABELS, nextAction, type Config, type Episode, type EpisodeDocument, type Investigation, type OperationsTask, type PatientCommunication, type Permission, type ReadinessItem, type Reassessment, type Followup, type Treatment, type TreatmentCourse, type TreatmentFraction } from './gamma-knife-types.js';
@@ -22,10 +24,10 @@ export type Actor = AuthenticatedUserContext;
 const SELECT = `select e.id, e.patient_id as "patientId", e.diagnosis, e.diagnosis_category as "diagnosisCategory", e.status, e.active,
   e.closure_classification as "closureClassification",e.replacement_episode_id as "replacementEpisodeId",e.revision,e.data,
   coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName", p.arabic_full_name as "patientArabicName", p.english_full_name as "patientEnglishName", p.mrn, e.updated_at as "updatedAt", (e.qr_hash is not null) as "qrActive",
-  (select b.booking_date::text from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint
+  coalesce((select b.booking_date::text from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint
     and b.patient_id=e.patient_id and b.status='scheduled' and b.voided_at is null
     and not exists(select 1 from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v where (v->>'date')::date >= b.booking_date)
-  ) as "followupDate"
+  ), e.data->>'nextFollowupDate') as "followupDate"
   from gamma_knife_episodes e join patients p on p.id=e.patient_id`;
 function episodeRow(row: Episode): Episode { return { ...row, id: Number(row.id), patientId: Number(row.patientId), replacementEpisodeId: row.replacementEpisodeId == null ? null : Number(row.replacementEpisodeId) }; }
 export function tokenHash(token: string): string { return createHash('sha256').update(token).digest('hex'); }
@@ -231,14 +233,142 @@ async function hasSignificantEpisodeEvidence(client: PoolClient, episode: Episod
   return evidence.rows.length > 0;
 }
 
+type AppointmentPurpose = 'treatment' | 'followup';
+const appointmentLinkKey: Record<AppointmentPurpose, 'treatmentAppointment' | 'followupAppointment'> = {
+  treatment: 'treatmentAppointment', followup: 'followupAppointment',
+};
+
+/** Cancel linked Appointments V2 bookings through its policy service, recording a visible task when policy or privilege prevents cancellation. */
+async function reconcileEpisodeAppointments(
+  actor: Actor,
+  episodeId: unknown,
+  expectedRevision: number,
+  purposes: AppointmentPurpose[],
+  reason: string,
+  validate: (client: PoolClient, episode: Episode) => Promise<void>,
+) {
+  const links = await transaction(async client => {
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, expectedRevision);
+    await validate(client, episode);
+    return purposes.flatMap(purpose => {
+      const link = episode.data[appointmentLinkKey[purpose]];
+      return link ? [{ purpose, bookingId: Number(link.bookingId) }] : [];
+    });
+  });
+  let revision = expectedRevision;
+  const pending: Array<{ purpose: AppointmentPurpose; bookingId: number; reason: string }> = [];
+  const canCancel = (await permissions(actor)).includes('scheduling');
+  for (const link of links) {
+    const active = await pool.query<{ status: string; patient_id: number; updated_at: string }>("select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1 and status in ('scheduled','arrived','waiting') and voided_at is null", [link.bookingId]);
+    if (!active.rows.length) continue;
+    const linkedEpisode = await findEpisode(episodeId);
+    if (Number(active.rows[0]!.patient_id) !== linkedEpisode.patientId) {
+      pending.push({ ...link, reason: 'The linked RISpro appointment belongs to a different patient and requires authorized review.' });
+      continue;
+    }
+    if (!canCancel) {
+      pending.push({ ...link, reason: 'The assigned user cannot cancel this RISpro appointment.' });
+      continue;
+    }
+    try {
+      await cancelBooking(link.bookingId, Number(actor.sub), async (client, cancelled) => {
+        await authorize(actor, 'scheduling', client);
+        const current = await findEpisode(episodeId, client, true);
+        checkEpisodeRevision(current, revision);
+        await validate(client, current);
+        const key = appointmentLinkKey[link.purpose];
+        if (Number(current.data[key]?.bookingId) !== link.bookingId) throw new HttpError(409, 'The linked appointment changed. Reload the episode before continuing.');
+        current.data[key] = { ...current.data[key]!, confirmed: false, postponed: true };
+        current.data.appointmentReconciliation = (current.data.appointmentReconciliation ?? []).map(item => item.bookingId === link.bookingId ? { ...item, status: 'resolved' as const } : item);
+        await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [current.id, `appointment_reconciliation:${link.bookingId}`, actor.sub]);
+        await episodeWorkflowHistory(client, current, actor, 'linked_appointment_cancelled', reason, { purpose: link.purpose, bookingId: link.bookingId, previousBookingStatus: cancelled.previousStatus });
+        revision = current.revision;
+      }, active.rows[0]!.updated_at);
+    } catch (error) {
+      if (!(error instanceof SchedulingError)) throw error;
+      const state = await transaction(async client => {
+        const current = await findEpisode(episodeId, client, true);
+        checkEpisodeRevision(current, revision);
+        await validate(client, current);
+        const status = await client.query<{ status: string }>('select status from appointments_v2.bookings where id=$1 for share', [link.bookingId]);
+        if (!status.rows.length || !['scheduled','arrived','waiting'].includes(status.rows[0].status)) {
+          current.data[appointmentLinkKey[link.purpose]] = { ...current.data[appointmentLinkKey[link.purpose]]!, confirmed: false, postponed: true };
+          current.data.appointmentReconciliation = (current.data.appointmentReconciliation ?? []).map(item => item.bookingId === link.bookingId ? { ...item, status: 'resolved' as const } : item);
+          await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [current.id, `appointment_reconciliation:${link.bookingId}`, actor.sub]);
+          await episodeWorkflowHistory(client, current, actor, 'linked_appointment_reconciled', reason, { purpose: link.purpose, bookingId: link.bookingId, bookingStatus: status.rows[0]?.status ?? 'missing' });
+          return { revision: current.revision, pending: false };
+        }
+        return { revision: current.revision, pending: true };
+      });
+      revision = state.revision;
+      if (state.pending) pending.push({ ...link, reason: error.message });
+    }
+  }
+  return { revision, pending };
+}
+
+async function recordAppointmentReconciliation(client: PoolClient, episode: Episode, actor: Actor, pending: Array<{ purpose: AppointmentPurpose; bookingId: number; reason: string }>) {
+  for (const item of pending) {
+    const previous = episode.data.appointmentReconciliation?.find(value => value.bookingId === item.bookingId);
+    if (previous?.status === 'required') continue;
+    episode.data.appointmentReconciliation = [...(episode.data.appointmentReconciliation ?? []).filter(value => value.bookingId !== item.bookingId), { purpose: item.purpose, bookingId: item.bookingId, status: 'required', reason: item.reason }];
+    await client.query(`insert into gamma_knife_operation_task_assignments(episode_id,task_key,owner_user_id,due_date,priority,updated_by_user_id,status)
+      values($1,$2,null,null,'urgent',$3,'open') on conflict(episode_id,task_key) do update set status='open',priority='urgent',updated_by_user_id=excluded.updated_by_user_id,updated_at=now()`, [episode.id, `appointment_reconciliation:${item.bookingId}`, actor.sub]);
+  }
+}
+
+async function resolveAppointmentReconciliation(client: PoolClient, episode: Episode, actor: Actor, purpose: AppointmentPurpose, bookingId: number, reason: string, bookingStatus: string) {
+  const key = appointmentLinkKey[purpose];
+  if (Number(episode.data[key]?.bookingId) !== bookingId) throw new HttpError(409, 'The appointment is no longer linked to this episode. Review the episode and task again.');
+  const task = episode.data.appointmentReconciliation?.find(item => item.bookingId === bookingId && item.status === 'required');
+  if (!task) throw new HttpError(409, 'This appointment reconciliation task is already resolved or no longer applies.');
+  episode.data[key] = { ...episode.data[key]!, confirmed: false, postponed: true };
+  episode.data.appointmentReconciliation = (episode.data.appointmentReconciliation ?? []).map(item => item.bookingId === bookingId ? { ...item, status: 'resolved' as const } : item);
+  await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [episode.id, `appointment_reconciliation:${bookingId}`, actor.sub]);
+  await episodeWorkflowHistory(client, episode, actor, 'appointment_reconciliation_resolved', reason, { purpose, bookingId, bookingStatus });
+}
+
+export async function reconcileEpisodeAppointment(actor: Actor, episodeId: unknown, bookingIdValue: unknown, input: unknown) {
+  await authorize(actor, 'scheduling');
+  const body = record(input); const bookingId = id(bookingIdValue); const reason = text(body.reason, 'Appointment reconciliation reason', true, 1000);
+  const initial = await transaction(async client => {
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    const task = episode.data.appointmentReconciliation?.find(item => item.bookingId === bookingId && item.status === 'required');
+    if (!task) throw new HttpError(404, 'Appointment reconciliation task not found.');
+    const link = episode.data[appointmentLinkKey[task.purpose]];
+    if (Number(link?.bookingId) !== bookingId) throw new HttpError(409, 'The appointment is no longer linked to this episode.');
+    return { revision: episode.revision, purpose: task.purpose, patientId: episode.patientId };
+  });
+  const snapshot = await pool.query<{ status: string; patient_id: number; updated_at: string }>('select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1 and voided_at is null', [bookingId]);
+  if (!snapshot.rows[0] || !['scheduled','arrived','waiting'].includes(snapshot.rows[0].status)) {
+    return transaction(async client => {
+      await authorize(actor, 'scheduling', client);
+      const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, initial.revision);
+      await resolveAppointmentReconciliation(client, episode, actor, initial.purpose, bookingId, reason, snapshot.rows[0]?.status ?? 'missing');
+      return { episode, reconciliationRequired: false };
+    });
+  }
+  if (Number(snapshot.rows[0].patient_id) !== initial.patientId) return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: 'The appointment belongs to another patient and remains in the exception queue for authorized review.' };
+  try {
+    await cancelBooking(bookingId, Number(actor.sub), async (client, cancelled) => {
+      await authorize(actor, 'scheduling', client);
+      const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, initial.revision);
+      await resolveAppointmentReconciliation(client, episode, actor, initial.purpose, bookingId, reason, cancelled.previousStatus);
+    }, snapshot.rows[0]!.updated_at);
+    return { episode: await findEpisode(episodeId), reconciliationRequired: false };
+  } catch (error) {
+    if (!(error instanceof SchedulingError)) throw error;
+    return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: error.message };
+  }
+}
+
 export async function withdrawEpisode(actor: Actor, episodeId: unknown, input: unknown) {
   const body = record(input);
   const reason = text(body.reason, 'Withdrawal reason', true, 1000);
   if (body.confirmed !== true) throw new HttpError(400, 'Confirm that this genuine referral is being withdrawn.');
-  return transaction(async client => {
-    await authorize(actor, 'referral', client);
-    const episode = await findEpisode(episodeId, client, true);
-    checkEpisodeRevision(episode, body.revision);
+  await authorize(actor, 'referral');
+  const validate = async (client: PoolClient, episode: Episode) => {
     if (!episode.active) throw new HttpError(409, 'This episode is already closed.');
     if (episode.data.mdt?.decision === 'not_suitable') throw new HttpError(409, 'Not suitable is an MDT outcome and must remain separate from referral withdrawal.');
     if (await hasDeliveredTreatment(client, episode.id)) throw new HttpError(409, 'Delivered or completed treatment cannot be withdrawn through the ordinary referral workflow. Use the authorized clinical correction process.');
@@ -246,14 +376,22 @@ export async function withdrawEpisode(actor: Actor, episodeId: unknown, input: u
       if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'This episode contains clinical evidence and requires an authorized administrator or clinician to resolve.');
       await authorize(actor, 'episode_correction', client);
     }
+  };
+  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate);
+  return transaction(async client => {
+    await authorize(actor, 'referral', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, reconciliation.revision);
+    await validate(client, episode);
+    await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
     episode.active = false;
     episode.status = 'closed';
     episode.closureClassification = 'withdrawn';
     episode.data.closureReason = reason;
     episode.qrActive = false;
     await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
-    await episodeWorkflowHistory(client, episode, actor, 'referral_withdrawn', reason, { classification: 'withdrawn' });
-    return { episode };
+    await episodeWorkflowHistory(client, episode, actor, 'referral_withdrawn', reason, { classification: 'withdrawn', appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
+    return { episode, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
   });
 }
 
@@ -261,14 +399,11 @@ export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown
   const body = record(input);
   const reason = text(body.reason, 'Entered-in-error reason', true, 1000);
   if (body.confirmed !== true) throw new HttpError(400, 'Confirm that this episode was registered in error.');
-  return transaction(async client => {
-    await authorize(actor, 'episode_correction', client);
-    const episode = await findEpisode(episodeId, client, true);
-    checkEpisodeRevision(episode, body.revision);
+  await authorize(actor, 'episode_correction');
+  const validate = async (client: PoolClient, episode: Episode) => {
     if (!episode.active) throw new HttpError(409, 'This episode is already closed.');
     const significant = await hasSignificantEpisodeEvidence(client, episode);
     const delivered = await hasDeliveredTreatment(client, episode.id);
-    let attributionDetails: Record<string, unknown> = {};
     if (significant || delivered) {
       if (!['doctor','supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'This episode contains clinical evidence and requires an authorized clinician or administrator to resolve.');
       if (body.correctedPatientId == null || String(body.correctedPatientId).trim() === '') throw new HttpError(409, 'Select and confirm the correct patient before resolving an episode with clinical evidence.');
@@ -279,23 +414,44 @@ export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown
       const selected = patient.rows[0];
       const validNames = selected ? [selected.arabic_full_name,selected.english_full_name].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase()) : [];
       if (!selected || selected.mrn !== confirmedMrn || !validNames.includes(confirmedName)) throw new HttpError(409, 'Confirm the corrected patient by entering the same MRN and registered name shown for that patient.');
+    }
+  };
+  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate);
+  return transaction(async client => {
+    await authorize(actor, 'episode_correction', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, reconciliation.revision);
+    await validate(client, episode);
+    let attributionDetails: Record<string, unknown> = {};
+    const significant = await hasSignificantEpisodeEvidence(client, episode);
+    const delivered = await hasDeliveredTreatment(client, episode.id);
+    if (significant || delivered) {
+      const correctedPatientId = id(body.correctedPatientId);
+      const patient = await client.query<{ id: number; mrn: string; arabic_full_name: string; english_full_name: string | null; national_id: string | null; sex: string | null; estimated_date_of_birth: string | null }>('select id,mrn,arabic_full_name,english_full_name,national_id,sex,estimated_date_of_birth from patients where id=$1 for key share', [correctedPatientId]);
+      const selected = patient.rows[0]!;
       const correctedName = selected.english_full_name || selected.arabic_full_name;
       if (correctedPatientId !== episode.patientId) {
-        const saved = await client.query(`insert into gamma_knife_patient_attribution_corrections(episode_id,original_patient_id,corrected_patient_id,confirmed_mrn,confirmed_name,reason,authorized_by_user_id)
-          values($1,$2,$3,$4,$5,$6,$7) returning id`, [episode.id,episode.patientId,correctedPatientId,selected.mrn,correctedName,reason,actor.sub]);
+        const original = await client.query<{ id: number; mrn: string; arabic_full_name: string; english_full_name: string | null; national_id: string | null; sex: string | null; estimated_date_of_birth: string | null }>('select id,mrn,arabic_full_name,english_full_name,national_id,sex,estimated_date_of_birth from patients where id=$1', [episode.patientId]);
+        const saved = await client.query(`insert into gamma_knife_patient_attribution_corrections(episode_id,original_patient_id,corrected_patient_id,original_patient_snapshot,corrected_patient_snapshot,confirmed_mrn,confirmed_name,reason,authorized_by_user_id)
+          values($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9) returning id`, [episode.id,episode.patientId,correctedPatientId,JSON.stringify(identitySnapshot(original.rows[0]!)),JSON.stringify(identitySnapshot(selected)),selected.mrn,correctedName,reason,actor.sub]);
         episode.data.patientAttributionCorrectionId = Number(saved.rows[0]!.id);
         attributionDetails = { patientAttributionCorrectionId: Number(saved.rows[0]!.id), originalPatientId: episode.patientId, correctedPatientId, correctedPatientMrn: selected.mrn, correctedPatientName: correctedName, clinicalRecordAttributionPreserved: true };
       } else attributionDetails = { duplicateEpisodeConfirmedPatientId: episode.patientId, confirmedPatientMrn: selected.mrn, clinicalRecordAttributionPreserved: true };
     }
+    await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
     episode.active = false;
     episode.status = 'closed';
     episode.closureClassification = 'entered_in_error';
     episode.data.closureReason = reason;
     episode.qrActive = false;
     await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
-    await episodeWorkflowHistory(client, episode, actor, 'episode_entered_in_error', reason, { classification: 'entered_in_error', ...attributionDetails });
-    return { episode };
+    await episodeWorkflowHistory(client, episode, actor, 'episode_entered_in_error', reason, { classification: 'entered_in_error', ...attributionDetails, appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
+    return { episode, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
   });
+}
+
+function identitySnapshot(patient: { id: number; mrn: string; national_id: string | null; arabic_full_name: string; english_full_name: string | null; sex: string | null; estimated_date_of_birth: string | null }) {
+  return { patientId: patient.id, mrn: patient.mrn, nationalId: patient.national_id, arabicFullName: patient.arabic_full_name, englishFullName: patient.english_full_name, sex: patient.sex, dateOfBirth: patient.estimated_date_of_birth };
 }
 
 export async function reverseEpisodeClosure(actor: Actor, episodeId: unknown, input: unknown) {
@@ -380,23 +536,86 @@ export async function decidePatientIdentityCorrection(actor: Actor, episodeId: u
   });
 }
 
+export async function completePatientIdentityCorrection(actor: Actor, episodeId: unknown, requestId: unknown, input: unknown) {
+  if (!['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'An authorized identity-management administrator is required.');
+  const body = record(input);
+  const reason = text(body.reason, 'Handoff confirmation reason', true, 1000);
+  return transaction(async client => {
+    await authorize(actor, 'identity_review', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    const request = await client.query(`select id,status,requested_fields,decided_at,patient_update_completed_at
+      from gamma_knife_patient_identity_correction_requests where id=$1 and episode_id=$2 for update`, [id(requestId), episode.id]);
+    const row = request.rows[0];
+    if (!row || row.status !== 'approved') throw new HttpError(409, 'Approve the identity request before confirming its patient-record update.');
+    if (row.patient_update_completed_at) throw new HttpError(409, 'The Core patient update has already been recorded for this request.');
+    const patient = await client.query<Record<string, unknown>>(`select id,arabic_full_name,english_full_name,national_id,identifier_type,identifier_value,sex,estimated_date_of_birth
+      from patients where id=$1 for key share`, [episode.patientId]);
+    const identity = patient.rows[0];
+    if (!identity) throw new HttpError(404, 'The patient record is no longer available.');
+    const columns: Record<string, string> = { arabicFullName: 'arabic_full_name', englishFullName: 'english_full_name', nationalId: 'national_id', identifierType: 'identifier_type', identifierValue: 'identifier_value', sex: 'sex', dateOfBirth: 'estimated_date_of_birth' };
+    const requested = row.requested_fields as Record<string, string>;
+    const normalized = (value: unknown, field: string) => {
+      const result = String(value ?? '').trim().toLocaleLowerCase();
+      return field === 'dateOfBirth' ? result.slice(0, 10) : result;
+    };
+    for (const [field, desired] of Object.entries(requested)) {
+      const actual = identity[columns[field]!];
+      if (normalized(actual, field) !== normalized(desired, field)) {
+        throw new HttpError(409, `The existing patient-edit workflow has not yet applied the requested ${SENSITIVE_PATIENT_FIELDS[field]?.label ?? 'identity'} value.`);
+      }
+    }
+    const audit = await client.query<{ changed_by_user_id: number; created_at: string; new_values: Record<string, unknown> }>(`select changed_by_user_id,created_at,new_values from audit_log
+      where entity_type='patient' and entity_id=$1 and action_type='update' and created_at >= $2 and changed_by_user_id is not null
+      order by created_at desc,id desc`, [episode.patientId, row.decided_at]);
+    const matching = audit.rows.find(entry => Object.entries(requested).every(([field, desired]) => {
+      const saved = entry.new_values?.[columns[field]!];
+      return normalized(saved, field) === normalized(desired, field);
+    }));
+    if (!matching) throw new HttpError(409, 'The requested values are present, but no matching audited update from the Core patient-edit workflow was found after approval.');
+    await client.query(`update gamma_knife_patient_identity_correction_requests
+      set patient_update_completed_at=$2,patient_update_completed_by_user_id=$3 where id=$1`, [id(requestId), matching.created_at, matching.changed_by_user_id]);
+    await episodeWorkflowHistory(client, episode, actor, 'patient_identity_correction_handoff_completed', reason, { correctionRequestId: id(requestId), updatedByUserId: Number(matching.changed_by_user_id), updatedAt: matching.created_at });
+    return { episode, request: { id: id(requestId), status: 'approved', patientUpdateCompletedAt: matching.created_at, patientUpdateCompletedByUserId: Number(matching.changed_by_user_id) } };
+  });
+}
+
 export async function addPostClosureCorrection(actor: Actor, episodeId: unknown, input: unknown) {
   const body = record(input); const kind = String(body.kind);
   if (kind !== 'clinical_addendum' && kind !== 'administrative_correction') throw new HttpError(400, 'Choose a clinical addendum or administrative correction.');
   const affectedRecord = text(body.affectedRecord, 'Affected record', true, 250);
   const reason = text(body.reason, 'Correction reason', true, 1000);
-  const previousContent = record(body.previousContent); const correctedContent = record(body.correctedContent);
+  const content = text(body.content, kind === 'clinical_addendum' ? 'Addendum' : 'Corrected administrative information', true, 4000);
   return transaction(async client => {
     await authorize(actor, kind === 'clinical_addendum' ? 'clinical' : 'episode_correction', client);
     if (kind === 'administrative_correction' && !['supervisor','super_admin'].includes(actor.role)) throw new HttpError(403, 'An authorized administrator is required for post-closure administrative corrections.');
     const episode = await findEpisode(episodeId, client, true);
     checkEpisodeRevision(episode, body.revision);
     if (episode.active) throw new HttpError(409, 'Post-closure corrections are available only after the episode is closed.');
+    const previousContent = await authoritativeCorrectionContent(client, episode, affectedRecord, kind);
+    const correctedContent = { addendum: content };
     const inserted = await client.query(`insert into gamma_knife_post_closure_corrections(episode_id,kind,affected_record,reason,previous_content,corrected_content,created_by_user_id)
       values($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) returning id`, [episode.id, kind, affectedRecord, reason, JSON.stringify(previousContent), JSON.stringify(correctedContent), actor.sub]);
     await episodeWorkflowHistory(client, episode, actor, 'post_closure_correction_added', reason, { correctionId: Number(inserted.rows[0]!.id), kind, affectedRecord, previousContent, correctedContent });
     return { id: Number(inserted.rows[0]!.id), episode };
   });
+}
+
+async function authoritativeCorrectionContent(client: PoolClient, episode: Episode, key: string, kind: string): Promise<Record<string, unknown>> {
+  if (key === 'referral' && kind === 'administrative_correction') return { diagnosis: episode.diagnosis, diagnosisCategory: episode.diagnosisCategory, referral: episode.data.referral ?? null };
+  if (key === 'clinical_assessment' && kind === 'clinical_addendum' && episode.data.clinical) return episode.data.clinical as unknown as Record<string, unknown>;
+  if (key === 'mdt_decision' && kind === 'clinical_addendum' && episode.data.mdt) return episode.data.mdt as unknown as Record<string, unknown>;
+  const courseMatch = /^treatment_course:(\d+)$/.exec(key);
+  if (courseMatch && kind === 'clinical_addendum') {
+    const course = await client.query<{ value: Record<string, unknown> }>('select to_jsonb(c) as value from gamma_knife_treatment_courses c where c.id=$1 and c.episode_id=$2', [Number(courseMatch[1]), episode.id]);
+    if (course.rows[0]) return course.rows[0].value;
+  }
+  const followupMatch = /^followup:([a-f0-9-]+)$/i.exec(key);
+  if (followupMatch && kind === 'clinical_addendum') {
+    const followup = episode.data.followups?.find(item => item.id === followupMatch[1]);
+    if (followup) return followup as unknown as Record<string, unknown>;
+  }
+  throw new HttpError(400, 'Select an existing record of a type supported for this correction.');
 }
 export async function documentsForEpisode(episodeId: number, db: Db = pool): Promise<EpisodeDocument[]> {
   const config = await readConfig(db);
@@ -456,8 +675,10 @@ export async function profile(actor: Actor, episodeId: unknown) {
   const historicalTreatment = await historicalTreatments(episode.id);
   const patient = await getPatientById(episode.patientId);
   const correctionRequests = await pool.query(`select r.id,r.episode_id as "episodeId",r.patient_id as "patientId",r.requested_fields as "requestedFields",r.reason,r.status,
-    requester.full_name as "requestedBy",r.created_at as "createdAt",decider.full_name as "decidedBy",r.decision_reason as "decisionReason",r.decided_at as "decidedAt"
+    requester.full_name as "requestedBy",r.created_at as "createdAt",decider.full_name as "decidedBy",r.decision_reason as "decisionReason",r.decided_at as "decidedAt",
+    update_actor.full_name as "patientUpdateCompletedBy",r.patient_update_completed_at as "patientUpdateCompletedAt"
     from gamma_knife_patient_identity_correction_requests r join users requester on requester.id=r.requested_by_user_id left join users decider on decider.id=r.decided_by_user_id
+    left join users update_actor on update_actor.id=r.patient_update_completed_by_user_id
     where r.episode_id=$1 order by r.created_at desc,r.id desc`, [episode.id]);
   const postClosureCorrections = await pool.query(`select c.id,c.kind,c.affected_record as "affectedRecord",c.reason,c.previous_content as "previousContent",c.corrected_content as "correctedContent",u.full_name as author,c.created_at as "createdAt"
     from gamma_knife_post_closure_corrections c join users u on u.id=c.created_by_user_id where c.episode_id=$1 order by c.created_at desc,c.id desc`, [episode.id]);
@@ -489,6 +710,7 @@ async function validateOperationalOwner(client: PoolClient, value: unknown): Pro
 
 export async function createReadinessItem(actor: Actor, episodeId: unknown, input: unknown) {
   const body = record(input); const label = text(body.label, 'Checklist item', true, 250);
+  const reason = text(body.reason, 'Reason for adding checklist item', true, 1000);
   const dueDate = body.dueDate == null || String(body.dueDate).trim() === '' ? null : date(body.dueDate);
   const priority = operationalPriority(body.priority ?? 'normal');
   return transaction(async client => {
@@ -499,8 +721,8 @@ export async function createReadinessItem(actor: Actor, episodeId: unknown, inpu
     const key = `custom_${randomBytes(10).toString('hex')}`;
     const inserted = await client.query(`insert into gamma_knife_readiness_items(episode_id,item_key,label,required,responsible_user_id,due_date,priority,notes,created_by_user_id,updated_by_user_id)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) returning id`, [episode.id, key, label, body.required !== false, ownerId, dueDate, priority, text(body.notes, 'Checklist note', false, 2000), actor.sub]);
-    if (body.required !== false && episode.data.preparation?.ready) { episode.data.preparation.ready = false; episode.status = 'preparation'; }
-    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_created', '', { itemId: Number(inserted.rows[0]!.id), label, required: body.required !== false });
+    if (body.required !== false && episode.status === 'preparation' && episode.data.preparation?.ready) episode.data.preparation.ready = false;
+    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_created', reason, { itemId: Number(inserted.rows[0]!.id), label, required: body.required !== false, episodeStatusPreserved: episode.status });
     return { id: Number(inserted.rows[0]!.id), episode };
   });
 }
@@ -523,8 +745,10 @@ export async function updateReadinessItem(actor: Actor, episodeId: unknown, item
       completed_at=case when $3='completed' then coalesce(completed_at,now()) else null end,
       completed_by_user_id=case when $3='completed' then coalesce(completed_by_user_id,$8) else null end,
       updated_by_user_id=$8,updated_at=now() where id=$1 returning *`, [id(itemId), required, status, ownerId, dueDate, priority, text(body.notes, 'Checklist note', false, 2000), actor.sub]);
-    if (required && status !== 'completed' && episode.data.preparation?.ready) { episode.data.preparation.ready = false; episode.status = 'preparation'; }
-    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_updated', text(body.reason, 'Update reason', false, 1000), { before, after: updated.rows[0] });
+    const reasonRequired = status !== before.status || (body.required !== undefined && required !== (before.required === true));
+    const reason = text(body.reason, 'Readiness change reason', reasonRequired, 1000);
+    if (required && status !== 'completed' && episode.status === 'preparation' && episode.data.preparation?.ready) episode.data.preparation.ready = false;
+    await episodeWorkflowHistory(client, episode, actor, 'readiness_item_updated', reason, { before, after: updated.rows[0], episodeStatusPreserved: episode.status });
     return { episode, itemId: Number(itemId) };
   });
 }
@@ -547,84 +771,150 @@ export async function recordPatientCommunication(actor: Actor, episodeId: unknow
   });
 }
 
+export async function recordNextFollowupDate(actor: Actor, episodeId: unknown, input: unknown) {
+  const body = record(input);
+  const plannedDate = date(body.nextFollowupDate);
+  const reason = text(body.reason, 'Clinical follow-up plan reason', true, 1000);
+  return transaction(async client => {
+    await authorize(actor, 'clinical', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, body.revision);
+    if (!episode.active || episode.status !== 'followup') throw new HttpError(409, 'A clinical next-follow-up date can be recorded only for an active follow-up episode.');
+    const previous = episode.data.nextFollowupDate ?? null;
+    episode.data.nextFollowupDate = plannedDate;
+    await episodeWorkflowHistory(client, episode, actor, 'next_followup_date_recorded', reason, { previousDate: previous, nextFollowupDate: plannedDate });
+    return { episode, nextFollowupDate: plannedDate };
+  });
+}
+
 export async function assignOperationalTask(actor: Actor, episodeId: unknown, input: unknown) {
-  const body = record(input); const taskKey = text(body.taskKey, 'Task', true, 120);
-  const fixedTaskKeys = ['treatment','upcoming_treatment','clinical_assessment','mdt_decision','treatment_scheduling','followup_booking','followup','entered_in_error'];
-  const dynamicTask = /^(investigation|readiness|treatment_report|interrupted_course|missing_report|identity_correction|scheduling_conflict):(\d+)$/.exec(taskKey);
+  const body = record(input); const rawTaskKey = text(body.taskKey, 'Task', true, 120);
+  const taskKey = rawTaskKey === 'followup' ? 'followup_booking' : rawTaskKey;
+  const fixedTaskKeys = ['treatment','upcoming_treatment','clinical_assessment','mdt_decision','treatment_scheduling','followup_booking','entered_in_error'];
+  const dynamicTask = /^(investigation|readiness|treatment_report|interrupted_course|missing_report|identity_correction|scheduling_conflict|appointment_reconciliation):(\d+)$/.exec(taskKey);
   if (!fixedTaskKeys.includes(taskKey) && !dynamicTask) throw new HttpError(400, 'Choose a current Gamma Knife operational task.');
   const dueDate = body.dueDate == null || String(body.dueDate).trim() === '' ? null : date(body.dueDate);
   const priority = operationalPriority(body.priority ?? 'normal');
+  const assignmentStatus = body.status == null || body.status === '' ? 'open' : String(body.status);
+  if (!['open','in_progress','resolved','cancelled'].includes(assignmentStatus)) throw new HttpError(400, 'Choose a valid operational task status.');
   return transaction(async client => {
     await authorize(actor, 'scheduling', client);
     const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
     if (dynamicTask) {
-      const table = dynamicTask[1] === 'investigation' ? 'gamma_knife_investigations' : dynamicTask[1] === 'readiness' ? 'gamma_knife_readiness_items' : dynamicTask[1] === 'treatment_report' || dynamicTask[1] === 'interrupted_course' || dynamicTask[1] === 'missing_report' ? 'gamma_knife_treatment_courses' : dynamicTask[1] === 'identity_correction' ? 'gamma_knife_patient_identity_correction_requests' : null;
+      const table = dynamicTask[1] === 'investigation' ? 'gamma_knife_investigations' : dynamicTask[1] === 'readiness' ? 'gamma_knife_readiness_items' : ['treatment_report','interrupted_course','missing_report'].includes(dynamicTask[1]!) ? 'gamma_knife_treatment_courses' : dynamicTask[1] === 'identity_correction' ? 'gamma_knife_patient_identity_correction_requests' : null;
       const key = dynamicTask[1] === 'scheduling_conflict' ? 'appointments_v2.bookings' : table;
-      const idColumn = dynamicTask[1] === 'scheduling_conflict' ? 'id' : dynamicTask[1] === 'investigation' || dynamicTask[1] === 'readiness' || dynamicTask[1] === 'identity_correction' ? 'id' : 'id';
-      const found = key === 'appointments_v2.bookings'
+      const idColumn = 'id';
+      const found = dynamicTask[1] === 'appointment_reconciliation'
+        ? { rows: episode.data.appointmentReconciliation?.some(item => item.bookingId === Number(dynamicTask[2]) && item.status === 'required') ? [{}] : [] }
+        : key === 'appointments_v2.bookings'
         ? await client.query('select 1 from appointments_v2.bookings b where b.id=$1 and b.patient_id=$2', [Number(dynamicTask[2]), episode.patientId])
-        : key ? await client.query(`select 1 from ${key} where ${idColumn}=$1 and episode_id=$2`, [Number(dynamicTask[2]), episode.id]) : { rows: [] };
+        : key ? await client.query(`select 1 from ${key} where ${idColumn}=$1 and episode_id=$2 and ${dynamicTask[1] === 'investigation' ? "status='requested'" : dynamicTask[1] === 'readiness' ? "status<>'completed'" : dynamicTask[1] === 'identity_correction' ? "(status='pending' or (status='approved' and patient_update_completed_at is null))" : dynamicTask[1] === 'interrupted_course' ? "status='interrupted'" : dynamicTask[1] === 'missing_report' || dynamicTask[1] === 'treatment_report' ? "status='completed' and not documentation_finalized" : 'true'}`, [Number(dynamicTask[2]), episode.id]) : { rows: [] };
       if (!found.rows.length) throw new HttpError(404, 'This operational task no longer exists.');
+    } else {
+      const currentTask = taskKey === 'clinical_assessment' ? episode.active && ['referrals','clinical_review'].includes(episode.status)
+        : taskKey === 'mdt_decision' ? episode.active && (episode.status === 'mdt' || episode.data.mdtReviewRequired === true)
+        : taskKey === 'treatment_scheduling' ? episode.active && episode.status === 'preparation'
+        : taskKey === 'followup_booking' ? episode.active && episode.status === 'followup'
+        : taskKey === 'entered_in_error' ? episode.closureClassification === 'entered_in_error' && !episode.replacementEpisodeId
+        : episode.active;
+      if (!currentTask) throw new HttpError(404, 'This operational task is no longer active.');
     }
     const ownerId = await validateOperationalOwner(client, body.ownerUserId);
-    const saved = await client.query(`insert into gamma_knife_operation_task_assignments(episode_id,task_key,owner_user_id,due_date,priority,updated_by_user_id)
-      values($1,$2,$3,$4,$5,$6) on conflict(episode_id,task_key) do update set owner_user_id=excluded.owner_user_id,due_date=excluded.due_date,priority=excluded.priority,updated_by_user_id=excluded.updated_by_user_id,updated_at=now()
-      returning id`, [episode.id, taskKey, ownerId, dueDate, priority, actor.sub]);
-    await episodeWorkflowHistory(client, episode, actor, 'operation_task_assigned', text(body.reason, 'Task assignment reason', false, 1000), { taskKey, ownerId, dueDate, priority });
+    const saved = await client.query(`insert into gamma_knife_operation_task_assignments(episode_id,task_key,owner_user_id,due_date,priority,updated_by_user_id,status)
+      values($1,$2,$3,$4,$5,$6,$7) on conflict(episode_id,task_key) do update set owner_user_id=excluded.owner_user_id,due_date=excluded.due_date,priority=excluded.priority,status=excluded.status,updated_by_user_id=excluded.updated_by_user_id,updated_at=now()
+      returning id`, [episode.id, taskKey, ownerId, dueDate, priority, actor.sub, assignmentStatus]);
+    await episodeWorkflowHistory(client, episode, actor, 'operation_task_assigned', text(body.reason, 'Task assignment reason', false, 1000), { taskKey, ownerId, dueDate, priority, status: assignmentStatus });
     return { episode, assignmentId: Number(saved.rows[0]!.id) };
   });
 }
 
-export async function operationsDashboard(actor: Actor, input: { limit?: unknown; offset?: unknown } = {}) {
+export async function operationsDashboard(actor: Actor, input: { limit?: unknown; offsets?: Record<string, unknown>; responsibleUserId?: unknown; status?: unknown; priority?: unknown; dueAfter?: unknown; dueBefore?: unknown } = {}) {
   await authorize(actor, 'scheduling');
   const todayDate = getTripoliToday();
   const dashboardConfig = await readConfig();
   const limit = Math.max(1, Math.min(100, Number.isInteger(Number(input.limit)) ? Number(input.limit) : 25));
-  const offset = Math.max(0, Math.min(100_000, Number.isInteger(Number(input.offset)) ? Number(input.offset) : 0));
-  const countResult = await pool.query(`select
-    (select count(*) from gamma_knife_episodes e join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint where e.active and b.booking_date=$1::date and b.status in ('scheduled','arrived','waiting') and b.voided_at is null) as "scheduledToday",
-    (select count(*) from gamma_knife_episodes e where e.active and ((e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))) or (e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))))) as "awaitingScheduling",
+  const ownerId = input.responsibleUserId == null || input.responsibleUserId === '' ? null : id(input.responsibleUserId);
+  const statusFilter = input.status == null || input.status === '' ? null : text(input.status, 'Task status', true, 20);
+  if (statusFilter && !['open','in_progress','resolved','cancelled'].includes(statusFilter)) throw new HttpError(400, 'Choose a valid operational task status.');
+  const priority = input.priority == null || input.priority === '' ? null : operationalPriority(input.priority);
+  const dueAfter = input.dueAfter == null || input.dueAfter === '' ? null : date(input.dueAfter);
+  const dueBefore = input.dueBefore == null || input.dueBefore === '' ? null : date(input.dueBefore);
+  const offsets = input.offsets ?? {};
+  const page = async (name: string, sourceSql: string, orderSql: string) => {
+    const offsetValue = Math.max(0, Math.min(100_000, Number.isInteger(Number(offsets[name])) ? Number(offsets[name]) : 0));
+    const result = await pool.query<Record<string, unknown>>(`with source_rows as (${sourceSql}), filtered as (
+      select q.* from source_rows q where $1::date is not null and $2::int>=0 and ($3::bigint is null or q."ownerUserId"=$3)
+        and ($4::text is null or q."assignmentStatus"=$4) and ($5::text is null or q.priority=$5)
+        and ($6::date is null or q."dueDate"::date>=$6::date) and ($7::date is null or q."dueDate"::date<=$7::date)
+    ), totals as (select count(*)::int as total from filtered)
+      select page.*,totals.total from totals left join lateral (select * from filtered order by ${orderSql} limit $8 offset $9) page on true`,
+      [todayDate, dashboardConfig.reminderDays, ownerId, statusFilter, priority, dueAfter, dueBefore, limit, offsetValue]);
+    const total = Number(result.rows[0]?.total ?? 0);
+    const rows = result.rows.filter(row => row.episodeId != null).map(({ total: _total, ...row }) => ({ ...row, episodeId: Number(row.episodeId), episodeRevision: Number(row.episodeRevision), ownerUserId: row.ownerUserId == null ? null : Number(row.ownerUserId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })) as OperationsTask[];
+    return { rows, pagination: { limit, offset: offsetValue, total } };
+  };
+  const taskQueue = async (kind: 'today' | 'upcoming' | 'awaiting' | 'followup' | 'exceptions') => {
+    let sourceSql = '';
+    let orderSql = '';
+    if (kind === 'today' || kind === 'upcoming') {
+      const upcoming = kind === 'upcoming';
+      sourceSql = `select e.id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,
+          '${upcoming ? 'upcoming_treatment' : 'treatment'}'::text as "taskKey",'${upcoming ? 'Upcoming treatment' : 'Today treatment'}'::text as task,owner.full_name as owner,a.due_date::text as "dueDate",coalesce(a.priority,'normal') as priority,coalesce(a.status,'open') as "assignmentStatus",b.status as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime",coalesce((e.data->'preparation'->>'ready')='true',false) as ready,
+          case when coalesce((e.data->'treatmentAppointment'->>'confirmed')::boolean,false)=false then 'Confirm appointment with patient' when coalesce((e.data->'preparation'->>'ready')::boolean,false)=false then 'Review preparation checklist' else 'Review treatment case' end as "nextAction"
+        from gamma_knife_episodes e join patients p on p.id=e.patient_id join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id
+        left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key='${upcoming ? 'upcoming_treatment' : 'treatment'}' left join users owner on owner.id=a.owner_user_id
+        where e.active and b.${upcoming ? `booking_date>$1::date and b.booking_date<=$1::date+14 and b.status='scheduled'` : `booking_date=$1::date and b.status in ('scheduled','arrived','waiting')`} and b.voided_at is null`;
+      orderSql = upcoming ? '"appointmentDate", "appointmentTime" nulls last, mrn, "episodeId"' : '"appointmentTime" nulls last, mrn, "episodeId"';
+    } else if (kind === 'awaiting') {
+      sourceSql = `with tasks as (
+        select e.id as episode_id,'clinical_assessment'::text as task_key,'Pending clinical assessment'::text as task,e.status::text as status,null::bigint as owner_id,null::date as due_date,'normal'::text as priority from gamma_knife_episodes e where e.active and e.status in ('referrals','clinical_review')
+        union all select e.id,'mdt_decision','Awaiting MDT decision',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and (e.status='mdt' or e.data->>'mdtReviewRequired'='true')
+        union all select e.id,'investigation:'||i.id::text,'Outstanding investigation: '||i.requested_text,i.status,i.responsible_user_id,i.due_date,i.priority from gamma_knife_investigations i join gamma_knife_episodes e on e.id=i.episode_id where e.active and i.status='requested'
+        union all select e.id,'readiness:'||r.id::text,r.label,r.status,r.responsible_user_id,r.due_date,r.priority from gamma_knife_readiness_items r join gamma_knife_episodes e on e.id=r.episode_id where e.active and r.required and r.status<>'completed'
+        union all select e.id,'treatment_scheduling','Allocate treatment appointment',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
+        union all select e.id,'treatment_report:'||c.id::text,'Finalize treatment report',c.status,null::bigint,null::date,'high' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
+        union all select e.id,'followup_booking','Allocate follow-up appointment',e.status,null::bigint,null::date,'normal' from gamma_knife_episodes e where e.active and e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
+      ) select e.id as "episodeId",e.revision as "episodeRevision",coalesce(a.owner_user_id,t.owner_id)::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,t.task_key as "taskKey",t.task,coalesce(owner.full_name,assigned.full_name) as owner,coalesce(a.due_date,t.due_date)::text as "dueDate",coalesce(a.priority,t.priority) as priority,coalesce(a.status,'open') as "assignmentStatus",t.status,null::bigint as "bookingId",null::text as "appointmentDate",null::text as "appointmentTime",false as ready,null::text as "nextAction"
+        from tasks t join gamma_knife_episodes e on e.id=t.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=t.task_key left join users owner on owner.id=t.owner_id left join users assigned on assigned.id=a.owner_user_id`;
+      orderSql = `case priority when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end,"dueDate" nulls last,"episodeId"`;
+    } else if (kind === 'followup') {
+      sourceSql = `select e.id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'followup_booking'::text as "taskKey",
+        case when b.id is not null then 'Follow-up scheduled' when planned.date_value<$1::date::text then 'Overdue follow-up' when planned.date_value<=($1::date+$2::int)::text then 'Follow-up due soon' when planned.date_value is null then 'Follow-up date not recorded' else 'Planned follow-up' end as task,
+        owner.full_name as owner,coalesce(b.booking_date::text,planned.date_value) as "dueDate",coalesce(a.priority,'normal') as priority,coalesce(a.status,'open') as "assignmentStatus",
+        case when b.id is not null then 'scheduled' when planned.date_value<$1::date::text then 'overdue' when planned.date_value<=($1::date+$2::int)::text then 'due_soon' when planned.date_value is null then 'date_not_recorded' else 'scheduled' end as status,
+        b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime"
+        from gamma_knife_episodes e join patients p on p.id=e.patient_id left join appointments_v2.bookings b on b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id and b.status='scheduled' and b.voided_at is null
+        left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key='followup_booking' left join users owner on owner.id=a.owner_user_id
+        cross join lateral (select nullif(e.data->>'nextFollowupDate','') as date_value) planned where e.active and e.status='followup'`;
+      orderSql = '"dueDate" nulls last,"episodeId"';
+    } else {
+      sourceSql = `with exception_rows as (
+        select e.id as episode_id,'entered_in_error'::text as task_key,'Entered-in-error referral needs resolution'::text as task,'open'::text as status from gamma_knife_episodes e where e.closure_classification='entered_in_error' and e.replacement_episode_id is null
+        union all select e.id,'interrupted_course:'||c.id::text,'Treatment course interrupted','interrupted' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='interrupted'
+        union all select e.id,'missing_report:'||c.id::text,'Completed treatment is missing finalized documentation','missing_report' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
+        union all select e.id,'identity_correction:'||r.id::text,case when r.status='pending' then 'Identity correction request awaiting review' else 'Approved identity correction awaiting Core update confirmation' end,r.status from gamma_knife_patient_identity_correction_requests r join gamma_knife_episodes e on e.id=r.episode_id where r.status='pending' or (r.status='approved' and r.patient_update_completed_at is null)
+        union all select e.id,'appointment_reconciliation:'||(x->>'bookingId'),'Reconcile linked RISpro appointment: '||coalesce(x->>'reason','review required'),'open' from gamma_knife_episodes e cross join lateral jsonb_array_elements(coalesce(e.data->'appointmentReconciliation','[]'::jsonb)) x where x->>'status'='required'
+        union all select distinct e.id,'scheduling_conflict:'||other.id::text,'Same patient has overlapping appointments','conflict' from gamma_knife_episodes e cross join lateral (values((e.data->'treatmentAppointment'->>'bookingId')::bigint),((e.data->'followupAppointment'->>'bookingId')::bigint)) linked(booking_id) join appointments_v2.bookings b on b.id=linked.booking_id join appointments_v2.bookings other on other.patient_id=e.patient_id and other.id<>b.id and other.booking_date=b.booking_date and b.booking_time is not null and other.booking_time=b.booking_time and other.status='scheduled' and other.voided_at is null where e.active and b.status='scheduled' and b.voided_at is null
+      ) select e.id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,x.task_key as "taskKey",x.task,owner.full_name as owner,a.due_date::text as "dueDate",coalesce(a.priority,'high') as priority,coalesce(a.status,'open') as "assignmentStatus",x.status,null::bigint as "bookingId",null::text as "appointmentDate",null::text as "appointmentTime"
+        from exception_rows x join gamma_knife_episodes e on e.id=x.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=x.task_key left join users owner on owner.id=a.owner_user_id`;
+      orderSql = 'case priority when \'urgent\' then 0 when \'high\' then 1 when \'normal\' then 2 else 3 end,"dueDate" nulls last,"episodeId"';
+    }
+    const result = await page(kind === 'today' ? 'todayTreatments' : kind === 'upcoming' ? 'upcomingTreatments' : kind === 'awaiting' ? 'awaitingAction' : kind === 'followup' ? 'followUp' : 'exceptions', sourceSql, orderSql);
+    return result;
+  };
+  const counts = await pool.query(`select
+    (select count(*) from gamma_knife_episodes e join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id where e.active and b.booking_date=$1::date and b.status in ('scheduled','arrived','waiting') and b.voided_at is null) as "scheduledToday",
+    (select count(*) from gamma_knife_episodes e where e.active and ((e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))) or (e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))))) as "awaitingScheduling",
     (select count(*) from gamma_knife_episodes e where e.active and e.status in ('preparation','treatment') and ((e.data->'preparation'->>'ready') is distinct from 'true' or exists(select 1 from gamma_knife_readiness_items r where r.episode_id=e.id and r.required and r.status<>'completed'))) as "notReady",
     (select count(*) from gamma_knife_episodes e where e.active and (e.status='mdt' or e.data->>'mdtReviewRequired'='true')) as "pendingMdt",
     (select count(*) from gamma_knife_investigations i join gamma_knife_episodes e on e.id=i.episode_id where e.active and i.status='requested') as "outstandingInvestigations",
     (select count(*) from gamma_knife_treatment_courses where status='completed' and not documentation_finalized) as "unfinalizedTreatmentReports",
-    (select count(*) from gamma_knife_episodes e where e.active and e.status='followup' and not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.booking_date>=$1::date and b.status='scheduled' and b.voided_at is null) and coalesce((select max((v->>'date')::date) from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v),e.created_at::date)+$2::int<$1::date) as "overdueFollowups",
-    (select count(*) from gamma_knife_patient_identity_correction_requests where status='pending') as "pendingCorrectionRequests"`, [todayDate, dashboardConfig.reminderDays]);
-  const today = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",null::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'treatment'::text as "taskKey",'Today''s treatment'::text as task,null::text as owner,null::text as "dueDate",'normal'::text as priority,b.status as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime",coalesce((e.data->'preparation'->>'ready')='true',false) as ready,
-    case when coalesce((e.data->'treatmentAppointment'->>'confirmed')::boolean,false)=false then 'Confirm appointment with patient' when coalesce((e.data->'preparation'->>'ready')::boolean,false)=false then 'Review preparation checklist' else 'Review treatment case' end as "nextAction"
-    from gamma_knife_episodes e join patients p on p.id=e.patient_id join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint
-    where e.active and b.booking_date=$1::date and b.status in ('scheduled','arrived','waiting') and b.voided_at is null order by b.booking_time nulls last,p.mrn,e.id limit $2 offset $3`, [todayDate, limit, offset]);
-  const upcoming = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",null::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'upcoming_treatment'::text as "taskKey",'Upcoming treatment'::text as task,null::text as owner,b.booking_date::text as "dueDate",'normal'::text as priority,b.status as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime",coalesce((e.data->'preparation'->>'ready')='true',false) as ready,
-    case when coalesce((e.data->'treatmentAppointment'->>'confirmed')::boolean,false)=false then 'Confirm appointment with patient' when coalesce((e.data->'preparation'->>'ready')::boolean,false)=false then 'Review preparation checklist' else 'Review treatment case' end as "nextAction"
-    from gamma_knife_episodes e join patients p on p.id=e.patient_id join appointments_v2.bookings b on b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint
-    where e.active and b.booking_date>$1::date and b.booking_date<=$1::date+14 and b.status='scheduled' and b.voided_at is null order by b.booking_date,b.booking_time nulls last,p.mrn,e.id limit $2 offset $3`, [todayDate, limit, offset]);
-  const awaiting = await pool.query<OperationsTask>(`with tasks as (
-    select e.id as episode_id,'clinical_assessment'::text as task_key,'Pending clinical assessment'::text as task,e.status::text as status,null::bigint as owner_id,null::date as due_date,'normal'::text as priority from gamma_knife_episodes e where e.active and e.status in ('referrals','clinical_review')
-    union all select e.id,'mdt_decision','Awaiting MDT decision',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and (e.status='mdt' or e.data->>'mdtReviewRequired'='true')
-    union all select e.id,'investigation:'||i.id::text,'Outstanding investigation: '||i.requested_text,i.status,i.responsible_user_id,i.due_date,i.priority from gamma_knife_investigations i join gamma_knife_episodes e on e.id=i.episode_id where e.active and i.status='requested'
-    union all select e.id,'readiness:'||r.id::text,r.label,r.status,r.responsible_user_id,r.due_date,r.priority from gamma_knife_readiness_items r join gamma_knife_episodes e on e.id=r.episode_id where e.active and r.required and r.status<>'completed'
-    union all select e.id,'treatment_scheduling','Allocate treatment appointment',e.status,null::bigint,null::date,'high' from gamma_knife_episodes e where e.active and e.status='preparation' and (e.data->'treatmentAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'treatmentAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
-    union all select e.id,'treatment_report:'||c.id::text,'Finalize treatment report',c.status,null::bigint,null::date,'high' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
-    union all select e.id,'followup_booking','Allocate follow-up appointment',e.status,null::bigint,null::date,'normal' from gamma_knife_episodes e where e.active and e.status='followup' and (e.data->'followupAppointment'->>'postponed'='true' or not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.status in ('scheduled','arrived','waiting') and b.voided_at is null))
-  ) select t.episode_id as "episodeId",e.revision as "episodeRevision",coalesce(a.owner_user_id,t.owner_id)::bigint as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,t.task_key as "taskKey",t.task,coalesce(owner.full_name,assignee.full_name) as owner,coalesce(a.due_date,t.due_date)::text as "dueDate",coalesce(a.priority,t.priority) as priority,t.status
-    from tasks t join gamma_knife_episodes e on e.id=t.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=t.task_key left join users owner on owner.id=t.owner_id left join users assignee on assignee.id=a.owner_user_id
-    order by case coalesce(a.priority,t.priority) when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end,coalesce(a.due_date,t.due_date) nulls last,e.updated_at,e.id limit $1 offset $2`, [limit, offset]);
-  const followup = await pool.query<OperationsTask>(`select e.id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,'followup'::text as "taskKey",
-      case when b.id is not null and b.booking_date >= $1::date then 'Booked follow-up' when coalesce(b.booking_date,due.next_due)<$1::date then 'Overdue follow-up' when b.id is null and due.next_due<=$1::date+$2::int then 'Follow-up due soon' when b.id is null then 'Follow-up awaiting booking' else 'Follow-up due soon' end as task,
-      owner.full_name as owner,coalesce(b.booking_date,due.next_due)::text as "dueDate",coalesce(a.priority,'normal') as priority,case when b.id is not null and b.booking_date >= $1::date then 'booked' when coalesce(b.booking_date,due.next_due)<$1::date then 'overdue' when b.id is null and due.next_due<=$1::date+$2::int then 'due_soon' else 'awaiting_booking' end as status,b.id as "bookingId",b.booking_date::text as "appointmentDate",b.booking_time::text as "appointmentTime"
-    from gamma_knife_episodes e join patients p on p.id=e.patient_id left join appointments_v2.bookings b on b.id=(e.data->'followupAppointment'->>'bookingId')::bigint left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key='followup_booking' left join users owner on owner.id=a.owner_user_id
-    cross join lateral (select coalesce((select max((v->>'date')::date) from jsonb_array_elements(coalesce(e.data->'followups','[]'::jsonb)) v),e.created_at::date)+$2::int as next_due) due
-    where e.active and e.status='followup' order by coalesce(b.booking_date,due.next_due),e.updated_at,e.id limit $3 offset $4`, [todayDate, dashboardConfig.reminderDays, limit, offset]);
-  const exceptions = await pool.query<OperationsTask>(`with exception_rows as (
-    select e.id as episode_id,'entered_in_error'::text as task_key,'Entered-in-error referral needs resolution'::text as task,'open'::text as status from gamma_knife_episodes e where e.closure_classification='entered_in_error' and e.replacement_episode_id is null
-    union all select e.id,'interrupted_course:'||c.id::text,'Treatment course interrupted','interrupted' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='interrupted'
-    union all select e.id,'missing_report:'||c.id::text,'Completed treatment is missing finalized documentation','missing_report' from gamma_knife_treatment_courses c join gamma_knife_episodes e on e.id=c.episode_id where c.status='completed' and not c.documentation_finalized
-    union all select e.id,'identity_correction:'||r.id::text,'Identity correction request awaiting review',r.status from gamma_knife_patient_identity_correction_requests r join gamma_knife_episodes e on e.id=r.episode_id where r.status='pending'
-    union all select distinct e.id,'scheduling_conflict:'||other.id::text,'Same patient has overlapping appointments','conflict' from gamma_knife_episodes e cross join lateral (values((e.data->'treatmentAppointment'->>'bookingId')::bigint),((e.data->'followupAppointment'->>'bookingId')::bigint)) linked(booking_id) join appointments_v2.bookings b on b.id=linked.booking_id join appointments_v2.bookings other on other.patient_id=e.patient_id and other.id<>b.id and other.booking_date=b.booking_date and b.booking_time is not null and other.booking_time=b.booking_time and other.status='scheduled' and other.voided_at is null where e.active and b.status='scheduled' and b.voided_at is null
-  ) select x.episode_id as "episodeId",e.revision as "episodeRevision",a.owner_user_id as "ownerUserId",p.arabic_full_name as "patientArabicName",p.english_full_name as "patientEnglishName",coalesce(nullif(p.english_full_name,''),p.arabic_full_name) as "patientName",p.mrn,x.task_key as "taskKey",x.task,owner.full_name as owner,a.due_date::text as "dueDate",coalesce(a.priority,'high') as priority,x.status
-    from exception_rows x join gamma_knife_episodes e on e.id=x.episode_id join patients p on p.id=e.patient_id left join gamma_knife_operation_task_assignments a on a.episode_id=e.id and a.task_key=x.task_key left join users owner on owner.id=a.owner_user_id order by coalesce(a.due_date,$1::date),e.id limit $2 offset $3`, [todayDate, limit, offset]);
-  const counts = countResult.rows[0] as Record<string, unknown>;
-  return { counts: Object.fromEntries(Object.entries(counts).map(([key,value]) => [key, Number(value)])), pagination: { limit, offset }, queues: { todayTreatments: today.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), upcomingTreatments: upcoming.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), awaitingAction: awaiting.rows.map(row => ({ ...row, episodeId: Number(row.episodeId) })), followUp: followup.rows.map(row => ({ ...row, episodeId: Number(row.episodeId), bookingId: row.bookingId == null ? null : Number(row.bookingId) })), exceptions: exceptions.rows.map(row => ({ ...row, episodeId: Number(row.episodeId) })) } };
+    (select count(*) from gamma_knife_episodes e where e.active and e.status='followup' and ((nullif(e.data->>'nextFollowupDate','') < $1::date::text and not exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id and b.booking_date>=$1::date and b.status='scheduled' and b.voided_at is null)) or exists(select 1 from appointments_v2.bookings b where b.id=(e.data->'followupAppointment'->>'bookingId')::bigint and b.patient_id=e.patient_id and b.booking_date<$1::date and b.status='scheduled' and b.voided_at is null))) as "overdueFollowups",
+    (select count(*) from gamma_knife_patient_identity_correction_requests where status='pending' or (status='approved' and patient_update_completed_at is null)) as "pendingCorrectionRequests"`, [todayDate]);
+  const [todayQueue, upcomingQueue, awaitingQueue, followupQueue, exceptionQueue] = await Promise.all([taskQueue('today'),taskQueue('upcoming'),taskQueue('awaiting'),taskQueue('followup'),taskQueue('exceptions')]);
+  return { counts: Object.fromEntries(Object.entries(counts.rows[0] as Record<string,unknown>).map(([key,value]) => [key,Number(value)])),
+    pagination: { todayTreatments: todayQueue.pagination, upcomingTreatments: upcomingQueue.pagination, awaitingAction: awaitingQueue.pagination, followUp: followupQueue.pagination, exceptions: exceptionQueue.pagination },
+    queues: { todayTreatments: todayQueue.rows, upcomingTreatments: upcomingQueue.rows, awaitingAction: awaitingQueue.rows, followUp: followupQueue.rows, exceptions: exceptionQueue.rows } };
 }
 export async function scheduleIdentityRisk(actor: Actor, episodeId: unknown, requestedPurpose: unknown) {
   await authorize(actor, 'scheduling');
@@ -718,6 +1008,8 @@ export async function rescheduleEpisodeAppointment(actor: Actor, episodeId: unkn
   const reason = text(body.reason, 'Rescheduling reason', true, 1000);
   const episode = await findEpisode(episodeId); assertSchedulePurposeStage(episode, purpose);
   const { examTypeId } = await appointmentPurposeSettings(pool, purpose);
+  const bookingSnapshot = await pool.query<{ booking_date: string; booking_time: string | null; updated_at: string }>("select booking_date::text,booking_time::text,updated_at::text from appointments_v2.bookings where id=$1 and patient_id=$2 and exam_type_id=$3 and status='scheduled' and voided_at is null", [bookingId, episode.patientId, examTypeId]);
+  if (!bookingSnapshot.rows[0] || Number(episode.data[purpose === 'treatment' ? 'treatmentAppointment' : 'followupAppointment']?.bookingId) !== bookingId) throw new HttpError(409, 'The linked RISpro appointment changed. Reload the episode before rescheduling.');
   const result = await rescheduleBooking(bookingId, bookingDate, bookingTime, examTypeId, null, null, Number(actor.sub), actor.role,
     body.override as CreateBookingPayload['override'], 'standard', null, null, reason, null, undefined, undefined,
     typeof body.policySetKey === 'string' ? body.policySetKey : 'default', undefined, false, false, false,
@@ -732,8 +1024,8 @@ export async function rescheduleEpisodeAppointment(actor: Actor, episodeId: unkn
       if (!owner.rows.length) throw new HttpError(409, 'The linked appointment no longer matches this patient and Gamma Knife purpose.');
       current.data[key] = { bookingId, confirmed: body.confirmed === true, postponed: false };
       if (body.confirmed === true) await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed during rescheduling.',$2)", [current.id, actor.sub]);
-      await episodeWorkflowHistory(client, current, actor, 'appointment_rescheduled', reason, { purpose, bookingId, bookingDate, bookingTime, confirmed: body.confirmed === true });
-    });
+      await episodeWorkflowHistory(client, current, actor, 'appointment_rescheduled', reason, { purpose, bookingId, previousDate: rescheduled.previousDate, previousTime: rescheduled.previousTime, bookingDate, bookingTime, confirmed: body.confirmed === true });
+    }, bookingSnapshot.rows[0]!.updated_at);
   return { booking: result.booking, episodeId: Number(episodeId) };
 }
 
@@ -829,9 +1121,27 @@ export async function addTreatmentFraction(actor: Actor, episodeId: unknown, cou
 }
 export async function changeTreatmentCourse(actor: Actor, episodeId: unknown, courseId: unknown, actionName: string, input: unknown) {
   const body = record(input); let reason = text(body.reason, 'Correction reason');
+  let expectedRevision = Number(body.revision);
+  let appointmentReconciliation: Awaited<ReturnType<typeof reconcileEpisodeAppointments>> | null = null;
+  if (actionName === 'complete') {
+    await authorize(actor, 'treatment');
+    reason = text(body.reason, 'GammaPlan completion confirmation', true);
+    const validateCompletion = async (client: PoolClient, episode: Episode) => {
+      if (!episode.active || episode.status !== 'treatment' || !episode.data.preparation?.ready) throw new HttpError(409, 'Treatment readiness must be current before course completion is recorded.');
+      const found = await client.query("select id,status,planned_fraction_count from gamma_knife_treatment_courses where id=$1 and episode_id=$2 for update", [id(courseId), episode.id]);
+      if (!found.rows[0] || found.rows[0].status !== 'in_progress' || body.confirmed !== true) throw new HttpError(409, 'An in-progress course and explicit GammaPlan completion confirmation are required.');
+      const delivered = await client.query("select count(distinct planned_fraction_number)::int as count from gamma_knife_treatment_fractions where course_id=$1 and status='delivered'", [id(courseId)]);
+      if (Number(delivered.rows[0]?.count) < Number(found.rows[0].planned_fraction_count)) throw new HttpError(409, 'The course has fewer delivered fraction records than its planned fraction count. Reconcile the plan against GammaPlan or keep the course open as interrupted.');
+      const completedAt = date(body.completedAt);
+      if (completedAt > getTripoliToday()) throw new HttpError(400, 'Course completion date cannot be in the future.');
+    };
+    appointmentReconciliation = await reconcileEpisodeAppointments(actor, episodeId, expectedRevision, ['treatment'], reason, validateCompletion);
+    expectedRevision = appointmentReconciliation.revision;
+  }
   return transaction(async client => {
     await authorize(actor, 'treatment', client);
-    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, body.revision);
+    const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, expectedRevision);
+    if (appointmentReconciliation) await recordAppointmentReconciliation(client, episode, actor, appointmentReconciliation.pending);
     const found = await client.query('select * from gamma_knife_treatment_courses where id=$1 and episode_id=$2 for update', [id(courseId), episode.id]);
     if (!found.rows.length) throw new HttpError(404, 'Treatment course not found.');
     const course = found.rows[0] as Record<string, unknown>;
@@ -874,8 +1184,8 @@ export async function changeTreatmentCourse(actor: Actor, episodeId: unknown, co
     } else throw new HttpError(400, 'Unknown treatment course action.');
     const updated = await client.query('select * from gamma_knife_treatment_courses where id=$1', [id(courseId)]);
     await treatmentHistory(client, id(courseId), actor, `course_${actionName}`, { before: course, after: updated.rows[0] }, reason);
-    await episodeWorkflowHistory(client, episode, actor, `course_${actionName}`, reason, { courseId: id(courseId) });
-    return { course: updated.rows[0], episode, ...await workflowRecords(episode.id, client) };
+    await episodeWorkflowHistory(client, episode, actor, `course_${actionName}`, reason, { courseId: id(courseId), appointmentReconciliationRequired: appointmentReconciliation?.pending.map(item => item.bookingId) ?? [] });
+    return { course: updated.rows[0], episode, ...await workflowRecords(episode.id, client), reconciliationRequired: Boolean(appointmentReconciliation?.pending.length), reconciliationPending: appointmentReconciliation?.pending.map(item => item.bookingId) ?? [] };
   });
 }
 export async function correctTreatmentFraction(actor: Actor, episodeId: unknown, courseId: unknown, fractionId: unknown, input: unknown) {
@@ -1031,6 +1341,27 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
   const requiredPermission = actionPermission[action];
   if (!requiredPermission) throw new HttpError(400, 'Unknown Gamma Knife action.');
   const body = record(input);
+  if (action === 'postpone') {
+    const reason = text(body.reason, 'Postponement reason', true);
+    const validate = async (_client: PoolClient, episode: Episode) => {
+      if (!episode.active) throw new HttpError(409, 'Episode is closed.');
+      requireStage(episode, ['preparation','treatment']);
+    };
+    await authorize(actor, 'scheduling');
+    const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment'], reason, validate);
+    return transaction(async client => {
+      await authorize(actor, 'scheduling', client);
+      const episode = await findEpisode(episodeId, client, true);
+      checkEpisodeRevision(episode, reconciliation.revision);
+      await validate(client, episode);
+      await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
+      if (episode.data.treatmentAppointment) { episode.data.treatmentAppointment.postponed = true; episode.data.treatmentAppointment.confirmed = false; }
+      episode.data.postponementReason = reason;
+      if (episode.data.preparation) episode.data.preparation.ready = false;
+      await episodeWorkflowHistory(client, episode, actor, 'treatment_postponed', reason, { stagePreserved: episode.status, appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
+      return { episode, token: undefined, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
+    });
+  }
   return transaction(async client => {
     await authorize(actor, requiredPermission, client);
     const episode = await findEpisode(episodeId, client, true);
@@ -1087,7 +1418,10 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       }
       data.preparation = { consent: body.consent === true, imaging: body.imaging === true, clinicalReady: body.clinicalReady === true, notes: text(body.notes, 'Preparation notes', ready), instructions: text(body.instructions, 'Patient preparation instructions'), actions: text(body.actions, 'Patient required actions'), ready };
       if (ready && (!data.preparation.consent || !data.preparation.imaging || !data.preparation.clinicalReady)) throw new HttpError(409, 'Confirm consent, required imaging, and clinical readiness.');
-      episode.status = ready ? 'treatment' : 'preparation';
+      // Readiness is an operational gate, not a clinical stage transition in reverse.
+      // Once the episode reaches treatment, clearing readiness must not rewrite its
+      // stage or the status of any treatment course/fraction.
+      if (ready && episode.status === 'preparation') episode.status = 'treatment';
     } else if (action === 'appointment') {
       const purpose = body.purpose;
       if (purpose !== 'treatment' && purpose !== 'followup') throw new HttpError(400, 'Invalid appointment purpose.');
@@ -1107,12 +1441,6 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       if (!key || !data[key] || data[key].postponed) throw new HttpError(409, 'Link a current appointment first.');
       data[key].confirmed = true;
       await client.query("insert into gamma_knife_patient_communications(episode_id,kind,outcome,created_by_user_id) values($1,'appointment_confirmed','Appointment confirmed with the patient.',$2)", [episode.id, actor.sub]);
-    } else if (action === 'postpone') {
-      requireStage(episode, ['preparation','treatment']); reason = text(body.reason, 'Postponement reason', true);
-      if (data.treatmentAppointment) { data.treatmentAppointment.postponed = true; data.treatmentAppointment.confirmed = false; }
-      data.postponementReason = reason;
-      if (data.preparation) data.preparation.ready = false;
-      episode.status = 'preparation';
     } else if (action === 'completion') {
       throw new HttpError(409, 'Use a treatment course and record each delivered or interrupted fraction before explicitly completing the course from GammaPlan.');
     } else if (action === 'report') {
@@ -1206,7 +1534,7 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
     episode.revision++;
     await client.query('update gamma_knife_episodes set status=$2,active=$3,closure_classification=$4,replacement_episode_id=$5,data=$6::jsonb,revision=$7,updated_at=now() where id=$1', [episode.id, episode.status, episode.active, episode.closureClassification ?? null, episode.replacementEpisodeId ?? null, JSON.stringify(data), episode.revision]);
     await history(client, episode, actor, action, reason, Object.keys(historyDetails).length ? historyDetails : ['document_visibility','document_remove'].includes(action) ? { documentId: id(body.documentId), released: action === 'document_visibility' && body.released === true } : {});
-    return { episode, ...(token ? { token } : {}) };
+    return { episode, ...(token ? { token } : {}), reconciliationRequired: false };
   });
 }
 

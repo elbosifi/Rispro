@@ -7,6 +7,12 @@ import { assertModuleAccess, hasModuleAccess, resolveModuleAccess, type ModuleAc
 /** Exact shared operations, never an authentication/settings namespace exemption. */
 export function requiredModulesForApi(method: string, path: string, access: ModuleAccess): readonly string[] | 'shared' {
   if (method === 'GET' && /^\/public\/gamma-knife(?:\/documents\/\d+)?$/.test(path)) return 'shared';
+  // These endpoints authenticate each request with a scoped bearer/token value;
+  // an unrelated RISpro session cookie must not turn a public/mobile link into a
+  // module-authorized Core or Doctor request.
+  if (pathWithin(path, '/public/appointments') || pathWithin(path, '/internal/appointment-slip-render')) return 'shared';
+  if (method === 'GET' && path === '/mobile/operations-summary') return 'shared';
+  if (['GET','POST'].includes(method) && pathWithin(path, '/reporting/saved-views/public')) return 'shared';
   if ((method === 'GET' && ['/auth/me','/public/institution-identity','/action-pin/status','/teaching/health'].includes(path))
     || (method === 'POST' && ['/auth/login','/auth/logout','/auth/refresh','/auth/change-password','/auth/re-auth',
       '/auth/passkeys/register/options','/auth/passkeys/register/verify','/auth/passkeys/login/options','/auth/passkeys/login/verify','/auth/passkeys/re-auth/options','/auth/passkeys/re-auth/verify',

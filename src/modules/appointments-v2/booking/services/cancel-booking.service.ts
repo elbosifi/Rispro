@@ -28,10 +28,14 @@ export interface CancelBookingResult {
 
 export async function cancelBooking(
   bookingId: number,
-  userId: number
+  userId: number,
+  transactionalAfterCancel?: (client: PoolClient, result: CancelBookingResult) => Promise<void>,
+  expectedUpdatedAt?: string
 ): Promise<CancelBookingResult> {
   const result = await withTransaction(async (client) => {
-    return cancelBookingInternal(client, bookingId, userId);
+    const cancelled = await cancelBookingInternal(client, bookingId, userId, expectedUpdatedAt);
+    await transactionalAfterCancel?.(client, cancelled);
+    return cancelled;
   });
 
   scheduleBookingWorklistSync(bookingId);
@@ -42,12 +46,18 @@ export async function cancelBooking(
 async function cancelBookingInternal(
   client: PoolClient,
   bookingId: number,
-  userId: number
+  userId: number,
+  expectedUpdatedAt?: string
 ): Promise<CancelBookingResult> {
   // Serialize all mutations of this booking before locking its quota pool.
   const booking = await findBookingByIdForUpdate(client, bookingId);
   if (!booking) {
     throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
+  }
+
+  if (expectedUpdatedAt) {
+    const version = await client.query<{ updated_at: string }>('select updated_at::text from appointments_v2.bookings where id=$1', [bookingId]);
+    if (version.rows[0]?.updated_at !== expectedUpdatedAt) throw new SchedulingError(409, 'The RISpro appointment changed while this action was open. Reload the episode and review it again.', ['stale_booking_revision']);
   }
 
   if (booking.status === "cancelled") {

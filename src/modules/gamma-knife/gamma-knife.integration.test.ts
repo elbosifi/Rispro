@@ -65,6 +65,9 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
       await pool.query('delete from gamma_knife_reassessment_decisions where reassessment_id in (select id from gamma_knife_reassessments where episode_id=any($1::bigint[]))', [episodeIds]);
       await pool.query('delete from gamma_knife_investigation_history where investigation_id in (select id from gamma_knife_investigations where episode_id=any($1::bigint[]))', [episodeIds]);
       await pool.query('delete from gamma_knife_investigations where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_readiness_items where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_patient_communications where episode_id=any($1::bigint[])', [episodeIds]);
+      await pool.query('delete from gamma_knife_operation_task_assignments where episode_id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_treatment_fractions where course_id in (select id from gamma_knife_treatment_courses where episode_id=any($1::bigint[]))', [episodeIds]);
       await pool.query('update gamma_knife_treatment_courses set prior_course_id=null,reassessment_id=null where episode_id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_reassessments where episode_id=any($1::bigint[])', [episodeIds]);
@@ -129,9 +132,12 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     const wrongPurpose = await request(`/api/gamma-knife/episodes/${episode.id}/actions/appointment`, { revision: episode.revision, purpose: 'treatment', bookingId: followupBooking }); assert.equal(wrongPurpose.status, 409);
     await command('appointment', { purpose: 'treatment', bookingId: treatmentBooking, confirmed: false });
     const notReady = await request(`/api/gamma-knife/episodes/${episode.id}/actions/preparation`, { revision: episode.revision, consent: false, imaging: true, clinicalReady: true, notes: 'Prepared', ready: true }); assert.equal(notReady.status, 409);
+    await pool.query("update gamma_knife_readiness_items set status='completed',completed_at=now(),completed_by_user_id=$2,updated_by_user_id=$2 where episode_id=$1 and required", [episode.id, fixture.userId]);
     await command('preparation', { consent: true, imaging: true, clinicalReady: true, notes: 'Synthetic preparation', ready: true, instructions: 'Patient-safe instructions' });
-    await command('postpone', { reason: 'Synthetic postponement' }); assert.equal(episode.status, 'preparation'); assert.equal(episode.data.treatmentAppointment?.confirmed, false);
-    await command('appointment', { purpose: 'treatment', bookingId: treatmentBooking, confirmed: true, reason: 'Rescheduled after review' });
+    await command('postpone', { reason: 'Synthetic postponement' }); assert.equal(episode.status, 'treatment'); assert.equal(episode.data.preparation?.ready, false); assert.equal(episode.data.treatmentAppointment?.confirmed, false);
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [treatmentBooking])).rows[0]!.status, 'cancelled', 'postponement cancels the linked booking through Appointments V2');
+    const replacementTreatmentBooking = await booking(fixture.examTypeId);
+    await command('appointment', { purpose: 'treatment', bookingId: replacementTreatmentBooking, confirmed: true, reason: 'New slot allocated after postponement' });
     await command('preparation', { consent: true, imaging: true, clinicalReady: true, notes: 'Readiness rechecked', ready: true, instructions: 'Patient-safe instructions' });
     const qr = await changeEpisode(actor(), episode.id, 'qr_replace', { revision: episode.revision }); episode = qr.episode;
     assert.equal((await publicEpisode(qr.token!)).instructions, 'Patient-safe instructions');
@@ -142,6 +148,7 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     assert.equal(fraction.fraction.status, 'delivered');
     const unconfirmedCompletion = await request(`/api/gamma-knife/episodes/${episode.id}/courses/${courseId}/complete`, { revision: episode.revision, completedAt: '2026-10-25', reason: 'Synthetic completion record', confirmed: false }); assert.equal(unconfirmedCompletion.status, 409);
     await resource(`/episodes/${episode.id}/courses/${courseId}/complete`, { completedAt: '2026-10-25', reason: 'Synthetic GammaPlan completion confirmation', confirmed: true }); assert.equal(episode.status, 'followup'); assert.equal(episode.data.treatment?.finalized, false);
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [replacementTreatmentBooking])).rows[0]!.status, 'cancelled', 'completed treatment does not retain an active treatment appointment');
     const completedProfile = await request(`/api/gamma-knife/episodes/${episode.id}`);
     assert.equal(completedProfile.body.courses.length, 1); assert.equal(completedProfile.body.courses[0].fractions.length, 1); assert.equal(completedProfile.body.courses[0].status, 'completed');
     assert.equal((await publicEpisode(qr.token!)).instructions, '');
@@ -215,7 +222,10 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     const stored = await getDocumentById(instructions, pool, { allowGammaKnife: true });
     assert.equal(stored.original_filename, 'تعليمات-المريض.pdf'); assert.doesNotMatch(stored.stored_path, /تعليمات/);
     await command('document_visibility', { documentId: instructions, released: true });
-    const deniedRelease = await request(`/api/gamma-knife/episodes/${episode.id}/actions/document_visibility`, { revision: episode.revision, documentId: sensitive, released: true }); assert.equal(deniedRelease.status, 409);
+    const sensitiveCategory = await pool.query<{ category: string }>('select category from gamma_knife_documents where episode_id=$1 and document_id=$2', [episode.id, sensitive]);
+    assert.equal(sensitiveCategory.rows[0]?.category, 'treatment_report');
+    assert.equal((await readConfig()).documentVisibility.treatment_report, 'sensitive');
+    const deniedRelease = await request(`/api/gamma-knife/episodes/${episode.id}/actions/document_visibility`, { revision: episode.revision, documentId: sensitive, released: true }); assert.equal(deniedRelease.status, 409, JSON.stringify(deniedRelease.body));
     // Even a legacy release flag must not bypass the current sensitive category policy.
     await pool.query('update gamma_knife_documents set released=true where document_id=$1', [sensitive]);
     const issued = await changeEpisode(actor(), episode.id, 'qr_replace', { revision: episode.revision }); episode = issued.episode;
