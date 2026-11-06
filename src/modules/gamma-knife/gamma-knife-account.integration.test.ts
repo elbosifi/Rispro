@@ -106,6 +106,7 @@ describe('Gamma Knife-only account boundary', { concurrency: false }, () => {
     if (episodeId) {
       await pool.query('delete from gamma_knife_investigation_history where investigation_id in (select id from gamma_knife_investigations where episode_id=$1)', [episodeId]);
       await pool.query('delete from gamma_knife_investigations where episode_id=$1', [episodeId]);
+      await pool.query('delete from gamma_knife_readiness_items where episode_id=$1', [episodeId]);
       await pool.query('delete from gamma_knife_history where episode_id=$1', [episodeId]);
       await pool.query('delete from gamma_knife_episodes where id=$1', [episodeId]);
     }

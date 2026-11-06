@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { pool } from '../../db/pool.js';
 import { seedTestData, cleanupTestData, type TestData } from '../appointments-v2/tests/integration/helpers.js';
-import { addPostClosureCorrection, assignOperationalTask, changeEpisode, changeTreatmentCourse, completePatientIdentityCorrection, createEpisode, createReadinessItem, createTreatmentCourse, decidePatientIdentityCorrection, editReferral, findEpisode, markEpisodeEnteredInError, operationsDashboard, readConfig, reconcileEpisodeAppointment, requestPatientIdentityCorrection, reverseEpisodeClosure, updateEpisodePatientContact, updateReadinessItem, withdrawEpisode } from './gamma-knife-service.js';
-import { deletePatient, mergePatients, updatePatient } from '../../services/patient-service.js';
+import { addPostClosureCorrection, addTreatmentFraction, assignOperationalTask, changeEpisode, changeTreatmentCourse, completePatientIdentityCorrection, createEpisode, createReadinessItem, createTreatmentCourse, decidePatientIdentityCorrection, editReferral, findEpisode, markEpisodeEnteredInError, operationsDashboard, readConfig, reconcileEpisodeAppointment, requestPatientIdentityCorrection, reverseEpisodeClosure, updateEpisodePatientContact, updateReadinessItem, withdrawEpisode } from './gamma-knife-service.js';
+import { deletePatient as deletePatientService, mergePatients, updatePatient } from '../../services/patient-service.js';
 import { cancelBooking } from '../appointments-v2/booking/services/cancel-booking.service.js';
+import { updateBookingStatusManual } from '../appointments-v2/booking/services/status-booking.service.js';
 import { PERMISSIONS, type Config, type Episode } from './gamma-knife-types.js';
 import type { Role } from '../../types/domain.js';
 
@@ -21,7 +22,7 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
     const db = await pool.query<{ name: string }>('select current_database() as name');
     assert.match(db.rows[0]!.name, /test|e2e/i);
     config = await readConfig();
-    for (const suffix of ['edit', 'replacement', 'withdraw', 'course', 'merge_target', 'merge_source', 'blocked_merge', 'treated_merge', 'delete', 'treated_merge_target', 'attribution_source', 'attribution_target', 'entry_error', 'operations', 'readiness', 'attribution_merge_source', 'attribution_merge_target', 'appointment_withdrawal', 'appointment_error', 'appointment_postpone', 'stale_booking']) {
+    for (const suffix of ['edit', 'replacement', 'withdraw', 'course', 'merge_target', 'merge_source', 'blocked_merge', 'treated_merge', 'delete', 'treated_merge_target', 'attribution_source', 'attribution_target', 'entry_error', 'operations', 'readiness', 'attribution_merge_source', 'attribution_merge_target', 'appointment_withdrawal', 'appointment_error', 'appointment_postpone', 'stale_booking', 'attribution_corrected_merge_episode', 'attribution_corrected_merge_source', 'attribution_corrected_merge_target', 'attribution_corrected_delete_episode', 'attribution_corrected_delete_patient', 'course_complete', 'course_completed_booking', 'course_conflict', 'course_interrupted']) {
       const fixture = await seedTestData('appointments_v2', `${prefix}${suffix}_`);
       fixtures.push(fixture);
       await pool.query('update users set gamma_knife_permissions=$2::text[] where id=$1', [fixture.userId, PERMISSIONS]);
@@ -47,7 +48,7 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
       await pool.query('update gamma_knife_episodes set replacement_episode_id=null where id=any($1::bigint[])', [episodeIds]);
       await pool.query('delete from gamma_knife_episodes where id=any($1::bigint[])', [episodeIds]);
     }
-    for (const suffix of ['stale_booking', 'appointment_postpone', 'appointment_error', 'appointment_withdrawal', 'attribution_merge_target', 'attribution_merge_source', 'readiness', 'operations', 'entry_error', 'attribution_target', 'attribution_source', 'treated_merge_target', 'delete', 'treated_merge', 'blocked_merge', 'merge_source', 'merge_target', 'course', 'withdraw', 'replacement', 'edit']) await cleanupTestData(`${prefix}${suffix}_`);
+    for (const suffix of ['course_interrupted', 'course_conflict', 'course_completed_booking', 'course_complete', 'attribution_corrected_delete_patient', 'attribution_corrected_delete_episode', 'attribution_corrected_merge_target', 'attribution_corrected_merge_source', 'attribution_corrected_merge_episode', 'stale_booking', 'appointment_postpone', 'appointment_error', 'appointment_withdrawal', 'attribution_merge_target', 'attribution_merge_source', 'readiness', 'operations', 'entry_error', 'attribution_target', 'attribution_source', 'treated_merge_target', 'delete', 'treated_merge', 'blocked_merge', 'merge_source', 'merge_target', 'course', 'withdraw', 'replacement', 'edit']) await cleanupTestData(`${prefix}${suffix}_`);
     await pool.end();
   });
 
@@ -155,6 +156,8 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
     await pool.query("update appointments_v2.bookings set updated_at=updated_at+interval '1 second' where id=$1", [staleBookingId]);
     await assert.rejects(() => cancelBooking(staleBookingId, staleFixture.userId, undefined, originalVersion), (error: unknown) => Boolean(error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409));
     assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [staleBookingId])).rows[0]!.status, 'scheduled');
+    await assert.rejects(() => updateBookingStatusManual(staleBookingId, 'completed', 'Stale status reconciliation.', staleFixture.userId, 'supervisor', { expectedUpdatedAt: originalVersion }), (error: unknown) => Boolean(error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409));
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [staleBookingId])).rows[0]!.status, 'scheduled');
   });
 
   it('persists task assignments across each operations queue and applies server filters and queue pagination', async () => {
@@ -250,6 +253,75 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
     assert.equal((await pool.query("select count(*)::int as count from gamma_knife_treatment_history where course_id=$1 and action='course_replacement_created'", [replacement.course.id])).rows[0]!.count, 1);
   });
 
+  it('reconciles delivered treatment, preserves interruptions and conflicting appointments, and rolls back failed status hooks', async () => {
+    const createCase = async (fixture: TestData, label: string, appointmentStatus: 'scheduled' | 'arrived' | 'cancelled' | 'completed', fractionStatus: 'delivered' | 'interrupted' = 'delivered') => {
+      const episode = await createEpisode(actor(fixture), { patientId: fixture.patientId, diagnosis: `Synthetic ${label}`, diagnosisCategory: config.diagnoses[0]!.name });
+      episodeIds.push(episode.id);
+      const approved = { ...episode.data, assessmentStatus: 'finalized' as const, mdt: { decision: 'approved' as const, consultants: ['Synthetic consultant'], assessment: 'Approved synthetic plan', notes: '', investigations: '', assessmentRevision: 1 }, preparation: { consent: true, imaging: true, clinicalReady: true, notes: '', instructions: '', actions: '', ready: true } };
+      await pool.query("update gamma_knife_episodes set status='preparation',data=$2::jsonb,revision=revision+1 where id=$1", [episode.id, JSON.stringify(approved)]);
+      await pool.query("update gamma_knife_readiness_items set status='completed',completed_at=now(),completed_by_user_id=$2,updated_by_user_id=$2 where episode_id=$1", [episode.id, fixture.userId]);
+      const prepared = await changeEpisode(actor(fixture), episode.id, 'preparation', { revision: (await findEpisode(episode.id)).revision, ready: true, consent: true, imaging: true, clinicalReady: true, notes: 'Synthetic readiness confirmed.', instructions: '', actions: '', reason: 'Synthetic test preparation.' });
+      const inserted = await pool.query<{ id: number }>(`insert into appointments_v2.bookings(patient_id,modality_id,exam_type_id,booking_date,booking_time,case_category,requires_report,status,policy_version_id,capacity_resolution_mode,uses_special_quota,is_walk_in,created_by_user_id)
+        values($1,$2,$3,'2045-08-17','09:00','non_oncology',false,'scheduled',$4,'standard',false,false,$5) returning id`, [fixture.patientId, fixture.modalityId, fixture.examTypeId, fixture.policyVersionId, fixture.userId]);
+      const bookingId = Number(inserted.rows[0]!.id);
+      bookingIds.push(bookingId);
+      if (appointmentStatus === 'arrived' || appointmentStatus === 'cancelled') await pool.query('update appointments_v2.bookings set status=$2,arrived_at=case when $2=\'arrived\' then now() else arrived_at end where id=$1', [bookingId, appointmentStatus]);
+      if (appointmentStatus === 'completed') await updateBookingStatusManual(bookingId, 'completed', 'Synthetic service completed before Gamma Knife course reconciliation.', fixture.userId, 'supervisor');
+      await pool.query("update gamma_knife_episodes set data=jsonb_set(data,'{treatmentAppointment}',$2::jsonb,true),revision=revision+1 where id=$1", [episode.id, JSON.stringify({ bookingId, confirmed: true, postponed: false })]);
+      let current = await findEpisode(prepared.episode.id);
+      const course = await createTreatmentCourse(actor(fixture), episode.id, { revision: current.revision, immobilization: 'frame', plannedFractionCount: 1, gammaPlanReference: `GP-${label}` });
+      current = course.episode;
+      const fraction = await addTreatmentFraction(actor(fixture), episode.id, course.course.id, { revision: current.revision, plannedFractionNumber: 1, status: fractionStatus, eventDate: '2026-11-05', operatorName: 'Synthetic clinician', gammaPlanReference: fractionStatus === 'delivered' ? `GP-${label}-F1` : '', notes: '' });
+      return { episode: fraction.episode, courseId: Number(course.course.id), bookingId };
+    };
+
+    const deliveredFixture = fixtures[26]!;
+    const delivered = await createCase(deliveredFixture, 'delivered-treatment', 'scheduled');
+    await pool.query("update users set gamma_knife_permissions=array['access','treatment']::text[] where id=$1", [deliveredFixture.userId]);
+    const completionInput = { revision: delivered.episode.revision, completedAt: '2026-11-05', reason: 'GammaPlan confirms the delivered fraction.', confirmed: true };
+    const concurrent = await Promise.allSettled([
+      changeTreatmentCourse(actor(deliveredFixture), delivered.episode.id, delivered.courseId, 'complete', completionInput),
+      changeTreatmentCourse(actor(deliveredFixture), delivered.episode.id, delivered.courseId, 'complete', completionInput),
+    ]);
+    assert.equal(concurrent.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(concurrent.filter(result => result.status === 'rejected').length, 1, 'the concurrent stale completion is rejected');
+    assert.equal((await findEpisode(delivered.episode.id)).status, 'followup');
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [delivered.bookingId])).rows[0]!.status, 'completed');
+    assert.equal((await pool.query<{ count: number }>("select count(*)::int as count from patient_notification_events where booking_id=$1 and event_type='appointment_cancelled'", [delivered.bookingId])).rows[0]!.count, 0);
+    assert.equal((await pool.query<{ count: number }>("select count(*)::int as count from gamma_knife_treatment_history where course_id=$1 and action='course_complete'", [delivered.courseId])).rows[0]!.count, 1);
+
+    const completedFixture = fixtures[27]!;
+    const completedAppointment = await createCase(completedFixture, 'previously-completed-appointment', 'completed');
+    const appointmentVersion = (await pool.query<{ updated_at: string }>('select updated_at::text from appointments_v2.bookings where id=$1', [completedAppointment.bookingId])).rows[0]!.updated_at;
+    const alreadyCompleted = await changeTreatmentCourse(actor(completedFixture), completedAppointment.episode.id, completedAppointment.courseId, 'complete', { revision: completedAppointment.episode.revision, completedAt: '2026-11-05', reason: 'Confirm delivered treatment against its completed appointment.', confirmed: true });
+    assert.equal(alreadyCompleted.reconciliationRequired, false);
+    assert.equal((await pool.query<{ status: string; updated_at: string }>('select status,updated_at::text from appointments_v2.bookings where id=$1', [completedAppointment.bookingId])).rows[0]!.status, 'completed');
+    assert.equal((await pool.query<{ updated_at: string }>('select updated_at::text from appointments_v2.bookings where id=$1', [completedAppointment.bookingId])).rows[0]!.updated_at, appointmentVersion);
+
+    const conflictFixture = fixtures[28]!;
+    const conflict = await createCase(conflictFixture, 'cancelled-appointment-conflict', 'cancelled');
+    const beforeNotifications = (await pool.query<{ count: number }>("select count(*)::int as count from patient_notification_events where booking_id=$1 and event_type='appointment_cancelled'", [conflict.bookingId])).rows[0]!.count;
+    const conflictResult = await changeTreatmentCourse(actor(conflictFixture), conflict.episode.id, conflict.courseId, 'complete', { revision: conflict.episode.revision, completedAt: '2026-11-05', reason: 'GammaPlan confirms delivery despite the booking conflict.', confirmed: true });
+    assert.equal(conflictResult.episode.status, 'followup');
+    assert.equal(conflictResult.reconciliationRequired, true);
+    const unresolved = await reconcileEpisodeAppointment(actor(conflictFixture), conflict.episode.id, conflict.bookingId, { revision: conflictResult.episode.revision, reason: 'Review the terminal booking conflict.' });
+    assert.equal(unresolved.reconciliationRequired, true);
+    assert.match(unresolved.message ?? '', /conflicting terminal status/);
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [conflict.bookingId])).rows[0]!.status, 'cancelled');
+    assert.equal((await pool.query<{ count: number }>("select count(*)::int as count from patient_notification_events where booking_id=$1 and event_type='appointment_cancelled'", [conflict.bookingId])).rows[0]!.count, beforeNotifications);
+
+    const interruptedFixture = fixtures[29]!;
+    const interrupted = await createCase(interruptedFixture, 'interrupted-course', 'arrived', 'interrupted');
+    assert.equal((await pool.query<{ status: string }>('select status from gamma_knife_treatment_courses where id=$1', [interrupted.courseId])).rows[0]!.status, 'interrupted');
+    assert.equal((await findEpisode(interrupted.episode.id)).status, 'treatment');
+    const interruptionVersion = (await pool.query<{ updated_at: string }>('select updated_at::text from appointments_v2.bookings where id=$1', [interrupted.bookingId])).rows[0]!.updated_at;
+    await assert.rejects(() => updateBookingStatusManual(interrupted.bookingId, 'completed', 'Simulate a failed episode side effect.', interruptedFixture.userId, 'supervisor', {
+      expectedUpdatedAt: interruptionVersion,
+      transactionalAfterStatusChange: async () => { throw new Error('simulated episode update failure'); },
+    }), /simulated episode update failure/);
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [interrupted.bookingId])).rows[0]!.status, 'arrived', 'a failed Gamma Knife transaction hook rolls back the appointment transition');
+  });
+
   it('corrects contact details with the patient audit, routes sensitive identity changes for review, and appends a post-closure addendum', async () => {
     const fixture = fixtures[4]!;
     let episode = await createEpisode(actor(fixture), { patientId: fixture.patientId, diagnosis: 'Synthetic demographic referral', diagnosisCategory: config.diagnoses[0]!.name });
@@ -288,7 +360,7 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
     const fixture = fixtures[8]!;
     const episode = await createEpisode(actor(fixture), { patientId: fixture.patientId, diagnosis: 'Synthetic delete guard', diagnosisCategory: config.diagnoses[0]!.name });
     episodeIds.push(episode.id);
-    await assert.rejects(() => deletePatient(fixture.patientId, fixture.userId), (error: unknown) => Boolean(error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409 && String((error as { message?: string }).message).includes('Gamma Knife episode history')));
+    await assert.rejects(() => deletePatientService(fixture.patientId, fixture.userId), (error: unknown) => Boolean(error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409 && String((error as { message?: string }).message).includes('Gamma Knife episode history')));
     assert.equal((await pool.query('select count(*)::int as count from patients where id=$1', [fixture.patientId])).rows[0]!.count, 1);
   });
 
@@ -351,6 +423,43 @@ describe('Gamma Knife operational corrections and cancelled-course replacement',
     assert.equal(Number(preserved.original_patient_snapshot.patientId), source.patientId);
     assert.equal(Number(preserved.corrected_patient_snapshot.patientId), target.patientId);
     assert.equal(Number((await findEpisode(episode.id)).patientId), target.patientId);
+  });
+
+  it('archives attribution snapshots when the corrected patient is merged or deleted', async () => {
+    const episodePatient = fixtures[21]!;
+    const mergeSource = fixtures[22]!;
+    const mergeTarget = fixtures[23]!;
+    let mergeEpisode = await createEpisode(actor(episodePatient), { patientId: episodePatient.patientId, diagnosis: 'Synthetic corrected-patient merge attribution', diagnosisCategory: config.diagnoses[0]!.name });
+    episodeIds.push(mergeEpisode.id);
+    await pool.query("update gamma_knife_episodes set data=jsonb_set(data,'{clinical}', '{\"history\":\"Reviewed synthetic history\",\"examination\":\"\",\"imaging\":\"\",\"assessment\":\"\",\"priorTreatment\":\"\",\"diagnosisDetails\":\"\"}'::jsonb,true),revision=revision+1 where id=$1", [mergeEpisode.id]);
+    mergeEpisode = await findEpisode(mergeEpisode.id);
+    const mergePatient = await pool.query<{ mrn: string; arabic_full_name: string; english_full_name: string | null }>('select mrn,arabic_full_name,english_full_name from patients where id=$1', [mergeSource.patientId]);
+    const mergeIdentity = mergePatient.rows[0]!;
+    mergeEpisode = (await markEpisodeEnteredInError(actor(episodePatient), mergeEpisode.id, { revision: mergeEpisode.revision, confirmed: true, correctedPatientId: mergeSource.patientId, confirmationPatientMrn: mergeIdentity.mrn, confirmationPatientName: mergeIdentity.english_full_name ?? mergeIdentity.arabic_full_name, reason: 'The early referral selected the wrong record; preserve the confirmed attribution.' })).episode;
+    const mergeCorrection = await pool.query<{ id: number; corrected_patient_snapshot: Record<string, unknown> }>('select id,corrected_patient_snapshot from gamma_knife_patient_attribution_corrections where episode_id=$1', [mergeEpisode.id]);
+
+    await mergePatients({ targetPatientId: mergeTarget.patientId, sourcePatientId: mergeSource.patientId, confirmationText: 'MERGE' }, mergeTarget.userId);
+    const mergedAttribution = await pool.query<{ corrected_patient_id: number | null; corrected_patient_snapshot: Record<string, unknown> }>('select corrected_patient_id,corrected_patient_snapshot from gamma_knife_patient_attribution_corrections where id=$1', [mergeCorrection.rows[0]!.id]);
+    assert.equal(mergedAttribution.rows[0]!.corrected_patient_id, null);
+    assert.equal(Number(mergedAttribution.rows[0]!.corrected_patient_snapshot.patientId), mergeSource.patientId);
+    assert.equal(Number((await findEpisode(mergeEpisode.id)).patientId), episodePatient.patientId);
+
+    const deleteEpisodePatient = fixtures[24]!;
+    const deleteCandidate = fixtures[25]!;
+    let deleteEpisode = await createEpisode(actor(deleteEpisodePatient), { patientId: deleteEpisodePatient.patientId, diagnosis: 'Synthetic corrected-patient deletion attribution', diagnosisCategory: config.diagnoses[0]!.name });
+    episodeIds.push(deleteEpisode.id);
+    await pool.query("update gamma_knife_episodes set data=jsonb_set(data,'{clinical}', '{\"history\":\"Reviewed synthetic history\",\"examination\":\"\",\"imaging\":\"\",\"assessment\":\"\",\"priorTreatment\":\"\",\"diagnosisDetails\":\"\"}'::jsonb,true),revision=revision+1 where id=$1", [deleteEpisode.id]);
+    deleteEpisode = await findEpisode(deleteEpisode.id);
+    const deletePatient = await pool.query<{ mrn: string; arabic_full_name: string; english_full_name: string | null }>('select mrn,arabic_full_name,english_full_name from patients where id=$1', [deleteCandidate.patientId]);
+    const deleteIdentity = deletePatient.rows[0]!;
+    deleteEpisode = (await markEpisodeEnteredInError(actor(deleteEpisodePatient), deleteEpisode.id, { revision: deleteEpisode.revision, confirmed: true, correctedPatientId: deleteCandidate.patientId, confirmationPatientMrn: deleteIdentity.mrn, confirmationPatientName: deleteIdentity.english_full_name ?? deleteIdentity.arabic_full_name, reason: 'Preserve the confirmed alternate identity while testing an authorized duplicate deletion.' })).episode;
+    const deleteCorrection = await pool.query<{ id: number; corrected_patient_snapshot: Record<string, unknown> }>('select id,corrected_patient_snapshot from gamma_knife_patient_attribution_corrections where episode_id=$1', [deleteEpisode.id]);
+
+    await deletePatientService(deleteCandidate.patientId, deleteCandidate.userId);
+    const deletedAttribution = await pool.query<{ corrected_patient_id: number | null; corrected_patient_snapshot: Record<string, unknown> }>('select corrected_patient_id,corrected_patient_snapshot from gamma_knife_patient_attribution_corrections where id=$1', [deleteCorrection.rows[0]!.id]);
+    assert.equal(deletedAttribution.rows[0]!.corrected_patient_id, null);
+    assert.equal(Number(deletedAttribution.rows[0]!.corrected_patient_snapshot.patientId), deleteCandidate.patientId);
+    assert.equal(Number((await findEpisode(deleteEpisode.id)).patientId), deleteEpisodePatient.patientId);
   });
 
   it('blocks merges for active and treated Gamma Knife episodes', async () => {

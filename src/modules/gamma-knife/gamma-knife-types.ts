@@ -33,7 +33,7 @@ export type EpisodeData = {
   mdt?: Mdt; preparation?: Preparation; treatment?: Treatment; followups?: Followup[];
   treatmentAppointment?: AppointmentLink; followupAppointment?: AppointmentLink;
   nextFollowupDate?: string | null;
-  appointmentReconciliation?: Array<{ purpose: 'treatment' | 'followup'; bookingId: number; status: 'required' | 'resolved'; reason: string }>;
+  appointmentReconciliation?: Array<{ purpose: 'treatment' | 'followup'; bookingId: number; targetStatus?: 'cancelled' | 'completed'; status: 'required' | 'resolved'; reason: string }>;
   checklist?: string[]; investigationsPending?: boolean; postponementReason?: string; closureReason?: string;
   legacyTreatmentSummarized?: boolean;
 };

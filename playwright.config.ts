@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 export default defineConfig({
   testDir: "./e2e/specs",
@@ -22,6 +24,10 @@ export default defineConfig({
       url: "http://127.0.0.1:3100/api/ready",
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      env: {
+        NODE_ENV: "test",
+        RISPRO_TEST_DICOM_WORKLIST_SOURCE_DIR: path.join(tmpdir(), `rispro-e2e-mwl-${process.pid}`),
+      },
     },
     {
       command: "node --env-file=e2e/.env frontend/node_modules/vite/bin/vite.js frontend --host 127.0.0.1",

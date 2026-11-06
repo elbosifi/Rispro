@@ -12,6 +12,7 @@ import { isPatientIdentityVerificationRequired, maskPatientIdentifier, resolvePa
 import { createBooking } from '../appointments-v2/booking/services/create-booking.service.js';
 import { cancelBooking } from '../appointments-v2/booking/services/cancel-booking.service.js';
 import { rescheduleBooking } from '../appointments-v2/booking/services/reschedule-booking.service.js';
+import { updateBookingStatusManual } from '../appointments-v2/booking/services/status-booking.service.js';
 import { SchedulingError } from '../appointments-v2/shared/errors/scheduling-error.js';
 import type { CreateBookingPayload } from '../appointments-v2/booking/models/booking.js';
 import type { AuthenticatedUserContext } from '../../types/http.js';
@@ -234,11 +235,13 @@ async function hasSignificantEpisodeEvidence(client: PoolClient, episode: Episod
 }
 
 type AppointmentPurpose = 'treatment' | 'followup';
+type AppointmentReconciliationTarget = 'cancelled' | 'completed';
+type PendingAppointmentReconciliation = { purpose: AppointmentPurpose; bookingId: number; targetStatus: AppointmentReconciliationTarget; reason: string };
 const appointmentLinkKey: Record<AppointmentPurpose, 'treatmentAppointment' | 'followupAppointment'> = {
   treatment: 'treatmentAppointment', followup: 'followupAppointment',
 };
 
-/** Cancel linked Appointments V2 bookings through its policy service, recording a visible task when policy or privilege prevents cancellation. */
+/** Persist the episode action and its outstanding appointment work before attempting cross-service transitions. */
 async function reconcileEpisodeAppointments(
   actor: Actor,
   episodeId: unknown,
@@ -246,73 +249,62 @@ async function reconcileEpisodeAppointments(
   purposes: AppointmentPurpose[],
   reason: string,
   validate: (client: PoolClient, episode: Episode) => Promise<void>,
+  finalize: (client: PoolClient, episode: Episode, pending: PendingAppointmentReconciliation[]) => Promise<{ action: string; details?: Record<string, unknown> }>,
 ) {
-  const links = await transaction(async client => {
+  const staged = await transaction(async client => {
     const episode = await findEpisode(episodeId, client, true);
     checkEpisodeRevision(episode, expectedRevision);
     await validate(client, episode);
-    return purposes.flatMap(purpose => {
+    const links = purposes.flatMap(purpose => {
       const link = episode.data[appointmentLinkKey[purpose]];
       return link ? [{ purpose, bookingId: Number(link.bookingId) }] : [];
     });
+    const pending: PendingAppointmentReconciliation[] = [];
+    for (const link of links) {
+      const booking = await client.query<{ status: string; patient_id: number }>(
+        'select status,patient_id from appointments_v2.bookings where id=$1 and voided_at is null',
+        [link.bookingId],
+      );
+      if (booking.rows[0]?.status === 'cancelled') continue;
+      const bookingReason = !booking.rows.length
+        ? 'The linked RISpro appointment no longer exists and requires authorized review.'
+        : Number(booking.rows[0]!.patient_id) !== episode.patientId
+          ? 'The linked RISpro appointment belongs to a different patient and requires authorized review.'
+          : 'The linked RISpro appointment must be cancelled through Appointments V2.';
+      pending.push({ ...link, targetStatus: 'cancelled', reason: bookingReason });
+    }
+    await recordAppointmentReconciliation(client, episode, actor, pending);
+    const operation = await finalize(client, episode, pending);
+    await episodeWorkflowHistory(client, episode, actor, operation.action, reason, {
+      ...operation.details,
+      appointmentReconciliationRequired: pending.map(item => item.bookingId),
+    });
+    return { episode, pending };
   });
-  let revision = expectedRevision;
-  const pending: Array<{ purpose: AppointmentPurpose; bookingId: number; reason: string }> = [];
-  const canCancel = (await permissions(actor)).includes('scheduling');
-  for (const link of links) {
-    const active = await pool.query<{ status: string; patient_id: number; updated_at: string }>("select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1 and status in ('scheduled','arrived','waiting') and voided_at is null", [link.bookingId]);
-    if (!active.rows.length) continue;
-    const linkedEpisode = await findEpisode(episodeId);
-    if (Number(active.rows[0]!.patient_id) !== linkedEpisode.patientId) {
-      pending.push({ ...link, reason: 'The linked RISpro appointment belongs to a different patient and requires authorized review.' });
-      continue;
-    }
-    if (!canCancel) {
-      pending.push({ ...link, reason: 'The assigned user cannot cancel this RISpro appointment.' });
-      continue;
-    }
-    try {
-      await cancelBooking(link.bookingId, Number(actor.sub), async (client, cancelled) => {
-        await authorize(actor, 'scheduling', client);
-        const current = await findEpisode(episodeId, client, true);
-        checkEpisodeRevision(current, revision);
-        await validate(client, current);
-        const key = appointmentLinkKey[link.purpose];
-        if (Number(current.data[key]?.bookingId) !== link.bookingId) throw new HttpError(409, 'The linked appointment changed. Reload the episode before continuing.');
-        current.data[key] = { ...current.data[key]!, confirmed: false, postponed: true };
-        current.data.appointmentReconciliation = (current.data.appointmentReconciliation ?? []).map(item => item.bookingId === link.bookingId ? { ...item, status: 'resolved' as const } : item);
-        await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [current.id, `appointment_reconciliation:${link.bookingId}`, actor.sub]);
-        await episodeWorkflowHistory(client, current, actor, 'linked_appointment_cancelled', reason, { purpose: link.purpose, bookingId: link.bookingId, previousBookingStatus: cancelled.previousStatus });
-        revision = current.revision;
-      }, active.rows[0]!.updated_at);
-    } catch (error) {
-      if (!(error instanceof SchedulingError)) throw error;
-      const state = await transaction(async client => {
-        const current = await findEpisode(episodeId, client, true);
-        checkEpisodeRevision(current, revision);
-        await validate(client, current);
-        const status = await client.query<{ status: string }>('select status from appointments_v2.bookings where id=$1 for share', [link.bookingId]);
-        if (!status.rows.length || !['scheduled','arrived','waiting'].includes(status.rows[0].status)) {
-          current.data[appointmentLinkKey[link.purpose]] = { ...current.data[appointmentLinkKey[link.purpose]]!, confirmed: false, postponed: true };
-          current.data.appointmentReconciliation = (current.data.appointmentReconciliation ?? []).map(item => item.bookingId === link.bookingId ? { ...item, status: 'resolved' as const } : item);
-          await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [current.id, `appointment_reconciliation:${link.bookingId}`, actor.sub]);
-          await episodeWorkflowHistory(client, current, actor, 'linked_appointment_reconciled', reason, { purpose: link.purpose, bookingId: link.bookingId, bookingStatus: status.rows[0]?.status ?? 'missing' });
-          return { revision: current.revision, pending: false };
-        }
-        return { revision: current.revision, pending: true };
-      });
-      revision = state.revision;
-      if (state.pending) pending.push({ ...link, reason: error.message });
+  let episode = staged.episode;
+  if (staged.pending.length && (await permissions(actor)).includes('scheduling')) {
+    for (const item of staged.pending) {
+      const task = episode.data.appointmentReconciliation?.find(value => value.bookingId === item.bookingId && value.status === 'required');
+      if (!task) continue;
+      try {
+        const result = await reconcileEpisodeAppointment(actor, episode.id, item.bookingId, { revision: episode.revision, reason });
+        episode = result.episode;
+      } catch {
+        episode = await findEpisode(episode.id);
+      }
     }
   }
-  return { revision, pending };
+  const pending = (episode.data.appointmentReconciliation ?? []).filter(item =>
+    item.status === 'required' && staged.pending.some(candidate => candidate.bookingId === item.bookingId),
+  );
+  return { episode, revision: episode.revision, pending, reconciliationRequired: pending.length > 0, reconciliationPending: pending.map(item => item.bookingId) };
 }
 
-async function recordAppointmentReconciliation(client: PoolClient, episode: Episode, actor: Actor, pending: Array<{ purpose: AppointmentPurpose; bookingId: number; reason: string }>) {
+async function recordAppointmentReconciliation(client: PoolClient, episode: Episode, actor: Actor, pending: PendingAppointmentReconciliation[]) {
   for (const item of pending) {
     const previous = episode.data.appointmentReconciliation?.find(value => value.bookingId === item.bookingId);
-    if (previous?.status === 'required') continue;
-    episode.data.appointmentReconciliation = [...(episode.data.appointmentReconciliation ?? []).filter(value => value.bookingId !== item.bookingId), { purpose: item.purpose, bookingId: item.bookingId, status: 'required', reason: item.reason }];
+    if (previous?.status === 'required' && previous.targetStatus === item.targetStatus) continue;
+    episode.data.appointmentReconciliation = [...(episode.data.appointmentReconciliation ?? []).filter(value => value.bookingId !== item.bookingId), { purpose: item.purpose, bookingId: item.bookingId, targetStatus: item.targetStatus, status: 'required', reason: item.reason }];
     await client.query(`insert into gamma_knife_operation_task_assignments(episode_id,task_key,owner_user_id,due_date,priority,updated_by_user_id,status)
       values($1,$2,null,null,'urgent',$3,'open') on conflict(episode_id,task_key) do update set status='open',priority='urgent',updated_by_user_id=excluded.updated_by_user_id,updated_at=now()`, [episode.id, `appointment_reconciliation:${item.bookingId}`, actor.sub]);
   }
@@ -323,10 +315,13 @@ async function resolveAppointmentReconciliation(client: PoolClient, episode: Epi
   if (Number(episode.data[key]?.bookingId) !== bookingId) throw new HttpError(409, 'The appointment is no longer linked to this episode. Review the episode and task again.');
   const task = episode.data.appointmentReconciliation?.find(item => item.bookingId === bookingId && item.status === 'required');
   if (!task) throw new HttpError(409, 'This appointment reconciliation task is already resolved or no longer applies.');
-  episode.data[key] = { ...episode.data[key]!, confirmed: false, postponed: true };
+  const targetStatus = task.targetStatus ?? 'cancelled';
+  episode.data[key] = targetStatus === 'cancelled'
+    ? { ...episode.data[key]!, confirmed: false, postponed: true }
+    : { ...episode.data[key]!, postponed: false };
   episode.data.appointmentReconciliation = (episode.data.appointmentReconciliation ?? []).map(item => item.bookingId === bookingId ? { ...item, status: 'resolved' as const } : item);
   await client.query("update gamma_knife_operation_task_assignments set status='resolved',updated_at=now(),updated_by_user_id=$3 where episode_id=$1 and task_key=$2", [episode.id, `appointment_reconciliation:${bookingId}`, actor.sub]);
-  await episodeWorkflowHistory(client, episode, actor, 'appointment_reconciliation_resolved', reason, { purpose, bookingId, bookingStatus });
+  await episodeWorkflowHistory(client, episode, actor, targetStatus === 'completed' ? 'treatment_appointment_completed' : 'appointment_reconciliation_resolved', reason, { purpose, bookingId, bookingStatus, targetStatus });
 }
 
 export async function reconcileEpisodeAppointment(actor: Actor, episodeId: unknown, bookingIdValue: unknown, input: unknown) {
@@ -338,18 +333,42 @@ export async function reconcileEpisodeAppointment(actor: Actor, episodeId: unkno
     if (!task) throw new HttpError(404, 'Appointment reconciliation task not found.');
     const link = episode.data[appointmentLinkKey[task.purpose]];
     if (Number(link?.bookingId) !== bookingId) throw new HttpError(409, 'The appointment is no longer linked to this episode.');
-    return { revision: episode.revision, purpose: task.purpose, patientId: episode.patientId };
+    return { revision: episode.revision, purpose: task.purpose, targetStatus: task.targetStatus ?? 'cancelled', patientId: episode.patientId };
   });
-  const snapshot = await pool.query<{ status: string; patient_id: number; updated_at: string }>('select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1 and voided_at is null', [bookingId]);
-  if (!snapshot.rows[0] || !['scheduled','arrived','waiting'].includes(snapshot.rows[0].status)) {
+  const snapshot = await pool.query<{ status: string; patient_id: number; updated_at: string }>('select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1', [bookingId]);
+  if (!snapshot.rows[0]) return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: 'The linked RISpro appointment is missing and requires authorized review.' };
+  if (Number(snapshot.rows[0].patient_id) !== initial.patientId) return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: 'The appointment belongs to another patient and remains in the exception queue for authorized review.' };
+
+  if (initial.targetStatus === 'completed') {
+    if (!['scheduled','arrived','waiting','in-progress','completed'].includes(snapshot.rows[0].status)) {
+      return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: `The RISpro appointment is ${snapshot.rows[0].status}; review the conflicting terminal status before reconciling delivered treatment.` };
+    }
+    try {
+      await updateBookingStatusManual(bookingId, 'completed', reason, Number(actor.sub), actor.role, {
+        expectedUpdatedAt: snapshot.rows[0].updated_at,
+        transactionalAfterStatusChange: async (client, result) => {
+          await authorize(actor, 'scheduling', client);
+          const episode = await findEpisode(episodeId, client, true);
+          checkEpisodeRevision(episode, initial.revision);
+          await resolveAppointmentReconciliation(client, episode, actor, initial.purpose, bookingId, reason, result.previousStatus);
+        },
+      });
+      return { episode: await findEpisode(episodeId), reconciliationRequired: false };
+    } catch (error) {
+      if (!(error instanceof SchedulingError)) throw error;
+      return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: error.message };
+    }
+  }
+
+  if (snapshot.rows[0].status === 'cancelled') {
     return transaction(async client => {
       await authorize(actor, 'scheduling', client);
       const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, initial.revision);
-      await resolveAppointmentReconciliation(client, episode, actor, initial.purpose, bookingId, reason, snapshot.rows[0]?.status ?? 'missing');
+      await resolveAppointmentReconciliation(client, episode, actor, initial.purpose, bookingId, reason, snapshot.rows[0]!.status);
       return { episode, reconciliationRequired: false };
     });
   }
-  if (Number(snapshot.rows[0].patient_id) !== initial.patientId) return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: 'The appointment belongs to another patient and remains in the exception queue for authorized review.' };
+  if (!['scheduled','arrived','waiting'].includes(snapshot.rows[0].status)) return { episode: await findEpisode(episodeId), reconciliationRequired: true, message: `The RISpro appointment is ${snapshot.rows[0].status} and requires authorized review before this episode can be reconciled.` };
   try {
     await cancelBooking(bookingId, Number(actor.sub), async (client, cancelled) => {
       await authorize(actor, 'scheduling', client);
@@ -377,22 +396,17 @@ export async function withdrawEpisode(actor: Actor, episodeId: unknown, input: u
       await authorize(actor, 'episode_correction', client);
     }
   };
-  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate);
-  return transaction(async client => {
+  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate, async (client, episode) => {
     await authorize(actor, 'referral', client);
-    const episode = await findEpisode(episodeId, client, true);
-    checkEpisodeRevision(episode, reconciliation.revision);
-    await validate(client, episode);
-    await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
     episode.active = false;
     episode.status = 'closed';
     episode.closureClassification = 'withdrawn';
     episode.data.closureReason = reason;
     episode.qrActive = false;
     await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
-    await episodeWorkflowHistory(client, episode, actor, 'referral_withdrawn', reason, { classification: 'withdrawn', appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
-    return { episode, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
+    return { action: 'referral_withdrawn', details: { classification: 'withdrawn' } };
   });
+  return reconciliation;
 }
 
 export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown, input: unknown) {
@@ -416,12 +430,8 @@ export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown
       if (!selected || selected.mrn !== confirmedMrn || !validNames.includes(confirmedName)) throw new HttpError(409, 'Confirm the corrected patient by entering the same MRN and registered name shown for that patient.');
     }
   };
-  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate);
-  return transaction(async client => {
+  const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment','followup'], reason, validate, async (client, episode) => {
     await authorize(actor, 'episode_correction', client);
-    const episode = await findEpisode(episodeId, client, true);
-    checkEpisodeRevision(episode, reconciliation.revision);
-    await validate(client, episode);
     let attributionDetails: Record<string, unknown> = {};
     const significant = await hasSignificantEpisodeEvidence(client, episode);
     const delivered = await hasDeliveredTreatment(client, episode.id);
@@ -438,16 +448,15 @@ export async function markEpisodeEnteredInError(actor: Actor, episodeId: unknown
         attributionDetails = { patientAttributionCorrectionId: Number(saved.rows[0]!.id), originalPatientId: episode.patientId, correctedPatientId, correctedPatientMrn: selected.mrn, correctedPatientName: correctedName, clinicalRecordAttributionPreserved: true };
       } else attributionDetails = { duplicateEpisodeConfirmedPatientId: episode.patientId, confirmedPatientMrn: selected.mrn, clinicalRecordAttributionPreserved: true };
     }
-    await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
     episode.active = false;
     episode.status = 'closed';
     episode.closureClassification = 'entered_in_error';
     episode.data.closureReason = reason;
     episode.qrActive = false;
     await client.query('update gamma_knife_episodes set qr_hash=null where id=$1', [episode.id]);
-    await episodeWorkflowHistory(client, episode, actor, 'episode_entered_in_error', reason, { classification: 'entered_in_error', ...attributionDetails, appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
-    return { episode, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
+    return { action: 'episode_entered_in_error', details: { classification: 'entered_in_error', ...attributionDetails } };
   });
+  return reconciliation;
 }
 
 function identitySnapshot(patient: { id: number; mrn: string; national_id: string | null; arabic_full_name: string; english_full_name: string | null; sex: string | null; estimated_date_of_birth: string | null }) {
@@ -1119,29 +1128,97 @@ export async function addTreatmentFraction(actor: Actor, episodeId: unknown, cou
     return { fraction, episode, ...await workflowRecords(episode.id, client) };
   });
 }
-export async function changeTreatmentCourse(actor: Actor, episodeId: unknown, courseId: unknown, actionName: string, input: unknown) {
-  const body = record(input); let reason = text(body.reason, 'Correction reason');
-  let expectedRevision = Number(body.revision);
-  let appointmentReconciliation: Awaited<ReturnType<typeof reconcileEpisodeAppointments>> | null = null;
-  if (actionName === 'complete') {
-    await authorize(actor, 'treatment');
-    reason = text(body.reason, 'GammaPlan completion confirmation', true);
-    const validateCompletion = async (client: PoolClient, episode: Episode) => {
-      if (!episode.active || episode.status !== 'treatment' || !episode.data.preparation?.ready) throw new HttpError(409, 'Treatment readiness must be current before course completion is recorded.');
-      const found = await client.query("select id,status,planned_fraction_count from gamma_knife_treatment_courses where id=$1 and episode_id=$2 for update", [id(courseId), episode.id]);
-      if (!found.rows[0] || found.rows[0].status !== 'in_progress' || body.confirmed !== true) throw new HttpError(409, 'An in-progress course and explicit GammaPlan completion confirmation are required.');
-      const delivered = await client.query("select count(distinct planned_fraction_number)::int as count from gamma_knife_treatment_fractions where course_id=$1 and status='delivered'", [id(courseId)]);
-      if (Number(delivered.rows[0]?.count) < Number(found.rows[0].planned_fraction_count)) throw new HttpError(409, 'The course has fewer delivered fraction records than its planned fraction count. Reconcile the plan against GammaPlan or keep the course open as interrupted.');
-      const completedAt = date(body.completedAt);
-      if (completedAt > getTripoliToday()) throw new HttpError(400, 'Course completion date cannot be in the future.');
-    };
-    appointmentReconciliation = await reconcileEpisodeAppointments(actor, episodeId, expectedRevision, ['treatment'], reason, validateCompletion);
-    expectedRevision = appointmentReconciliation.revision;
+async function completeTreatmentCourse(actor: Actor, episodeId: unknown, courseId: unknown, body: Record<string, unknown>, reason: string) {
+  const expectedRevision = Number(body.revision);
+  const completedAt = date(body.completedAt);
+  if (body.confirmed !== true) throw new HttpError(409, 'An explicit GammaPlan completion confirmation is required.');
+  if (completedAt > getTripoliToday()) throw new HttpError(400, 'Course completion date cannot be in the future.');
+
+  const validate = async (client: PoolClient, episode: Episode) => {
+    if (!episode.active || episode.status !== 'treatment' || !episode.data.preparation?.ready) throw new HttpError(409, 'Treatment readiness must be current before course completion is recorded.');
+    const found = await client.query('select * from gamma_knife_treatment_courses where id=$1 and episode_id=$2 for update', [id(courseId), episode.id]);
+    const course = found.rows[0] as Record<string, unknown> | undefined;
+    if (!course || course.status !== 'in_progress') throw new HttpError(409, 'An in-progress course is required for completion.');
+    const delivered = await client.query("select count(distinct planned_fraction_number)::int as count from gamma_knife_treatment_fractions where course_id=$1 and status='delivered'", [id(courseId)]);
+    if (Number(delivered.rows[0]?.count) < Number(course.planned_fraction_count)) throw new HttpError(409, 'The course has fewer delivered fraction records than its planned fraction count. Reconcile the plan against GammaPlan or keep the course open as interrupted.');
+    return { course, deliveredCount: Number(delivered.rows[0]!.count) };
+  };
+
+  const initial = await transaction(async client => {
+    await authorize(actor, 'treatment', client);
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, expectedRevision);
+    await validate(client, episode);
+    const bookingId = episode.data.treatmentAppointment?.bookingId ?? null;
+    const booking = bookingId == null ? null : await client.query<{ status: string; patient_id: number; updated_at: string }>(
+      'select status,patient_id,updated_at::text from appointments_v2.bookings where id=$1', [bookingId],
+    );
+    return { episodeRevision: episode.revision, patientId: episode.patientId, bookingId, booking: booking?.rows[0] ?? null };
+  });
+
+  const finish = async (client: PoolClient, reconciliationReason?: string) => {
+    await authorize(actor, 'treatment', client);
+    let bookingStatus: string | null = null;
+    let pendingReason = reconciliationReason;
+    if (initial.bookingId != null) {
+      const booking = await client.query<{ status: string; patient_id: number }>(
+        'select status,patient_id from appointments_v2.bookings where id=$1 for update', [initial.bookingId],
+      );
+      if (!booking.rows[0]) pendingReason ||= 'The linked RISpro appointment no longer exists and requires authorized review.';
+      else {
+        bookingStatus = booking.rows[0].status;
+        if (Number(booking.rows[0].patient_id) !== initial.patientId) pendingReason ||= 'The linked RISpro appointment belongs to another patient and requires authorized review.';
+        if (bookingStatus !== 'completed') pendingReason ||= 'The treatment was delivered, but the linked RISpro appointment is not recorded as completed.';
+      }
+    }
+
+    const episode = await findEpisode(episodeId, client, true);
+    checkEpisodeRevision(episode, initial.episodeRevision);
+    if (initial.bookingId != null && Number(episode.data.treatmentAppointment?.bookingId) !== initial.bookingId) throw new HttpError(409, 'The linked RISpro appointment changed. Reload the episode and reconcile it before completing this course.');
+    const { course, deliveredCount } = await validate(client, episode);
+    const pending = initial.bookingId != null && pendingReason
+      ? [{ purpose: 'treatment' as const, bookingId: initial.bookingId, targetStatus: 'completed' as const, reason: pendingReason }]
+      : [];
+    await recordAppointmentReconciliation(client, episode, actor, pending);
+    await client.query(`update gamma_knife_treatment_courses set status='completed',completion_confirmed=true,completion_reason=$2,completed_at=$3,completed_by=$4,updated_at=now() where id=$1`, [id(courseId), reason, completedAt, actor.sub]);
+    const deliveredRows = await client.query<{ operator_name: string }>("select distinct operator_name from gamma_knife_treatment_fractions where course_id=$1 and status='delivered' order by operator_name", [id(courseId)]);
+    episode.data.treatment = { date: completedAt, immobilization: course.immobilization as Treatment['immobilization'], fractions: deliveredCount, team: deliveredRows.rows.map(row => row.operator_name), completed: true, reportId: null, finalized: false };
+    episode.status = 'followup';
+    const updated = await client.query('select * from gamma_knife_treatment_courses where id=$1', [id(courseId)]);
+    await treatmentHistory(client, id(courseId), actor, 'course_complete', { before: course, after: updated.rows[0] }, reason);
+    await episodeWorkflowHistory(client, episode, actor, 'course_complete', reason, { courseId: id(courseId), appointmentStatus: bookingStatus, appointmentReconciliationRequired: pending.map(item => item.bookingId) });
+    return { course: updated.rows[0], episode, ...await workflowRecords(episode.id, client), reconciliationRequired: pending.length > 0, reconciliationPending: pending.map(item => item.bookingId) };
+  };
+
+  if (initial.bookingId == null) return transaction(client => finish(client));
+  if (!initial.booking || Number(initial.booking.patient_id) !== initial.patientId) {
+    return transaction(client => finish(client, initial.booking ? 'The linked RISpro appointment belongs to another patient and requires authorized review.' : 'The linked RISpro appointment no longer exists and requires authorized review.'));
   }
+  if (!['scheduled','arrived','waiting','in-progress','completed'].includes(initial.booking.status)) {
+    return transaction(client => finish(client, `The treatment was delivered, but the linked RISpro appointment is ${initial.booking!.status} and requires authorized review.`));
+  }
+  try {
+    let completion: Awaited<ReturnType<typeof finish>> | undefined;
+    await updateBookingStatusManual(initial.bookingId, 'completed', reason, Number(actor.sub), actor.role, {
+      expectedUpdatedAt: initial.booking.updated_at,
+      transactionalAfterStatusChange: async client => { completion = await finish(client); },
+    });
+    if (!completion) throw new HttpError(500, 'Appointments V2 completed without saving the Gamma Knife treatment completion.');
+    return completion;
+  } catch (error) {
+    if (!(error instanceof SchedulingError)) throw error;
+    return transaction(client => finish(client, `The treatment was delivered, but Appointments V2 could not complete the linked appointment: ${error.message}`));
+  }
+}
+
+export async function changeTreatmentCourse(actor: Actor, episodeId: unknown, courseId: unknown, actionName: string, input: unknown) {
+  const body = record(input);
+  if (actionName === 'complete') return completeTreatmentCourse(actor, episodeId, courseId, body, text(body.reason, 'GammaPlan completion confirmation', true));
+  let reason = text(body.reason, 'Correction reason');
+  const expectedRevision = Number(body.revision);
   return transaction(async client => {
     await authorize(actor, 'treatment', client);
     const episode = await findEpisode(episodeId, client, true); checkEpisodeRevision(episode, expectedRevision);
-    if (appointmentReconciliation) await recordAppointmentReconciliation(client, episode, actor, appointmentReconciliation.pending);
     const found = await client.query('select * from gamma_knife_treatment_courses where id=$1 and episode_id=$2 for update', [id(courseId), episode.id]);
     if (!found.rows.length) throw new HttpError(404, 'Treatment course not found.');
     const course = found.rows[0] as Record<string, unknown>;
@@ -1169,23 +1246,11 @@ export async function changeTreatmentCourse(actor: Actor, episodeId: unknown, co
       const delivered = await client.query("select 1 from gamma_knife_treatment_fractions where course_id=$1 and status='delivered' limit 1", [id(courseId)]);
       if (delivered.rows.length || !['planned','interrupted'].includes(String(course.status))) throw new HttpError(409, 'A course with delivered fractions cannot be cancelled. Keep it open as interrupted or complete it explicitly from GammaPlan.');
       await client.query("update gamma_knife_treatment_courses set status='cancelled',updated_at=now() where id=$1", [id(courseId)]);
-    } else if (actionName === 'complete') {
-      reason = text(body.reason, 'GammaPlan completion confirmation', true);
-      if (body.confirmed !== true || !['in_progress'].includes(String(course.status))) throw new HttpError(409, 'An in-progress course and explicit GammaPlan completion confirmation are required.');
-      if (episode.status !== 'treatment' || !episode.data.preparation?.ready) throw new HttpError(409, 'Treatment readiness must be current before course completion is recorded.');
-      const delivered = await client.query("select count(distinct planned_fraction_number)::int as count from gamma_knife_treatment_fractions where course_id=$1 and status='delivered'", [id(courseId)]);
-      if (Number(delivered.rows[0]?.count) < Number(course.planned_fraction_count)) throw new HttpError(409, 'The course has fewer delivered fraction records than its planned fraction count. Reconcile the plan against GammaPlan or keep the course open as interrupted.');
-      const completedAt = date(body.completedAt); if (completedAt > getTripoliToday()) throw new HttpError(400, 'Course completion date cannot be in the future.');
-      await client.query(`update gamma_knife_treatment_courses set status='completed',completion_confirmed=true,completion_reason=$2,completed_at=$3,completed_by=$4,updated_at=now() where id=$1`, [id(courseId), reason, completedAt, actor.sub]);
-      const deliveredRows = await client.query<{ operator_name: string }>("select distinct operator_name from gamma_knife_treatment_fractions where course_id=$1 and status='delivered' order by operator_name", [id(courseId)]);
-      const deliveredCount = Number(delivered.rows[0]!.count);
-      episode.data.treatment = { date: completedAt, immobilization: course.immobilization as Treatment['immobilization'], fractions: deliveredCount, team: deliveredRows.rows.map(row => row.operator_name), completed: true, reportId: null, finalized: false };
-      episode.status = 'followup';
     } else throw new HttpError(400, 'Unknown treatment course action.');
     const updated = await client.query('select * from gamma_knife_treatment_courses where id=$1', [id(courseId)]);
     await treatmentHistory(client, id(courseId), actor, `course_${actionName}`, { before: course, after: updated.rows[0] }, reason);
-    await episodeWorkflowHistory(client, episode, actor, `course_${actionName}`, reason, { courseId: id(courseId), appointmentReconciliationRequired: appointmentReconciliation?.pending.map(item => item.bookingId) ?? [] });
-    return { course: updated.rows[0], episode, ...await workflowRecords(episode.id, client), reconciliationRequired: Boolean(appointmentReconciliation?.pending.length), reconciliationPending: appointmentReconciliation?.pending.map(item => item.bookingId) ?? [] };
+    await episodeWorkflowHistory(client, episode, actor, `course_${actionName}`, reason, { courseId: id(courseId) });
+    return { course: updated.rows[0], episode, ...await workflowRecords(episode.id, client), reconciliationRequired: false, reconciliationPending: [] };
   });
 }
 export async function correctTreatmentFraction(actor: Actor, episodeId: unknown, courseId: unknown, fractionId: unknown, input: unknown) {
@@ -1348,19 +1413,14 @@ export async function changeEpisode(actor: Actor, episodeId: unknown, action: st
       requireStage(episode, ['preparation','treatment']);
     };
     await authorize(actor, 'scheduling');
-    const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment'], reason, validate);
-    return transaction(async client => {
+    const reconciliation = await reconcileEpisodeAppointments(actor, episodeId, Number(body.revision), ['treatment'], reason, validate, async (client, episode) => {
       await authorize(actor, 'scheduling', client);
-      const episode = await findEpisode(episodeId, client, true);
-      checkEpisodeRevision(episode, reconciliation.revision);
-      await validate(client, episode);
-      await recordAppointmentReconciliation(client, episode, actor, reconciliation.pending);
       if (episode.data.treatmentAppointment) { episode.data.treatmentAppointment.postponed = true; episode.data.treatmentAppointment.confirmed = false; }
       episode.data.postponementReason = reason;
       if (episode.data.preparation) episode.data.preparation.ready = false;
-      await episodeWorkflowHistory(client, episode, actor, 'treatment_postponed', reason, { stagePreserved: episode.status, appointmentReconciliationRequired: reconciliation.pending.map(item => item.bookingId) });
-      return { episode, token: undefined, reconciliationRequired: reconciliation.pending.length > 0, reconciliationPending: reconciliation.pending.map(item => item.bookingId) };
+      return { action: 'treatment_postponed', details: { stagePreserved: episode.status } };
     });
+    return { ...reconciliation, token: undefined };
   }
   return transaction(async client => {
     await authorize(actor, requiredPermission, client);

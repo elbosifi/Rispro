@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +44,7 @@ const env = {
   ...envValues,
   JWT_SECRET: "test-secret",
   NODE_ENV: process.env.NODE_ENV || "test",
+  RISPRO_TEST_DICOM_WORKLIST_SOURCE_DIR: path.join(tmpdir(), `rispro-test-mwl-${process.pid}`),
 };
 
 const migrateCommand = npmCommand(["run", "migrate"]);

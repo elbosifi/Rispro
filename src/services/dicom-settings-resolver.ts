@@ -137,7 +137,10 @@ export async function resolveGatewaySettings(): Promise<ResolvedGatewaySettings>
   const settings = await loadSettingsMap(["dicom_gateway"]);
   const gw = settings.dicom_gateway || {};
 
-  const worklistSourceDir = resolveAbsolutePath(gw.worklist_source_dir, "storage/dicom/worklist-source");
+  const testWorklistSourceDir = process.env.NODE_ENV === "test"
+    ? normalizeOptionalText(process.env.RISPRO_TEST_DICOM_WORKLIST_SOURCE_DIR)
+    : undefined;
+  const worklistSourceDir = resolveAbsolutePath(testWorklistSourceDir || gw.worklist_source_dir, "storage/dicom/worklist-source");
   const worklistOutputDir = resolveAbsolutePath(gw.worklist_output_dir, "storage/dicom/worklists");
 
   return {

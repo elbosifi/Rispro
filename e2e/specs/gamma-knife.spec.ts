@@ -41,7 +41,7 @@ test.beforeAll(async () => {
     const policy = await db.query('select id from appointments_v2.policy_versions order by id limit 1');
     const gammaOnlyHash = await bcrypt.hash(E2E_PASSWORD, 4);
     const gammaOnly = await db.query(`insert into users(username,password_hash,full_name,role,is_active,gamma_knife_only,gamma_knife_permissions)
-      values('e2e_gamma_neurosurgeon',$1,'Synthetic Gamma Knife Neurosurgeon','doctor',true,true,array['access','clinical','mdt']::text[]) returning id`, [gammaOnlyHash]);
+      values('e2e_gamma_neurosurgeon',$1,'Synthetic Gamma Knife Neurosurgeon','doctor',true,true,array['access','clinical','mdt','treatment','documents']::text[]) returning id`, [gammaOnlyHash]);
     gammaKnifeOnlyUserId = Number(gammaOnly.rows[0].id);
     const correctionOnly = await db.query(`insert into users(username,password_hash,full_name,role,is_active,gamma_knife_only,gamma_knife_permissions)
       values('e2e_gamma_correction_supervisor',$1,'Synthetic Gamma Knife Operations Coordinator','supervisor',true,true,array['access','referral','scheduling','episode_correction']::text[]) returning id`, [gammaOnlyHash]);
@@ -187,7 +187,9 @@ test('Gamma Knife receptionist completes referral coordination without clinical 
   await page.screenshot({ path: testInfo.outputPath('reception-workspace-ar-mobile.png'), fullPage: true });
 });
 test('minimal staff workflow and public QR page at desktop and mobile widths', async ({ page, browser }, testInfo) => {
-  test.setTimeout(600000);
+  test.setTimeout(900000);
+  page.setDefaultTimeout(10000);
+  page.setDefaultNavigationTimeout(15000);
   await signInWithSession(page, 'e2e_super_admin');
   await page.goto('/gamma-knife/settings');
   await expect(page.getByRole('heading', { name: 'Assigned users' })).toBeVisible();
@@ -278,6 +280,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await expect(reopenedAssignment.locator('[name="priority"]')).toHaveValue('urgent');
   await expect(reopenedAssignment.locator('[name="status"]')).toHaveValue('in_progress');
   await page.screenshot({ path: testInfo.outputPath('operations-task-reopened-desktop.png'), fullPage: true });
+  await signInWithSession(page, 'e2e_gamma_neurosurgeon');
   await page.goto(`/gamma-knife/episodes/${episodeId}`);
   await page.screenshot({ path: testInfo.outputPath('clinical-assessment-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -331,14 +334,19 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByLabel('Confirm ready for treatment').check();
   await page.getByRole('button', { name: 'Save preparation', exact: true }).click();
   await expect(page.getByText('Current status: Treatment')).toBeVisible();
-  const [schedulingPage] = await Promise.all([
-    page.context().waitForEvent('page'),
-    page.getByRole('link', { name: 'Schedule or reschedule in RISpro', exact: true }).click(),
-  ]);
-  await expect(schedulingPage).toHaveURL(new RegExp(`/appointments\\?patientId=${patientId}`));
-  await expect(schedulingPage.getByText('E2E Gamma Knife Patient', { exact: true }).first()).toBeVisible();
-  await schedulingPage.screenshot({ path: testInfo.outputPath('rispro-scheduling-handoff.png'), fullPage: true });
-  await schedulingPage.close();
+  const courseForm = page.locator('form').filter({ hasText: 'Record a planned treatment course' });
+  await courseForm.locator('[name="immobilization"]').selectOption('frame');
+  await courseForm.locator('[name="plannedFractionCount"]').fill('1');
+  await courseForm.locator('[name="gammaPlanReference"]').fill('GP-SYNTHETIC-ROUTINE-01');
+  await courseForm.locator('[name="targetReferences"]').fill('M1');
+  await courseForm.getByRole('button', { name: 'Record a planned treatment course', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Course #1 .*Planned/ })).toBeVisible();
+
+  await signInWithSession(page, 'e2e_gamma_receptionist');
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Schedule appointment', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Schedule appointment', exact: true }).click();
   const treatmentDate = e2eTomorrowInTripoli();
   const rescheduledTreatmentDate = new Date(`${treatmentDate}T12:00:00Z`);
   rescheduledTreatmentDate.setUTCDate(rescheduledTreatmentDate.getUTCDate() + 1);
@@ -358,6 +366,13 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await expect(page.getByText(/Scheduled.*Tentative/)).toBeVisible();
   await page.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled.*Confirmed/)).toBeVisible();
+  await page.getByRole('button', { name: 'Record patient contact', exact: true }).click();
+  const appointmentCommunicationForm = page.locator('form').filter({ has: page.getByLabel('Outcome', { exact: true }) });
+  await appointmentCommunicationForm.locator('select[name="kind"]').selectOption('appointment_confirmed');
+  await appointmentCommunicationForm.getByLabel('Outcome', { exact: true }).fill('Treatment appointment confirmed with the synthetic patient.');
+  await appointmentCommunicationForm.getByRole('button', { name: 'Record communication', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Communication recorded.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Schedule appointment', exact: true }).click();
   const rescheduleTreatmentBooking = page.locator('form').filter({ hasText: 'Reschedule linked appointment' });
   await rescheduleTreatmentBooking.locator('[name="bookingDate"]').fill(rescheduledTreatmentDateText);
   await rescheduleTreatmentBooking.locator('[name="bookingTime"]').fill('10:30');
@@ -366,13 +381,21 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await expect(page.getByText(/Scheduled.*Tentative/)).toBeVisible();
   await page.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled.*Confirmed/)).toBeVisible();
-  const courseForm = page.locator('form').filter({ hasText: 'Record a planned treatment course' });
-  await courseForm.locator('[name="immobilization"]').selectOption('frame');
-  await courseForm.locator('[name="plannedFractionCount"]').fill('1');
-  await courseForm.locator('[name="gammaPlanReference"]').fill('GP-SYNTHETIC-ROUTINE-01');
-  await courseForm.locator('[name="targetReferences"]').fill('M1');
-  await courseForm.getByRole('button', { name: 'Record a planned treatment course', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /Course #1 .*Planned/ })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Record patient contact', exact: true }).click();
+  await expect(page.getByText('Outcome: Treatment appointment confirmed with the synthetic patient.', { exact: true })).toBeVisible();
+  const receptionProfile = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
+  const linkedTreatmentBookingId = Number(receptionProfile.episode.data.treatmentAppointment.bookingId);
+  expect(receptionProfile.appointments.find((booking: { id: number }) => booking.id === linkedTreatmentBookingId)?.status).toBe('scheduled');
+  const linkDb = new pg.Pool({ connectionString: target.url });
+  try {
+    const courseLink = await linkDb.query("select booking_id from gamma_knife_treatment_courses where episode_id=$1 and status='planned' order by course_number desc limit 1", [episodeId]);
+    expect(Number(courseLink.rows[0].booking_id)).toBe(linkedTreatmentBookingId);
+  } finally { await linkDb.end(); }
+
+  await signInWithSession(page, 'e2e_gamma_neurosurgeon');
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
+  await page.getByRole('tab', { name: 'Treatment', exact: true }).click();
   const courseProfile = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
   const courseId = Number(courseProfile.courses[0].id);
   const beforeIncompleteAttempt = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
@@ -396,9 +419,36 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   expect(afterCompletedCourse.courses[0]).toMatchObject({ status: 'completed', plannedFractionCount: 1 });
   expect(afterCompletedCourse.courses[0].fractions).toHaveLength(1);
   const completedTreatmentBookingId = Number(afterCompletedCourse.episode.data.treatmentAppointment.bookingId);
-  expect(afterCompletedCourse.appointments.find((booking: { id: number }) => booking.id === completedTreatmentBookingId)?.status).toBe('cancelled');
+  expect(afterCompletedCourse.appointments.find((booking: { id: number }) => booking.id === completedTreatmentBookingId)?.status).toBe('completed');
+  const db = new pg.Pool({ connectionString: target.url });
+  try {
+    const bookingStatus = await db.query('select status from appointments_v2.bookings where id=$1', [completedTreatmentBookingId]);
+    const cancellationCount = await db.query("select count(*)::int as count from patient_notification_events where booking_id=$1 and event_type='appointment_cancelled'", [completedTreatmentBookingId]);
+    expect(bookingStatus.rows[0].status).toBe('completed');
+    expect(cancellationCount.rows[0].count).toBe(0);
+  } finally { await db.end(); }
   const reconciliation = page.getByRole('status').filter({ hasText: 'Treatment completion is recorded, but this RISpro booking is still marked scheduled.' });
   await expect(reconciliation).toHaveCount(0);
+  await signInWithSession(page, 'e2e_gamma_receptionist');
+  await page.goto('/gamma-knife');
+  await page.getByLabel('Search patients', { exact: true }).fill('E2E Gamma Knife Patient');
+  const completedWorklistCard = page.locator('.gk-worklist-row').filter({ hasText: 'E2E Gamma Knife Patient' }).first();
+  await expect(completedWorklistCard).toBeVisible();
+  await completedWorklistCard.getByRole('link', { name: 'E2E Gamma Knife Patient', exact: true }).click();
+  await expect(page.getByText('Current status: Follow-up', { exact: true })).toBeVisible();
+  await expect(page.getByText('Next action: Attach treatment report and record follow-up', { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('reception-after-delivery-en-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('reception-after-delivery-en-mobile.png'), fullPage: true });
+  await page.locator('button').filter({ hasText: /\u0627\u0644\u0639\u0631\u0628\u064A\u0629/ }).last().click({ timeout: 5000 });
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl', { timeout: 5000 });
+  await page.screenshot({ path: testInfo.outputPath('reception-after-delivery-ar-mobile.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('reception-after-delivery-ar-desktop.png'), fullPage: true });
+  await signInWithSession(page, 'e2e_gamma_neurosurgeon');
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
   await page.route('**/api/gamma-knife/scanner-settings', route => route.fulfill({ json: { scanner: { enabled: true, endpoint: 'http://127.0.0.1:9801', allowedOrigins: ['http://127.0.0.1:9801'], source: 'feeder', dpi: '200', colorMode: 'grayscale' } } }));
   await page.getByRole('tab', { name: 'Follow-up', exact: true }).click();
   await expect(page.getByText('Episode closure is available after treatment documentation is finalized.', { exact: true })).toBeVisible();
@@ -499,12 +549,31 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByRole('button', { name: 'Create QR code', exact: true }).click();
   const publicLink = page.getByRole('link', { name: 'Open patient page' });
   await expect(publicLink).toBeVisible(); const url = (await publicLink.getAttribute('href'))!;
-  await page.getByRole('tab', { name: 'Follow-up', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Next follow-up appointment', exact: true }).selectOption({ index: 1 });
-  await page.getByRole('button', { name: 'Link appointment', exact: true }).click();
+  await signInWithSession(page, 'e2e_gamma_receptionist');
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Schedule appointment', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Schedule appointment', exact: true }).click();
+  const followupBookingForm = page.locator('form').filter({ hasText: 'Create Gamma Knife appointment' });
+  await followupBookingForm.locator('[name="bookingDate"]').fill(e2eTomorrowInTripoli());
+  await followupBookingForm.locator('[name="bookingTime"]').fill('14:00');
+  await followupBookingForm.getByLabel(/Verify patient identity using the primary identifier/).fill('100000000094');
+  await followupBookingForm.getByRole('button', { name: 'Verify identity', exact: true }).click({ timeout: 5000 });
+  await expect(followupBookingForm.getByRole('button', { name: 'Identity verified', exact: true })).toBeVisible();
+  const followupSafetyAcknowledgement = followupBookingForm.getByLabel('I reviewed the modality safety warning', { exact: true });
+  if (await followupSafetyAcknowledgement.count()) await followupSafetyAcknowledgement.check();
+  const followupMriScreening = followupBookingForm.locator('[name="mriScreeningResult"]');
+  if (await followupMriScreening.count()) await followupMriScreening.selectOption('no_known_implant_reported');
+  await followupBookingForm.getByRole('button', { name: 'Create appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled.*Tentative/)).toBeVisible();
   await page.getByRole('button', { name: 'Confirm appointment', exact: true }).click();
   await expect(page.getByText(/Scheduled.*Confirmed/)).toBeVisible();
+  const followupProfile = await (await page.request.get(`${api}/gamma-knife/episodes/${episodeId}`)).json();
+  const followupBookingId = Number(followupProfile.episode.data.followupAppointment.bookingId);
+  expect(followupProfile.appointments.find((booking: { id: number }) => booking.id === followupBookingId)?.status).toBe('scheduled');
+  await signInWithSession(page, 'e2e_gamma_neurosurgeon');
+  await page.goto(`/gamma-knife/episodes/${episodeId}`);
+  await page.getByRole('tab', { name: 'Follow-up', exact: true }).click();
   await page.getByLabel('Clinical condition and symptoms').fill('Mistyped follow-up draft');
   await page.screenshot({ path: testInfo.outputPath('followup-unsaved-draft-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -550,7 +619,7 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
     };
   });
   await patient.goto(url); await expect(patient.getByText('Clinic-approved synthetic instructions')).toHaveCount(0);
-  await expect(patient.getByText(`Follow-up: ${new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(e2eTomorrowInTripoli() + 'T12:00:00Z'))} 09:00`)).toBeVisible();
+  await expect(patient.getByText(`Follow-up: ${new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(e2eTomorrowInTripoli() + 'T12:00:00Z'))} 14:00`)).toBeVisible();
   await expect(patient.getByRole('button', { name: 'patient-instructions.pdf' })).toBeVisible();
   const patientDocumentResponse = patient.waitForResponse(response => /\/api\/public\/gamma-knife\/documents\/\d+$/.test(response.url()));
   await patient.getByRole('button', { name: 'patient-instructions.pdf', exact: true }).click();
@@ -580,6 +649,8 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByLabel(/Reason for ending this episode/).fill('Synthetic closure after completed follow-up');
   await page.getByRole('button', { name: 'Close episode', exact: true }).click();
   await expect(page.getByText('Current status: Closed')).toBeVisible();
+  await signInWithSession(page, 'e2e_gamma_receptionist');
+  await page.goto('/gamma-knife');
   await page.getByRole('link', { name: 'Patient list', exact: true }).click();
   await page.getByRole('button', { name: 'Register referral' }).click();
   await page.getByLabel('Find patient').fill('E2E Gamma Knife Patient');
@@ -591,6 +662,10 @@ test('minimal staff workflow and public QR page at desktop and mobile widths', a
   await page.getByRole('button', { name: 'Create episode' }).click();
   await expect(page).toHaveURL(/\/gamma-knife\/episodes\/\d+$/);
   const multipleLesionEpisodeId = Number(new URL(page.url()).pathname.split('/').pop());
+  await signInWithSession(page, 'e2e_gamma_neurosurgeon');
+  const multipleLesionAccess = await page.request.get(`${api}/gamma-knife/episodes/${multipleLesionEpisodeId}`);
+  expect(multipleLesionAccess.status()).toBe(200);
+  await page.goto(`/gamma-knife/episodes/${multipleLesionEpisodeId}`);
   await expect(page.getByRole('heading', { name: 'E2E Gamma Knife Patient' })).toBeVisible();
   await page.getByLabel('History', { exact: true }).fill('Prior Gamma Knife episode is available in the patient history.');
   for (const field of ['Examination','Imaging information','Clinical assessment']) {
@@ -777,7 +852,7 @@ test('Arabic patient journey, investigation return, clinical guards and mobile p
   expect(completedMask.ok()).toBeTruthy();
   maskProfile = await (await page.request.get(api + '/gamma-knife/episodes/' + episodeId)).json();
   const completedTreatmentBookingId = Number(maskProfile.episode.data.treatmentAppointment.bookingId);
-  expect(maskProfile.appointments.find((booking: { id: number }) => booking.id === completedTreatmentBookingId)?.status).toBe('cancelled');
+  expect(maskProfile.appointments.find((booking: { id: number }) => booking.id === completedTreatmentBookingId)?.status).toBe('completed');
   expect(maskProfile.courses.at(-1)).toMatchObject({ status: 'completed', immobilization: 'mask', plannedFractionCount: 5 });
   expect(maskProfile.courses.at(-1).fractions.filter((item: { status: string }) => item.status === 'delivered')).toHaveLength(5);
   expect(maskProfile.courses.at(-1).fractions.some((item: { status: string }) => item.status === 'interrupted')).toBe(true);

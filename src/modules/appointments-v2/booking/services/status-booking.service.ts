@@ -42,6 +42,7 @@ interface BookingStatusRow {
   id: string | number;
   patient_id: string | number;
   status: BookingStatus;
+  updated_at?: string;
   booking_date?: string;
   uses_special_quota?: boolean;
   modality_id?: string | number;
@@ -56,6 +57,19 @@ interface BookingStatusRow {
   auto_completed_at?: string | null;
   acquisition_status_source?: "pacs" | "mpps" | null;
   pacs_auto_completion_disabled_at?: string | null;
+}
+
+export interface ManualStatusTransitionResult {
+  id: number;
+  previousStatus: BookingStatus;
+  status: BookingStatus;
+  autoCompletionDisabled?: boolean;
+  autoCompletionDisabledMessage?: string;
+}
+
+export interface ManualStatusTransitionOptions {
+  expectedUpdatedAt?: string;
+  transactionalAfterStatusChange?: (client: PoolClient, result: ManualStatusTransitionResult) => Promise<void>;
 }
 
 interface PatientRequirementCleanupRow extends BookingStatusRow {
@@ -494,14 +508,9 @@ export async function updateBookingStatusManual(
   nextStatus: string,
   reason: string | null | undefined,
   userId: number,
-  userRole?: Role
-): Promise<{
-  id: number;
-  previousStatus: BookingStatus;
-  status: BookingStatus;
-  autoCompletionDisabled?: boolean;
-  autoCompletionDisabledMessage?: string;
-}> {
+  userRole?: Role,
+  options: ManualStatusTransitionOptions = {}
+): Promise<ManualStatusTransitionResult> {
   if (!MANUAL_STATUS_TARGETS.has(nextStatus as BookingStatus)) {
     throw new SchedulingError(400, "Invalid appointment status.", ["invalid_status"]);
   }
@@ -525,6 +534,7 @@ export async function updateBookingStatusManual(
           id,
           patient_id,
           status,
+          updated_at::text as updated_at,
           booking_date::text,
           uses_special_quota,
           modality_id,
@@ -545,6 +555,9 @@ export async function updateBookingStatusManual(
     const booking = rows[0];
     if (!booking) {
       throw new SchedulingError(404, `Booking ${bookingId} not found.`, ["booking_not_found"]);
+    }
+    if (options.expectedUpdatedAt && booking.updated_at !== options.expectedUpdatedAt) {
+      throw new SchedulingError(409, "The RISpro appointment changed while this action was open. Reload and review it again.", ["stale_booking_revision"]);
     }
     if (booking.status === "voided" || targetStatus === "voided") {
       throw new SchedulingError(409, "Voided bookings cannot be changed from manual status management.", ["manual_status_voided_rejected"]);
@@ -668,6 +681,14 @@ export async function updateBookingStatusManual(
       }
     }
 
+    const result: ManualStatusTransitionResult = {
+      id: bookingId,
+      previousStatus: booking.status,
+      status: targetStatus,
+      autoCompletionDisabled,
+      autoCompletionDisabledMessage,
+    };
+    await options.transactionalAfterStatusChange?.(client, result);
     await client.query("commit");
     if (targetStatus === "arrived") await notifyComplementaryRecallBookingEvent(bookingId, "additional_imaging_patient_arrived");
     if (terminalTransition?.transitioned && (targetStatus === "completed" || targetStatus === "discontinued")) {
@@ -680,13 +701,7 @@ export async function updateBookingStatusManual(
     } else {
       scheduleBookingWorklistSync(bookingId);
     }
-    return {
-      id: bookingId,
-      previousStatus: booking.status,
-      status: targetStatus,
-      autoCompletionDisabled,
-      autoCompletionDisabledMessage,
-    };
+    return result;
   } catch (error) {
     await client.query("rollback");
     throw error;

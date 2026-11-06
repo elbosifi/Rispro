@@ -148,7 +148,8 @@ describe('Gamma Knife minimal episode workflow and access boundaries', { concurr
     assert.equal(fraction.fraction.status, 'delivered');
     const unconfirmedCompletion = await request(`/api/gamma-knife/episodes/${episode.id}/courses/${courseId}/complete`, { revision: episode.revision, completedAt: '2026-10-25', reason: 'Synthetic completion record', confirmed: false }); assert.equal(unconfirmedCompletion.status, 409);
     await resource(`/episodes/${episode.id}/courses/${courseId}/complete`, { completedAt: '2026-10-25', reason: 'Synthetic GammaPlan completion confirmation', confirmed: true }); assert.equal(episode.status, 'followup'); assert.equal(episode.data.treatment?.finalized, false);
-    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [replacementTreatmentBooking])).rows[0]!.status, 'cancelled', 'completed treatment does not retain an active treatment appointment');
+    assert.equal((await pool.query<{ status: string }>('select status from appointments_v2.bookings where id=$1', [replacementTreatmentBooking])).rows[0]!.status, 'completed', 'delivered treatment completes its Appointments V2 booking');
+    assert.equal((await pool.query<{ count: number }>("select count(*)::int as count from patient_notification_events where booking_id=$1 and event_type='appointment_cancelled'", [replacementTreatmentBooking])).rows[0]!.count, 0, 'treatment completion does not emit a cancellation notification');
     const completedProfile = await request(`/api/gamma-knife/episodes/${episode.id}`);
     assert.equal(completedProfile.body.courses.length, 1); assert.equal(completedProfile.body.courses[0].fractions.length, 1); assert.equal(completedProfile.body.courses[0].status, 'completed');
     assert.equal((await publicEpisode(qr.token!)).instructions, '');
