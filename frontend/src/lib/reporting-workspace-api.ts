@@ -19,6 +19,7 @@ export interface WorkspaceReport {
   canEdit:boolean;canFinalize:boolean;canReview:boolean;canDelete:boolean;canRecover:boolean;canRestoreRevision:boolean;
   reviewRequestedBy:number|null;reviewRequestedAt:string|null;preferredReviewerId:number|null;
   blockedReason?:string|null;
+  finalizeReasons?:string[];
   reviewEnabled?:boolean;
   keyImages:{id:string;caption:string;provenance:{sourceSeriesDescription:string;sourceStudyDate:string;prior:boolean}}[];
   addenda:{id:string;text:string;author:string;signedAt:string}[];
@@ -86,6 +87,14 @@ export function refreshReportingQueries(client:QueryClient,report:WorkspaceRepor
 }
 export const workspaceBase='/native-reporting/workspace';
 export const reportingTemplatesBase=workspaceBase+'/templates';
+export const reportingTemplateQueryKey=(userId:number|undefined)=>['reporting-templates',userId] as const;
+export const emptyReportSections=():ReportSections=>({clinicalHistory:'',comparison:'',technique:'',findings:'',impression:''});
+export function reportTemplateSelection(value:string) {
+  if(value==='blank'||value==='structured')return {template:value};
+  const match=/^personal:([1-9]\d*)$/.exec(value),id=Number(match?.[1]);
+  if(!match||!Number.isSafeInteger(id))throw new Error('Select an available reporting template.');
+  return {templateId:id};
+}
 export const reportBase=(id:number|string)=>'/native-reporting/reports/'+id;
 export const post=<T>(path:string,body:unknown)=>api<T>(path,{method:'POST',body:JSON.stringify(body)});
 export const listReportingTemplates=()=>api<ReportingTemplateList>(reportingTemplatesBase);

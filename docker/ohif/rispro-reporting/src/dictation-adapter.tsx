@@ -7,7 +7,7 @@ import {loadDictationPreferences,saveDictationPreferences,formatShortcut,DICTATI
 import {captureDictationTarget} from './dictation-shared/dictation-target';
 import {cleanupMedicalDictation} from './dictation-shared/medical-dictation-cleanup';
 
-export default function DictationAdapter({report,contextKey,enabled,onError}) {
+export default function DictationAdapter({report,contextKey,enabled,onError,onBusyChange=undefined}) {
   const [preferences,setPreferences]=useState(loadDictationPreferences),[processing,setProcessing]=useState(false);
   const [targetLabel,setTargetLabel]=useState('None — select a report field'),[devices,setDevices]=useState([]),[deviceNotice,setDeviceNotice]=useState('');
   const recorder=useAudioRecorder(preferences.deviceId),toolbar=useRef(null),remembered=useRef(null),target=useRef(null);
@@ -79,6 +79,7 @@ export default function DictationAdapter({report,contextKey,enabled,onError}) {
   const savePreferences=next=>{try{saveDictationPreferences(next);}catch{onError(new Error('Microphone preferences could not be saved in this browser.'));}};
   const status=processing?'Transcribing':recorder.phase==='recording'?`${testing.current?'Testing microphone':'Recording'} (${recorder.duration} / 60 s)`:recorder.phase==='requesting'?'Allow microphone access':recorder.phase==='stopping'?'Stopping':'Ready';
   const occupied=active.current||processing||recorder.phase!=='idle';
+  useEffect(()=>{onBusyChange?.(occupied);return()=>onBusyChange?.(false);},[occupied,onBusyChange]);
   return <div ref={toolbar} className="rispro-report-dictation" data-dictation-toolbar>
     <div className="rispro-report-actions"><Button disabled={!enabled||processing||testing.current} onMouseDown={e=>e.preventDefault()} onClick={toggle}>{processing?'Transcribing…':recorder.phase==='recording'&&!testing.current?'Stop Dictation':'Dictate into Field'}</Button>
       {(active.current||testing.current)&&<Button variant="outline" onClick={cancel}>Cancel recording</Button>}

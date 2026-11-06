@@ -48,12 +48,14 @@ let benchmarkPort,dbNetworkConnected=false;
 const renderingStress=process.env.OHIF_RENDER_STRESS==='1';
 const responsive=process.env.OHIF_RESPONSIVE==='1';
 const multiStudy=process.env.OHIF_MULTI_STUDY==='1';
-const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1';let workspaceFixture;
+const reportingStage3=process.env.OHIF_REPORTING_STAGE3==='1';
+const workspaceV2=process.env.OHIF_WORKSPACE_V2==='1'||reportingStage3;let workspaceFixture;
+const additionalCleanup=[];
 // Resilience acceptance exercises the production gateway's transport-policy
 // authorization for every static chunk. Keep that backend hop inside the same
 // disposable Docker network for Express as well as Native; Windows published-
 // port hairpins previously timed out before MR could even start.
-const dockerBackend=nativeDelivery || resilience || startupSelection || renderingRecovery;
+const dockerBackend=nativeDelivery || resilience || startupSelection || renderingRecovery || reportingStage3;
 const reliability=responsive && process.env.OHIF_RELIABILITY==='1';
 const originalOhif=(await pool.query('select * from ohif_viewer_settings where singleton_key=true')).rows[0];
 const originalSettings=(await pool.query("select * from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')")).rows;
@@ -67,7 +69,7 @@ try{
     const backendDb=new URL(dbUrl);backendDb.hostname='rispro-test-postgres';backendDb.port='5432';
     const vars={RISPRO_E2E:'1',RISPRO_BENCH_DOCKER:'1',DATABASE_URL:backendDb.href,TEST_DATABASE_URL:backendDb.href,PGHOST:'rispro-test-postgres',PGPORT:'5432',PGDATABASE:'rispro_test',PGUSER:'rispro_test',PGPASSWORD:decodeURIComponent(backendDb.password),DATABASE_SSL:'false',JWT_SECRET:env.jwtSecret,OHIF_ENABLED:'true',OHIF_NATIVE_DELIVERY_ENABLED:String(nativeDelivery),OHIF_NATIVE_AUTH_SECRET:env.ohifNativeAuthSecret,COOKIE_SECURE:'false',UPLOADS_DIR:'/benchmark-uploads'};
     if(progressive)vars.OHIF_LOADING_PROFILE_BENCHMARK='progressive';
-    benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets'].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
+    benchmarkPort=start(prefix+'-backend',process.env.OHIF_BENCH_BACKEND_IMAGE||'rispro-ohif:benchmark-backend',3000,['--network',networkName,'--network-alias','benchmark-backend',...Object.entries(vars).flatMap(([key,value])=>['-e',key+'='+value]),...['src','scripts','shared','assets',...(reportingStage3?['dist-frontend']:[])].flatMap(dir=>['-v',join(root,dir)+':/app/'+dir+':ro']),'-v',join(temp,'uploads')+':/benchmark-uploads','--entrypoint','node'],['--import','tsx','scripts/ohif-native-benchmark-server.mjs']);
     let ready=false;for(let attempt=0;attempt<120;attempt++){try{if((await fetch(`http://127.0.0.1:${benchmarkPort}/__benchmark/metrics`,{signal:AbortSignal.timeout(1000)})).ok){ready=true;break;}}catch{}if(docker('inspect','--format','{{.State.Running}}',prefix+'-backend')!=='true')break;await new Promise(r=>setTimeout(r,250));}
     if(!ready)throw Error('Synthetic Docker backend did not start: '+dockerLogs(prefix+'-backend'));
   }
@@ -86,7 +88,7 @@ try{
   doctorId=Number((await pool.query("insert into doctor_portal.doctor_profiles(user_id,display_name,doctor_role,active,can_finalize_reports,can_assign_protocols,can_supervise) values($1,'SYNTHETIC RADIOLOGIST','consultant',true,true,false,true) returning id",[userId])).rows[0].id);
   policySetId=Number((await pool.query("insert into appointments_v2.policy_sets(key,name) values($1,'SYNTHETIC NATIVE REPORTING') returning id",['native.'+randomUUID()])).rows[0].id);
   const policyVersion=Number((await pool.query("insert into appointments_v2.policy_versions(policy_set_id,version_no,status,config_hash) values($1,1,'draft','synthetic') returning id",[policySetId])).rows[0].id);
-  for(const modality of renderingStress?['MR']:['CT','MR']){
+  for(const modality of reportingStage3?['CT']:renderingStress?['MR']:['CT','MR']){
     let modalityId=Number((await pool.query('select id from modalities where code=$1',[modality])).rows[0]?.id);
     if(!modalityId){modalityId=Number((await pool.query('insert into modalities(code,name_ar,name_en) values($1,$2,$2) returning id',[modality,'SYNTHETIC '+modality])).rows[0].id);createdModalityIds.push(modalityId);}
     await pool.query('insert into doctor_portal.doctor_modality_permissions(doctor_id,modality_id,can_protocol,can_report,can_supervise,active) values($1,$2,false,true,false,true)',[doctorId,modalityId]);
@@ -198,12 +200,14 @@ try{
   // A non-localhost HTTP origin verifies LAN-compatible capture and UUID creation.
   // Only Chromium resolves this reserved test hostname to the loopback fixture.
   const viewerOrigin=workspaceV2?origin:origin.replace('127.0.0.1','rispro-synthetic.invalid');
-  if(workspaceV2)workspaceFixture=await (await import('./ohif-workspace-v2-acceptance.mjs')).prepareWorkspaceV2({pool,temp});
+  if(workspaceV2)workspaceFixture=reportingStage3?await (await import('./ohif-reporting-stage3-browser.mjs')).prepareStage3({pool,temp,cases,archiveRequest}):await (await import('./ohif-workspace-v2-acceptance.mjs')).prepareWorkspaceV2({pool,temp});
   browser=await chromium.launch({headless:true,channel:renderingStress&&process.env.OHIF_RENDER_BROWSER==='msedge'?'msedge':undefined,args:['--host-resolver-rules=MAP rispro-synthetic.invalid 127.0.0.1','--no-proxy-server',...(workspaceV2?['--unsafely-treat-insecure-origin-as-secure='+viewerOrigin,'--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-audio-capture='+workspaceFixture.audioPath]:[])]});const context=await browser.newContext({viewport:{width:1600,height:1000},ignoreHTTPSErrors:renderingStress});
   if(workspaceV2)await context.grantPermissions(['microphone']);
   await context.addCookies([{name:env.cookieName,value:login,url:origin,httpOnly:true}]);
   await context.addCookies([{name:env.cookieName,value:login,url:viewerOrigin,httpOnly:true}]);
-  if(renderingRecovery){
+  if(reportingStage3){
+    await (await import('./ohif-reporting-stage3-browser.mjs')).runStage3({browser,context,origin,c:cases[0],pool,env,temp,userId,doctorId,additionalCleanup,onPage:page=>{activePage=page;}});
+  }else if(renderingRecovery){
     const {runRenderingRecoveryAcceptance}=await import('./ohif-rendering-recovery-browser.mjs');
     await runRenderingRecoveryAcceptance({context,cases,origin,temp,
       launch:async c=>{const response=await context.request.post(origin+`/api/doctor/reporting-board/cases/${c.appointmentId}/viewer-launch`,{data:{includePriors:true}});assert.equal(response.status(),200);return response.json();}});
@@ -506,6 +510,7 @@ try{
     await db.query('delete from historical_pacs_studies where study_instance_uid=any($1::text[])',[cases.flatMap(c=>[c.study,c.study+'.8'])]);
     await db.query('delete from native_reports where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from viewer_launch_sessions where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from study_source_resolutions where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from doctor_portal.case_team_assignments where appointment_id=any($1::bigint[])',[ids]);await db.query('delete from appointments_v2.bookings where id=any($1::bigint[])',[ids]);await db.query('delete from patients where id=any($1::bigint[])',[cases.map(c=>c.patientId)]);if(doctorId){await db.query('delete from doctor_portal.doctor_modality_permissions where doctor_id=$1',[doctorId]);await db.query('delete from doctor_portal.doctor_profiles where id=$1',[doctorId]);}if(policySetId){await db.query('delete from appointments_v2.policy_versions where policy_set_id=$1',[policySetId]);await db.query('delete from appointments_v2.policy_sets where id=$1',[policySetId]);}if(userId){await db.query('delete from audit_log where changed_by_user_id=$1',[userId]);await db.query('delete from users where id=$1',[userId]);}await db.query('commit');
   }catch(error){await db.query('rollback');console.error('Synthetic fixture cleanup failed:',error.message);}finally{db.release();}
+  for(const cleanup of additionalCleanup)await cleanup();
   if(workspaceFixture)await workspaceFixture.cleanup();
   if(createdModalityIds.length)await pool.query('delete from modalities where id=any($1::bigint[])',[createdModalityIds]);
   env.uploadsDir=oldUploads;await pool.query("delete from system_settings where category in ('authoritative_orthanc','sonicdicom_reports','documents_and_uploads')");for(const row of originalSettings)await pool.query('insert into system_settings(category,setting_key,setting_value,updated_by_user_id,updated_at) values($1,$2,$3,$4,$5)',[row.category,row.setting_key,row.setting_value,row.updated_by_user_id,row.updated_at]);await pool.query('update ohif_viewer_settings set enabled=$1,native_reporting_enabled=$2,access_strategy=$3,selected_pacs_node_id=$4,allow_prior_studies=$5,max_prior_studies=$6 where singleton_key=true',[originalOhif.enabled,originalOhif.native_reporting_enabled,originalOhif.access_strategy,originalOhif.selected_pacs_node_id,originalOhif.allow_prior_studies,originalOhif.max_prior_studies]);await pool.end();

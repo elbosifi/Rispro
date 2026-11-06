@@ -81,5 +81,5 @@ export async function workspaceViewerContext(actor:Actor,session:ViewerLaunchSes
   const report=study.reports.find(r=>Number(r.id)===session.reportId)||study.reports.find(r=>!r.deletedAt)||null;
   return {v2:true,contextId:session.reportContextId,appointmentId:report?.appointmentId??null,studyKey:a.study.orthanc_study_id,primaryStudyUid:session.studyInstanceUid,
     signerUserId:Number(actor.userId),
-    enabled:study.policy.enabled,canEdit:report?.canEdit??study.canCreate,canFinalize:report?.canFinalize??false,finalizeReasons:report?.finalizeReasons??[],blockedReason:report?.blockedReason??study.blockedReason,identity:study.identity,report,reports:study.reports.filter(r=>!r.deletedAt),policy:study.policy};
+    enabled:study.policy.enabled,canCreate:study.canCreate,primaryReportId:study.primaryReportId,canEdit:report?.canEdit??study.canCreate,canFinalize:report?.canFinalize??false,finalizeReasons:report?.finalizeReasons??[],blockedReason:report?.blockedReason??study.blockedReason,identity:study.identity,report,reports:study.reports.filter(r=>!r.deletedAt),policy:study.policy};
 }

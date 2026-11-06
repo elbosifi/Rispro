@@ -24,5 +24,5 @@ export const saveMedGemmaSettings = (settings: MedGemmaSettings, apiKey: string,
 export const testMedGemmaConnection = () => api<MedGemmaHealth>("/medgemma/test-connection", { method: "POST" });
 export const getMedGemmaHealth = () => api<MedGemmaHealth>("/medgemma/health");
 // Allow the saved backend timeout (up to 600 seconds) to complete.
-export const generateMedGemmaText = (task: MedGemmaTask, text: string, instructionsOverride?: string) => api<MedGemmaResult>("/medgemma/generate", { method: "POST", body: JSON.stringify({ task, text, ...(instructionsOverride?.trim() ? { instructionsOverride } : {}) }) }, 630_000);
+export const generateMedGemmaText = (task: MedGemmaTask, text: string, instructionsOverride?: string, signal?: AbortSignal) => api<MedGemmaResult>("/medgemma/generate", { method: "POST", signal, body: JSON.stringify({ task, text, ...(instructionsOverride?.trim() ? { instructionsOverride } : {}) }) }, 630_000);
 export const cleanupMedGemmaDictation = (text: string) => generateMedGemmaText("cleanup_dictation", text);

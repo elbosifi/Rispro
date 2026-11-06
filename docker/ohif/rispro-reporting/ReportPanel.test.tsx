@@ -6,8 +6,8 @@ vi.mock('./src/dictation-adapter',()=>({default:()=>null}));
 afterEach(cleanup);
 const report={id:1,status:'draft',canEdit:true,canFinalize:true,author:'Test doctor',keyImages:[]};
 function mount(extra={}){
-  const state={context:{v2:true,contextId:'c',primaryStudyUid:'1.2.3',identity:{patientName:'Synthetic patient',patientIdentifier:'SYN-1',birthDate:'19801102',sex:'F',studyDate:'20261101',examination:'Full verified RIS examination description',accession:'V2-123'},reports:[report]},report,text:{},captionEdits:{},...extra};
-  render(<ReportPanel store={{getSnapshot:()=>state,subscribe:()=>()=>{},setError:vi.fn()}}/>);
+  const state={context:{v2:true,policy:{allowedTypes:['primary'],collaboration:'both'},contextId:'c',primaryStudyUid:'1.2.3',identity:{patientName:'Synthetic patient',patientIdentifier:'SYN-1',birthDate:'19801102',sex:'F',studyDate:'20261101',examination:'Full verified RIS examination description',accession:'V2-123'},reports:[report]},report,text:{},captionEdits:{},templateSelection:'blank',templateDraft:{name:'',sections:{},dirty:false},ai:{task:'cleanup_dictation',field:'findings'},reviewEvents:[],reviewers:[],...extra};
+  render(<ReportPanel store={{getSnapshot:()=>state,subscribe:()=>()=>{},setError:vi.fn(),aiProposalStale:()=>false}}/>);
 }
 it('renders complete compact verified demographics, exam-time age and in-review status',()=>{
   mount({report:{...report,status:'in_review'}});

@@ -245,7 +245,7 @@ test('unresolved same-patient V2 association permits verified viewing and contex
     const session=await findViewerContext(row.report_context_id,doctor.userId);assert.ok(session);
     await authorizeWorkspaceViewer(doctor,session);
     await authorizeViewerDicomWebRequest({userId:doctor.userId,appRole:doctor.appRole,contextId:row.report_context_id,launchToken:'',relativePathWithQuery:'/studies/'+s.studyInstanceUid});
-    const context=await workspaceViewerContext(doctor,session);assert.equal(context.canEdit,false);assert.ok(context.blockedReason);assert.equal(context.reports.length,1);
+    const context=await workspaceViewerContext(doctor,session);assert.equal(context.canEdit,false);assert.equal(context.canCreate,false);assert.equal(context.primaryReportId,null);assert.ok(context.blockedReason);assert.equal(context.reports.length,1);
     await assert.rejects(()=>create(doctor,96),/without a verified matching study/);
     await assert.rejects(()=>saveWorkspaceDraft(doctor,draft.id,{expectedRevision:draft.revision,sections:content}),/without a verified matching study/);
     await assert.rejects(()=>finalizeWorkspaceReport(doctor,draft.id,{expectedRevision:draft.revision,confirmed:true,signerUserId:doctor.userId,requestId:randomUUID()}),/without a verified matching study/);

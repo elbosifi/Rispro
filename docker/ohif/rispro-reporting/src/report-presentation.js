@@ -16,6 +16,10 @@ export function finalizeDisabledReasons(s) {
   if(s.conflict)reasons.push('Resolve the report conflict by reloading the saved report before signing.');
   if(s.busy||s.saving)reasons.push('Wait for the current report operation to finish.');
   if(s.pendingCapture)reasons.push('Retry or discard the pending key-image upload before signing.');
+  if(s.dictationBusy)reasons.push('Finish dictation before signing.');
+  if(s.ai?.busy||s.ai?.proposal&&!s.ai.proposal.applied)reasons.push('Finish or dismiss the AI proposal before signing.');
+  if(s.aiSaveRequired&&s.dirty)reasons.push('Explicitly Save accepted AI changes before signing.');
+  if(s.templateDraft?.dirty||s.templateBusy)reasons.push('Save or discard template edits before signing.');
   if(!(s.report?.canFinalize??s.context?.canFinalize))reasons.push(...(s.report?.finalizeReasons?.length?s.report.finalizeReasons:s.context?.finalizeReasons?.length?s.context.finalizeReasons:[s.report?.blockedReason||s.context?.blockedReason||'Signing eligibility could not be verified. Reload the report context.']));
   return [...new Set(reasons)];
 }
