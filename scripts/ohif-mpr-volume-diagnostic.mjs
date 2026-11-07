@@ -58,10 +58,24 @@ export async function runMprVolumeDiagnostic({browser,context:source,c,origin,ap
       const trace=await page.evaluate(outcome=>({terminal:window.__mprFrameProbe.snapshot(outcome,true),timed:window.__mprFrameProbe.history(),gpu:window.__renderProbe.events.map(({type,ms,width,height,depth,contextLost,requested})=>({type,ms,width,height,depth,contextLost,requested}))}),outcome);
       const selected=await page.evaluate(series=>{const s=window.services,vs=[...s.viewportGridService.getState().viewports.keys()].map(id=>s.cornerstoneViewportService.getCornerstoneViewport(id));return vs.every(v=>v?.getImageIds?.().every(id=>id.includes('/series/'+series+'/')));},c.study+'.1');
       const active=trace.terminal.volumes.find(v=>v.active);
-      writeFileSync(join(temp,stage+'-'+outcome+'.json'),JSON.stringify({stage,switching,frameDelayMs,requireCacheFill,outcome,selected,events,...trace},null,2));
+      const firstProcessed=active?.frames?.map(frame=>frame.stages.processed?.first).filter(Number.isFinite)||[];
+      const firstProcessedMs=firstProcessed.length?Math.min(...firstProcessed)-(trace.terminal.ms-trace.terminal.sinceActivation):null;
+      const diagnosticPixelsCorrect=outcome==='success'?await page.evaluate(()=>{
+        const core=window.cornerstone,s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
+        const volume=core.cache.getVolume(v.getVolumeId()),z=Math.floor(volume.imageIds.length/2),id=volume.imageIds[z],image=core.cache.getImage(id);
+        const instance=core.metaData.get('instance',id)||{},n=Number(instance.InstanceNumber||instance.instanceNumber);
+        const x=Math.floor(image.width/2),y=Math.floor(image.height/2),expected=700+Math.round(220*Math.sin(x/19)+180*Math.cos(y/23))+20+((n-1)%16)*8;
+        return image.getPixelData()[y*image.width+x]===expected&&volume.voxelManager.getAtIJK(x,y,z)===expected;
+      }):null;
+      writeFileSync(join(temp,stage+'-'+outcome+'.json'),JSON.stringify({stage,switching,frameDelayMs,requireCacheFill,outcome,selected,firstProcessedMs,diagnosticPixelsCorrect,events,...trace},null,2));
       await page.screenshot({path:join(temp,stage+'-'+outcome+'.png')});
       assert.equal(selected,true,'Every MPR viewport must still reference the selected synthetic series');
-      const summary={stage,switching,outcome,selected,framesProcessed:active?.framesProcessed,totalNumFrames:active?.totalNumFrames,pending:active?.pending,activeQueued:trace.terminal.pools.load.activeVolumeQueued,globalQueued:trace.terminal.pools.load.queued};results.push(summary);console.log(JSON.stringify({mprDiagnostic:summary}));
+      const summary={stage,switching,outcome,selected,firstProcessedMs,diagnosticPixelsCorrect,framesProcessed:active?.framesProcessed,totalNumFrames:active?.totalNumFrames,pending:active?.pending,activeQueued:trace.terminal.pools.load.activeVolumeQueued,globalQueued:trace.terminal.pools.load.queued};results.push(summary);console.log(JSON.stringify({mprDiagnostic:summary}));
+      if(outcome==='success'){
+        assert.equal(diagnosticPixelsCorrect,true,'The selected volume and image cache must contain the exact original synthetic pixels');
+        assert.ok(firstProcessedMs<=10000,'The active MPR volume must begin processing within ten seconds');
+        assert.equal(trace.terminal.pools.load.retiredStackQueued,0,'Retired stack owners must leave no queued jobs');
+      }
     }catch(error){writeFileSync(join(temp,stage+'-setup-failure.json'),JSON.stringify({events,error:redact(error.message)},null,2));throw error;}
     finally{await context.close();}
     if(!switching)continue;
@@ -72,5 +86,6 @@ export async function runMprVolumeDiagnostic({browser,context:source,c,origin,ap
     }
   }
   writeFileSync(join(temp,'mpr-diagnostic-summary.json'),JSON.stringify(results,null,2));
-  console.log('MPR diagnostic completed without a reproduced timeout; do not infer a fix.');return results;
+  assert.equal(results.filter(r=>r.outcome==='timeout').length,0,'Every MPR initialization must complete within the existing 120-second deadline');
+  console.log('PASS: every controlled MPR initialization completed with verified source pixels and prompt frame progress.');return results;
 }

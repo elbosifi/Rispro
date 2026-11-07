@@ -5,6 +5,121 @@ function failedCacheCleanupGuard() {
   return 'if (this._imageCache.get(imageId) === cachedImage) this._imageCache.delete(imageId);';
 }
 
+// Queued stack work belongs to one viewport selection, not merely an image ID.
+// Retirement deliberately leaves transports and successful cache entries alone.
+function createStackPrefetchOwnership(getEnabledElement, pool) {
+  const owners = new WeakMap();
+  let sequence = 0;
+  const retire = owner => {
+    if (!owner || owner.retired) return;
+    owner.retired = true;
+    pool.filterRequests(request => request.additionalDetails?._risproStackPrefetchOwner !== owner);
+    owner.cleanup?.();
+    if (owners.get(owner.element) === owner) owners.delete(owner.element);
+    if (owner.viewport._risproStackPrefetchOwner === owner) delete owner.viewport._risproStackPrefetchOwner;
+  };
+  const current = owner => {
+    if (!owner || owner.retired) return false;
+    let viewport;
+    try { viewport = getEnabledElement(owner.element)?.viewport; } catch { /* Already disabled. */ }
+    const valid = viewport === owner.viewport && !viewport?.isDisabled && viewport?.type === 'stack' &&
+      viewport._risproSelectionOwner === owner.selection &&
+      (viewport._risproSelectionGeneration ?? owner.generation) === owner.generation &&
+      (viewport._risproDisplaySetInstanceUIDs || []).join('|') === owner.displaySets;
+    if (!valid) retire(owner);
+    return valid;
+  };
+  return {
+    get: element => owners.get(element), current, retire,
+    begin(element) {
+      const previous = owners.get(element);
+      if (current(previous)) return previous;
+      retire(previous);
+      let viewport;
+      try { viewport = getEnabledElement(element)?.viewport; } catch { return; }
+      if (!viewport || viewport.isDisabled || viewport.type !== 'stack') return;
+      const serial = ++sequence;
+      const owner = { element, viewport, selection: viewport._risproSelectionOwner,
+        generation: viewport._risproSelectionGeneration ?? serial, serial,
+        displaySets: (viewport._risproDisplaySetInstanceUIDs || []).join('|'), retired: false, fresh: true };
+      owner.retire = () => retire(owner);
+      owners.set(element, owner);
+      viewport._risproStackPrefetchOwner = owner;
+      return owner;
+    },
+  };
+}
+
+function patchStackContextPrefetch(input) {
+  let source = input.replaceAll('\r\n', '\n');
+  const replace = (anchor, replacement) => {
+    if (source.split(anchor).length !== 2) throw new Error('Pinned stackContextPrefetch anchor drift: ' + anchor.slice(0, 90));
+    source = source.replace(anchor, replacement);
+  };
+  replace('import { imageLoader,', 'import { getEnabledElement, imageLoader,');
+  replace('let resetPrefetchTimeout;', 'const risproPrefetch = (' + createStackPrefetchOwnership.toString() + ')(getEnabledElement, imageLoadPoolManager);');
+  replace('const priorities = {};\n', '');
+  replace('const enable = (element, priority = 0) => {', `const enable = (element, priority = 0) => {
+    const owner = risproPrefetch.begin(element);
+    if (!owner) return;
+    if (owner.fresh) { addToolState(element, undefined); owner.fresh = false; }`);
+  replace('    priorities[element] = priority;', '    owner.priority = priority;');
+  replace('    owner.priority = priority;\n    prefetch(element, priority);', '    owner.priority = priority;\n    prefetch(element, priority, owner);');
+  replace(`    const promiseRemovedHandler = getPromiseRemovedHandler(element);
+    eventTarget.removeEventListener(Enums.Events.IMAGE_CACHE_IMAGE_REMOVED, promiseRemovedHandler);
+    eventTarget.addEventListener(Enums.Events.IMAGE_CACHE_IMAGE_REMOVED, promiseRemovedHandler);`, `    if (!owner.cacheRemoved) {
+        const handler = getPromiseRemovedHandler(element);
+        owner.cacheRemoved = event => { if (risproPrefetch.current(owner)) handler(event); };
+        eventTarget.addEventListener(Enums.Events.IMAGE_CACHE_IMAGE_REMOVED, owner.cacheRemoved);
+        owner.cleanup = () => {
+            clearTimeout(owner.timer);
+            if (risproPrefetch.get(element) === owner) element.removeEventListener(Enums.Events.STACK_NEW_IMAGE, onImageUpdated);
+            eventTarget.removeEventListener(Enums.Events.IMAGE_CACHE_IMAGE_REMOVED, owner.cacheRemoved);
+            if (owner.state) owner.state.enabled = false;
+        };
+    }`);
+  replace('function prefetch(element, priority = 0) {', `function prefetch(element, priority = 0, owner = risproPrefetch.get(element)) {
+    if (!risproPrefetch.current(owner)) return;`);
+  replace('imageLoadPoolManager.filterRequests(clearFromImageIds(stack));', 'imageLoadPoolManager.filterRequests(request => request.additionalDetails?._risproStackPrefetchOwner !== owner);');
+  replace('    function doneCallback(imageId) {', `    function doneCallback(imageId) {
+        if (!risproPrefetch.current(owner)) return;`);
+  replace(`    if (!stackPrefetch.indicesToRequest.length) {
+        return;
+    }`, `    if (!stackPrefetch.indicesToRequest.length) {
+        const currentId = stack.imageIds[currentImageIdIndex];
+        if (!stackPrefetch.cacheFill && cache.getCachedImageBasedOnImageURI(currentId)?.sizeInBytes) doneCallback(currentId);
+        return;
+    }`);
+  replace('                    updateToolState(element, usage);\n                    prefetch(element, priority);', '                    updateToolState(element, usage, owner);\n                    prefetch(element, priority, owner);');
+  replace('    const requestFn = (imageId, options) => {', `    const requestFn = (imageId, options) => {
+        if (!risproPrefetch.current(owner)) return Promise.resolve();`);
+  replace('            imageId,\n        }, priority);', '            imageId, _risproStackPrefetchOwner: owner,\n        }, priority);');
+  replace(`    clearTimeout(resetPrefetchTimeout);
+    resetPrefetchTimeout = setTimeout(function () {
+        const element = e.target;`, `    const element = e.target, owner = risproPrefetch.get(element);
+    if (!risproPrefetch.current(owner)) return;
+    clearTimeout(owner.timer);
+    owner.timer = setTimeout(function () {
+        if (!risproPrefetch.current(owner)) return;`);
+  replace('            updateToolState(element);\n            prefetch(element, priorities[element]);', '            updateToolState(element, undefined, owner);\n            prefetch(element, owner.priority, owner);');
+  replace('const updateToolState = (element, usage) => {', `const updateToolState = (element, usage, owner = risproPrefetch.get(element)) => {
+    if (!risproPrefetch.current(owner)) return;`);
+  replace('    addToolState(element, stackPrefetchData);', '    owner.state = stackPrefetchData;\n    addToolState(element, stackPrefetchData);');
+  replace(`function disable(element) {
+    clearTimeout(resetPrefetchTimeout);
+    element.removeEventListener(Enums.Events.STACK_NEW_IMAGE, onImageUpdated);
+    const promiseRemovedHandler = getPromiseRemovedHandler(element);
+    eventTarget.removeEventListener(Enums.Events.IMAGE_CACHE_IMAGE_REMOVED, promiseRemovedHandler);
+    const stackPrefetchData = getToolState(element);
+    if (stackPrefetchData) {
+        stackPrefetchData.enabled = false;
+    }
+}`, `function disable(element) {
+    risproPrefetch.retire(risproPrefetch.get(element));
+}`);
+  return source;
+}
+
 function createCornerstoneImageOwnership(imageLoadPoolManager, cache) {
   const sharedLoads = new Map();
   const queuedCount = imageId => {
@@ -109,6 +224,8 @@ function configureViewportReliability(root) {
     fs.writeFileSync(filename, source.replace(anchor, replacement));
   };
   const service = 'extensions/cornerstone/src/services/ViewportService/CornerstoneViewportService.ts';
+  const prefetchFile = path.join(root, 'node_modules/@cornerstonejs/tools/dist/esm/utilities/stackPrefetch/stackContextPrefetch.js');
+  fs.writeFileSync(prefetchFile, patchStackContextPrefetch(fs.readFileSync(prefetchFile, 'utf8')));
   // Expose the existing completion promise to its caller. Previously neither
   // async volume assignment nor createViewportData rejections were handled.
   replace(service, '  ): void {\n    const renderingEngine = this.getRenderingEngine();',
@@ -196,6 +313,7 @@ function configureViewportReliability(root) {
   replace(component, '        cornerstoneViewportService.setViewportData(', '        await cornerstoneViewportService.setViewportData(');
   replace(component, '      const loadViewportData = async () => {', `      let obsolete = false;
       const previousViewport = cornerstoneViewportService.getCornerstoneViewport(viewportId);
+      previousViewport?._risproStackPrefetchOwner?.retire();
       const viewportInfo = cornerstoneViewportService.getViewportInfo(viewportId);
       const owner = {
         generation: Math.max(viewportInfo?._risproSelectionGeneration || 0, previousViewport?._risproSelectionGeneration || 0) + 1,
@@ -204,6 +322,7 @@ function configureViewportReliability(root) {
       if (viewportInfo) { viewportInfo._risproSelectionGeneration = owner.generation; viewportInfo._risproPendingSelection = owner; }
       // Invalidate actual pending pixel/actor mutations before metadata creation yields.
       const invalidate = () => {
+        if (previousViewport?._risproStackPrefetchOwner?.selection === owner) previousViewport._risproStackPrefetchOwner.retire();
         if (previousViewport && previousViewport._risproSelectionGeneration === owner.generation) Object.assign(previousViewport, {
           _risproSelection: { generation: owner.generation, obsolete: true }, _risproDataRequest: {},
           _risproSelectionOwner: owner, _risproSelectionGeneration: owner.generation,
@@ -330,6 +449,7 @@ function configureViewportReliability(root) {
   const stack = core + 'StackViewport.js';
   replace(stack, '    async setStack(imageIds, currentImageIdIndex = 0) {',
     `    async setStack(imageIds, currentImageIdIndex = 0) {
+        this._risproStackPrefetchOwner?.retire();
         const generation = this._risproSelectionGeneration;
         const owner = this._risproSelectionOwner;
         const selection = this._risproSelection = { generation };`);
@@ -358,6 +478,8 @@ function configureViewportReliability(root) {
         const imageId = await this._loadAndDisplayImage(this.imageIds[imageIdIndex], imageIdIndex);
         if (this._risproSelection !== selection || this.isDisabled || this.currentImageIdIndex !== imageIdIndex) return imageId;`);
   const volume = core + 'BaseVolumeViewport.js';
+  replace(core + 'BaseRenderingEngine.js', '    _resetViewport(viewport) {', `    _resetViewport(viewport) {
+        viewport._risproStackPrefetchOwner?.retire();`);
   replace(volume, '    async setVolumes(volumeInputArray, immediate = false, suppressEvents = false) {',
     `    async setVolumes(volumeInputArray, immediate = false, suppressEvents = false) {
         const generation = this._risproSelectionGeneration;
@@ -383,5 +505,5 @@ function configureViewportReliability(root) {
   require('./configure-rendering-resilience.cjs').configureRenderingResilience(root);
 }
 
-module.exports = { configureViewportReliability, recoverMobileMpr, failedCacheCleanupGuard, createCornerstoneImageOwnership };
+module.exports = { configureViewportReliability, recoverMobileMpr, failedCacheCleanupGuard, createCornerstoneImageOwnership, patchStackContextPrefetch };
 if (require.main === module) configureViewportReliability(process.cwd());

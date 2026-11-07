@@ -34,10 +34,11 @@ export function installMprFrameProbe() {
     return v;
   };
   const poolStats=(pool,active)=>{
-    const out={queued:0,activeVolumeQueued:0,activeVolumeOwned:0,activeImagesOtherOwner:0,otherVolumeQueued:0,otherImageQueued:0,byType:{},bySource:{},inFlight:{...pool?.numRequests},max:{...pool?.maxNumRequests},awake:pool?.awake,grabDelay:pool?.grabDelay};
+    const out={queued:0,stackOwnedQueued:0,retiredStackQueued:0,activeVolumeQueued:0,activeVolumeOwned:0,activeImagesOtherOwner:0,otherVolumeQueued:0,otherImageQueued:0,byType:{},bySource:{},inFlight:{...pool?.numRequests},max:{...pool?.maxNumRequests},awake:pool?.awake,grabDelay:pool?.grabDelay};
     for(const [type,priorities]of Object.entries(pool?.getRequestPool?.()||{}))for(const [priority,list]of Object.entries(priorities)){
       out.byType[type+':'+priority]=list.length;out.queued+=list.length;
       for(const q of list){const own=jobs.get(q.requestFn)||details.get(q.additionalDetails),id=q.additionalDetails?.imageId,vol=q.additionalDetails?.volumeId;
+        if(q.additionalDetails?._risproStackPrefetchOwner){out.stackOwnedQueued++;if(q.additionalDetails._risproStackPrefetchOwner.retired)out.retiredStackQueued++;}
         if(own?.source!=null)out.bySource[own.source]=(out.bySource[own.source]||0)+1;
         if(active&&(own?.row===active||vol===active.v.volumeId)){out.activeVolumeQueued++;out.activeVolumeOwned++;}
         else if(active&&active.v.imageIds.includes(id)){out.activeVolumeQueued++;out.activeImagesOtherOwner++;}
