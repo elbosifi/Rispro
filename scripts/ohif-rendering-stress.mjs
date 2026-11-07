@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {runMprVolumeDiagnostic} from './ohif-mpr-volume-diagnostic.mjs';
+import {installMprFrameProbe} from './ohif-mpr-frame-probe.mjs';
 
 export function installRenderingProbe(){
   const events=[],contexts=[],seen=new WeakSet(),requestedLoss=new WeakSet();
@@ -121,7 +123,7 @@ async function selectSeriesWithoutWaiting(page,series,displaySetInstanceUID,dire
   catch(error){const state=await page.evaluate(()=>{const s=window.services;return [...s.viewportGridService.getState().viewports].map(([id,row])=>({id,row:row.displaySetInstanceUIDs,active:s.viewportGridService.getActiveViewportId(),type:s.cornerstoneViewportService.getCornerstoneViewport(id)?.type,sets:row.displaySetInstanceUIDs?.map(uid=>s.displaySetService.getDisplaySetByUID(uid)?.SeriesInstanceUID)}));});throw Error('Synthetic series selection did not apply: '+JSON.stringify(state),{cause:error});}
 }
 
-async function rapidLargeStackSwitch(page,c,network,navigate){
+async function rapidLargeStackSwitch(page,c,network,navigate,{fallThrough=false}={}){
   const gated=[],frameResponses=new Map(),pendingFrames=new Set(),resourceSamples=[];
   const configuredCycles=Number(process.env.OHIF_RENDER_SWITCH_CYCLES||2);
   assert.ok(Number.isSafeInteger(configuredCycles)&&configuredCycles>0,'OHIF_RENDER_SWITCH_CYCLES must be a positive integer');
@@ -140,7 +142,7 @@ async function rapidLargeStackSwitch(page,c,network,navigate){
     const url=route.request().url(),series=decodeURIComponent(new URL(url).pathname).match(/\/series\/([^/]+)/)?.[1];
     const item={url,series,release:null};gated.push(item);
     await new Promise(resolve=>{item.release=resolve;});
-    try{await route.continue();}catch{}
+    try{if(fallThrough)await route.fallback();else await route.continue();}catch{}
   };
   const release=()=>{for(const item of gated)item.release?.();};
   const sampleResources=async selectedSeries=>{
@@ -250,6 +252,7 @@ async function capture(page,context,apiOrigin,c){
 }
 
 export async function runRenderingStress({browser,context,c,origin,apiOrigin,temp,launch}){
+  if(process.env.OHIF_MPR_DIAGNOSTIC==='1')return runMprVolumeDiagnostic({browser,context,c,origin,apiOrigin,temp,launch,installRenderingProbe,pixels,selectSeries,rapidLargeStackSwitch});
   const sourceContext=context;
   writeFileSync(join(temp,'environment.json'),JSON.stringify({browser:browser.version(),channel:process.env.OHIF_RENDER_BROWSER||'chromium',image:process.env.OHIF_TEST_IMAGE,dimensions:[c.size,c.size,c.slices],https:new URL(origin).protocol==='https:',platform:process.platform},null,2));
   const gpuSession=await browser.newBrowserCDPSession();
@@ -262,6 +265,7 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
   for(const includePriors of [false,true]){
     const context=await browser.newContext({viewport:{width:1600,height:1000},storageState:await sourceContext.storageState(),ignoreHTTPSErrors:true});
     await context.addInitScript(installRenderingProbe);
+    if(process.env.OHIF_MPR_FRAME_PROBE==='1')await context.addInitScript(installMprFrameProbe);
     if(process.env.OHIF_BOOTSTRAP_NULL_SCRIPT==='1')await context.addInitScript(()=>Object.defineProperty(document,'currentScript',{get:()=>null}));
     try{for(let repetition=0;repetition<sessionRepetitions;repetition++){
     const page=await context.newPage(),network=[],errors=[],warnings=[];
@@ -330,8 +334,10 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
       }finally{await peer.close();}
       const volumeSnapshots=[];
       for(let cycle=0;cycle<3;cycle++){
+        if(process.env.OHIF_MPR_FRAME_PROBE==='1')writeFileSync(join(temp,stage+`-mpr-${cycle}-activation.json`),JSON.stringify(await page.evaluate(()=>window.__mprFrameProbe.activate()),null,2));
         await page.evaluate(()=>window.commandsManager.runCommand('setHangingProtocol',{protocolId:'mpr'}));
         await pixels(page,true);
+        if(process.env.OHIF_MPR_FRAME_PROBE==='1')writeFileSync(join(temp,stage+`-mpr-${cycle}-success.json`),JSON.stringify(await page.evaluate(()=>({terminal:window.__mprFrameProbe.snapshot('success',true),timed:window.__mprFrameProbe.history()})),null,2));
         volumeSnapshots.push(await snapshot(page));
         // Exercise the real slab/MIP controls without changing source precision.
         await page.evaluate(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());v.setSlabThickness(12);v.setBlendMode(window.cornerstone.Enums.BlendModes.MAXIMUM_INTENSITY_BLEND);v.render();});
@@ -359,6 +365,7 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
          finalPixel:rapid?.pixel,expectedPixel:rapid?.expectedPixel};
        console.log(JSON.stringify(resultSummary));
     }catch(error){
+      if(process.env.OHIF_MPR_FRAME_PROBE==='1')writeFileSync(join(temp,stage+'-mpr-failure.json'),JSON.stringify(await page.evaluate(()=>({terminal:window.__mprFrameProbe.snapshot('failure',true),timed:window.__mprFrameProbe.history()})).catch(()=>({unavailable:true})),null,2));
       writeFileSync(join(temp,stage+'-failure.json'),JSON.stringify({network,errors,warnings,state:await snapshot(page).catch(e=>({error:e.message}))},null,2));
       await page.screenshot({path:join(temp,stage+'-failure.png')}).catch(()=>undefined);
       throw error;

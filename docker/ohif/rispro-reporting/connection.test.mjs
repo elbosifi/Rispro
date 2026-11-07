@@ -59,7 +59,7 @@ test('transient DICOM reads retry with backoff, deduplicate and keep exact retur
   assert.deepEqual(await Promise.all([a,b]),[new Uint8Array([0,255,13,10]),new Uint8Array([0,255,13,10])]);assert.equal(count,4);assert.deepEqual(f.delays,[1000,2000,4000]);
   assert.equal(f.controller.getSnapshot().status,'connected');
 });
-test('canceling one consumer of a shared image read leaves the other consumer and pixels intact',async()=>{
+for(const canceledIndex of [0,1])test(`canceling shared image read consumer ${canceledIndex+1} preserves the other consumer and pixels`,async()=>{
   const f=fixture();let workCount=0,cancelCount=0,resolveWork;
   const expected=new Uint16Array([0,17,1024,4095]);
   const work=()=>{workCount++;return new Promise(resolve=>{resolveWork=resolve;});};
@@ -67,12 +67,12 @@ test('canceling one consumer of a shared image read leaves the other consumer an
   const firstAbort=new AbortController(),secondAbort=new AbortController();
   const first=f.controller.read('shared-image',work,firstAbort.signal,cancel).catch(error=>error);
   const second=f.controller.read('shared-image',work,secondAbort.signal,cancel).catch(error=>error);
-  await new Promise(r=>setImmediate(r));firstAbort.abort();await new Promise(r=>setImmediate(r));
-  assert.equal(cancelCount,0,'the shared transport is still owned by the second consumer');
+  await new Promise(r=>setImmediate(r));[firstAbort,secondAbort][canceledIndex].abort();await new Promise(r=>setImmediate(r));
+  assert.equal(cancelCount,0,'the shared transport is still owned by the remaining consumer');
   resolveWork(expected);
-  const [firstResult,secondResult]=await Promise.all([first,second]);
-  assert.equal(firstResult.name,'AbortError');
-  assert.deepEqual(secondResult,expected,'the remaining consumer receives the original decoded pixel data');
+  const results=await Promise.all([first,second]);
+  assert.equal(results[canceledIndex].name,'AbortError');
+  assert.deepEqual(results[1-canceledIndex],expected,'the remaining consumer receives the original decoded pixel data');
   assert.equal(workCount,1,'shared readers retain transport deduplication');
   assert.equal(cancelCount,0);f.controller.destroy();
 });

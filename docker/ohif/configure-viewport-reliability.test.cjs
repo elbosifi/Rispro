@@ -40,6 +40,40 @@ test('Cornerstone same-key load leases cancel one consumer and abort only the fi
   await current.promise;
 });
 
+for (const canceledIndex of [0, 1]) {
+  test(`a Cornerstone consumer cancel handle preserves the other consumer (cancel ${canceledIndex + 1})`,async()=>{
+    const ownership=createCornerstoneImageOwnership({getRequestPool:()=>({})},{getImageLoadObject:()=>undefined});
+    let resolveImage,aborts=0;
+    const shared=ownership.track('wadors:two-owners',{promise:new Promise(resolve=>{resolveImage=resolve;}),cancelFn:()=>aborts++});
+    const consumers=[ownership.createConsumer(shared),ownership.createConsumer(shared)];
+    consumers[canceledIndex].cancelFn();
+    await assert.rejects(consumers[canceledIndex].promise,{name:'AbortError'});
+    const pixels=new Uint16Array([31,2048,65535]);
+    resolveImage({getPixelData:()=>pixels});
+    assert.deepEqual((await consumers[1-canceledIndex].promise).getPixelData(),pixels);
+    assert.equal(aborts,0);
+  });
+}
+
+test('image-key cancellation must target the requesting second consumer',async()=>{
+  const ownership=createCornerstoneImageOwnership({getRequestPool:()=>({})},{getImageLoadObject:()=>undefined});
+  let resolveImage;
+  const shared=ownership.track('wadors:second-owner',{promise:new Promise(resolve=>{resolveImage=resolve;})});
+  const first=ownership.createConsumer(shared),second=ownership.createConsumer(shared);
+  let firstCanceled=false,secondCanceled=false;
+  first.promise.catch(error=>{firstCanceled=error.name==='AbortError';});
+  second.promise.catch(error=>{secondCanceled=error.name==='AbortError';});
+  // The proposed owner argument makes the caller's intent explicit. The baseline
+  // ignores it and cancels the first Set entry. Keep this failing until that API
+  // can be corrected with evidence; production semantics are unchanged here.
+  ownership.cancelConsumer('wadors:second-owner',second);
+  await Promise.resolve();
+  resolveImage({getPixelData:()=>new Uint16Array([73])});
+  await Promise.allSettled([first.promise,second.promise]);
+  assert.equal(firstCanceled,false,'Canceling the later owner must preserve the first owner');
+  assert.equal(secondCanceled,true,'Only the requesting second owner should be canceled');
+});
+
 test('mobile MPR rejection restores only the affected static CT/MR stack once and does not overwrite later selection',()=>{
   const previous=global.window;
   let coarse=true,type='orthographic',uid='ct';
