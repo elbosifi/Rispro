@@ -1,6 +1,44 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {recoverMobileMpr}=require('./configure-viewport-reliability.cjs');
+const {recoverMobileMpr,failedCacheCleanupGuard,createCornerstoneImageOwnership}=require('./configure-viewport-reliability.cjs');
+
+test('late failed image-cache insertion cannot delete a newer same-key image load',()=>{
+  const removeIfCurrent=new Function('cache','imageId','cachedImage',failedCacheCleanupGuard().replaceAll('this._imageCache','cache'));
+  const cache=new Map(),old={},current={pixels:77};
+  cache.set('same-image',current);
+  removeIfCurrent(cache,'same-image',old);
+  assert.equal(cache.get('same-image'),current,'A late old rejection must leave the replacement request registered');
+  removeIfCurrent(cache,'same-image',current);
+  assert.equal(cache.has('same-image'),false,'The active failed insertion must still be removed');
+});
+
+test('Cornerstone same-key load leases cancel one consumer and abort only the final consumer',async()=>{
+  const requestPool={interaction:{0:[]}};
+  const pool={getRequestPool:()=>requestPool};
+  const ownership=createCornerstoneImageOwnership(pool,{getImageLoadObject:()=>undefined});
+  let resolveImage,rejectImage,aborts=0;
+  const pixels=new Uint16Array([7,1024,4095]);
+  const shared=ownership.track('wadors:shared',{promise:new Promise((resolve,reject)=>{resolveImage=resolve;rejectImage=reject;}),cancelFn:()=>{aborts++;rejectImage(Object.assign(Error('transport aborted'),{name:'AbortError'}));}});
+  const first=ownership.createConsumer(shared),second=ownership.createConsumer(shared);
+  assert.equal(ownership.cancelConsumer('wadors:shared'),true);
+  await assert.rejects(first.promise,{name:'AbortError'});
+  resolveImage({getPixelData:()=>pixels});
+  assert.deepEqual((await second.promise).getPixelData(),pixels);
+  assert.equal(aborts,0,'The shared transport remains active while another Cornerstone consumer owns it');
+
+  let rejectOld,oldAborts=0;
+  const old=ownership.track('wadors:reused',{promise:new Promise((_,reject)=>{rejectOld=reject;}),cancelFn:()=>{oldAborts++;rejectOld(Object.assign(Error('old request canceled'),{name:'AbortError'}));}});
+  const last=ownership.createConsumer(old);
+  ownership.cancelConsumer('wadors:reused');
+  await assert.rejects(last.promise,{name:'AbortError'});
+  assert.equal(oldAborts,1,'Final consumer cancellation aborts the transport exactly once');
+  let resolveNew;
+  const current=ownership.track('wadors:reused',{promise:new Promise(resolve=>{resolveNew=resolve;})});
+  await Promise.resolve();
+  assert.equal(ownership.get('wadors:reused'),current,'Late cleanup from the canceled operation cannot unregister the replacement');
+  resolveNew({getPixelData:()=>new Uint16Array([88])});
+  await current.promise;
+});
 
 test('mobile MPR rejection restores only the affected static CT/MR stack once and does not overwrite later selection',()=>{
   const previous=global.window;

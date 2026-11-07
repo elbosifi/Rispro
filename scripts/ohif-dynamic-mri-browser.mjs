@@ -64,10 +64,12 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
   await dynamicFixture(c, archiveRequest);
   await context.addInitScript(installProbe);
   const page = await context.newPage(), errors = [];
+  const consoleMessages = [];
   let rejectBrowser;
   const browserFailure = new Promise((_, reject) => { rejectBrowser = reject; });
   browserFailure.catch(() => {});
   page.on('pageerror', error => { errors.push(error.stack); rejectBrowser(error); });
+  page.on('console', message => { if (message.type() === 'error' || message.type() === 'warning') consoleMessages.push({ type: message.type(), text: message.text().slice(0, 1500) }); });
   const save = () => writeFileSync(join(temp, 'dynamic-mri-results.json'), JSON.stringify({ checks, errors, environment: 'Production pinned OHIF, Chromium, disposable Orthanc, synthetic pixels only' }, null, 2));
   const launched = await launch(c);
   const response = await context.request.get(origin + launched.launchUrl, { maxRedirects: 0 });
@@ -98,6 +100,101 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
       return Math.max(...Object.entries(expected).map(([key, value]) => Math.abs(Number(shape.getAttribute(key)) - value))) < .5;
     }, uid);
   };
+  const gatedFrames=[];
+  const holdFrame=async route=>{
+    const pathname=decodeURIComponent(new URL(route.request().url()).pathname);
+    const series=pathname.match(/\/series\/([^/]+)/)?.[1];
+    // Keep one real frame request outstanding per series. Holding every
+    // dynamic-volume frame would occupy Cornerstone's finite request pool and
+    // prevent the later selected series from reaching the transport at all.
+    if(gatedFrames.some(gate=>gate.series===series)){try{await route.continue();}catch{}return;}
+    const gate={series,released:false,release:null};gatedFrames.push(gate);
+    await new Promise(resolve=>{gate.release=resolve;});
+    try{await route.continue();}catch{}
+  };
+  const releaseFrames=()=>gatedFrames.forEach(gate=>{if(!gate.released){gate.released=true;gate.release?.();}});
+  const releaseSeries=series=>gatedFrames.filter(gate=>gate.series===series&&!gate.released).forEach(gate=>{gate.released=true;gate.release?.();});
+  const waitForGate=async(series,count=1)=>{
+    const until=Date.now()+60000;
+    while(Date.now()<until){if(gatedFrames.filter(gate=>gate.series===series).length>=count)return;await new Promise(resolve=>setTimeout(resolve,25));}
+    throw Error('No gated synthetic frame request started for '+series);
+  };
+  const selectPending=async(series,displaySetInstanceUID,direct=false)=>{
+    if(!displaySetInstanceUID)await page.waitForFunction(seriesUID=>window.services?.displaySetService.getDisplaySetsForSeries(seriesUID)?.length>0,series,{timeout:60000});
+    await page.evaluate(({seriesUID,displaySetInstanceUID,direct})=>{
+      const s=window.services,rows=s.viewportGridService.getState().viewports;
+      let viewportId=s.viewportGridService.getActiveViewportId();
+      if(!viewportId)viewportId=[...rows.keys()].find(id=>s.cornerstoneViewportService.getCornerstoneViewport(id));
+      if(!viewportId)throw Error('No live viewport is ready for the synthetic dynamic MRI switch');
+      if(s.viewportGridService.getActiveViewportId()!==viewportId)s.viewportGridService.setActiveViewportId(viewportId);
+      let displaySet=displaySetInstanceUID?s.displaySetService.getDisplaySetByUID(displaySetInstanceUID):s.displaySetService.getDisplaySetsForSeries(seriesUID)?.[0];
+      if(!displaySet&&window.__rapidDynamicDisplaySets?.[seriesUID]){
+        displaySet=window.__rapidDynamicDisplaySets[seriesUID];
+        s.displaySetService.addDisplaySets(displaySet);
+      }
+      if(!displaySet)throw Error('Synthetic rapid-switch display set missing: '+seriesUID);
+      const row=s.viewportGridService.getState().viewports.get(viewportId);
+      const update={viewportId,displaySetInstanceUIDs:[displaySet.displaySetInstanceUID],viewportOptions:row?.viewportOptions||{},displaySetOptions:[{}]};
+      if(direct)s.viewportGridService.setDisplaySetsForViewport(update);
+      else window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[update]});
+    },{seriesUID:series,displaySetInstanceUID,direct});
+    await page.waitForFunction(seriesUID=>{
+      const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+      return row?.displaySetInstanceUIDs?.some(uid=>s.displaySetService.getDisplaySetByUID(uid)?.SeriesInstanceUID===seriesUID);
+    },series,{timeout:30000});
+  };
+  const rapidSwitch=async()=>{
+    await waitForGate(c.study+'.10');
+    await page.evaluate(async study=>window.commandsManager.runCommand('loadStudy',{StudyInstanceUID:study}),c.study);
+    for(let repetition=0;repetition<2;repetition++){
+      await selectPending(c.study+'.11');if(repetition===0){releaseSeries(c.study+'.10');await waitForGate(c.study+'.11');}
+      await selectPending(c.study+'.12');if(repetition===0){releaseSeries(c.study+'.11');await waitForGate(c.study+'.12');}
+      await selectPending(c.study+'.10');
+    }
+    const mprSeries=await page.evaluate(study=>{
+      const service=window.services.displaySetService,sets=['.10','.12'].map(suffix=>service.getDisplaySetsForSeries(study+suffix)?.[0]);
+      window.__rapidDynamicDisplaySets=Object.fromEntries(sets.filter(Boolean).map(set=>[set.SeriesInstanceUID,set]));
+      return sets.map(set=>set?.displaySetInstanceUID);
+    },c.study);
+    if(mprSeries.some(uid=>!uid))throw Error('Synthetic dynamic MRI display-set identities were not materialized before the gate');
+    // Change layout and resize while volume/MPR initialization and all three
+    // series still have outstanding frame responses.
+    await page.evaluate(()=>window.commandsManager.runCommand('setHangingProtocol',{protocolId:'mpr'}));
+    await page.waitForFunction(()=>{const s=window.services,ids=[...s.viewportGridService.getState().viewports.keys()];return ids.length===3&&ids.every(id=>s.cornerstoneViewportService.getCornerstoneViewport(id));},null,{timeout:30000});
+    await page.setViewportSize({width:1280,height:900});
+    await selectPending(c.study+'.12',mprSeries[1],true);
+    await page.setViewportSize({width:1600,height:1000});
+    await page.evaluate(()=>window.commandsManager.runCommand('setHangingProtocol',{protocolId:'default'}));
+    await page.waitForFunction(()=>{const s=window.services,id=s.viewportGridService.getActiveViewportId(),ids=[...s.viewportGridService.getState().viewports.keys()];return ids.length===1&&id&&s.cornerstoneViewportService.getCornerstoneViewport(id);},null,{timeout:30000});
+    await selectPending(c.study+'.10',mprSeries[0]);
+    const outstanding=gatedFrames.length;releaseFrames();
+    await page.unroute('**/frames/**',holdFrame);
+    await page.waitForFunction(seriesUID=>{
+      try{
+        const s=window.services,core=window.cornerstone,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+        const ds=s.displaySetService.getDisplaySetByUID(row.displaySetInstanceUIDs[0]),v=s.cornerstoneViewportService.getCornerstoneViewport(id);
+        if(ds?.SeriesInstanceUID!==seriesUID||!v?.canvas?.width)return false;
+        const volume=core.cache.getVolume(ds.displaySetInstanceUID,true),frame=volume?.getCurrentDimensionGroupImageIds?.()[0];
+        const sample=frame&&core.cache.getImage(frame)?.getPixelData?.()[48*96+48];
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const ctx=canvas.getContext('2d');ctx.drawImage(v.canvas,0,0,64,64);
+        const pixels=ctx.getImageData(0,0,64,64).data;let low=255,high=0;for(let i=0;i<pixels.length;i+=4){low=Math.min(low,pixels[i]);high=Math.max(high,pixels[i]);}
+        return sample===100&&volume.dimensionGroupNumber===1&&high-low>20;
+      }catch{return false;}
+    },c.study+'.10',{timeout:90000});
+    const final=await page.evaluate(()=>{
+      const s=window.services,core=window.cornerstone,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+      const ds=s.displaySetService.getDisplaySetByUID(row.displaySetInstanceUIDs[0]),v=s.cornerstoneViewportService.getCornerstoneViewport(id),volume=core.cache.getVolume(ds.displaySetInstanceUID,true);
+      return {series:ds.SeriesInstanceUID,phase:volume.dimensionGroupNumber,pixel:core.cache.getImage(volume.getCurrentDimensionGroupImageIds()[0]).getPixelData()[48*96+48],
+        contexts:v.getRenderingEngine().contextPool.getContextCount(),actors:v.getActors().length,cacheBytes:core.cache.getCacheSize()};
+    });
+    assert.deepEqual(final.series,c.study+'.10');assert.equal(final.phase,1);assert.equal(final.pixel,100);assert.ok(outstanding>=3);
+    checks.push('two A-B-C-A cycles switch dynamic/enhanced/two-echo MRI before gated frames finish; MPR initialization and resizing stay bounded and final A pixels are correct');
+    await selectPending(c.study+'.12',mprSeries[1]);
+    await page.waitForFunction(study=>{const s=window.services,uid=s.viewportGridService.getState().viewports.get(s.viewportGridService.getActiveViewportId())?.displaySetInstanceUIDs?.[0],ds=s.displaySetService.getDisplaySetByUID(uid),v=window.cornerstone.cache.getVolume(uid,true);return ds?.SeriesInstanceUID===study+'.12'&&v?.loadStatus.loaded&&v.numDimensionGroups===2;},c.study,{timeout:90000});
+    const echoes=await page.evaluate(()=>{const s=window.services,core=window.cornerstone,uid=s.viewportGridService.getState().viewports.get(s.viewportGridService.getActiveViewportId()).displaySetInstanceUIDs[0],v=core.cache.getVolume(uid,true);return [1,2].map(group=>{v.dimensionGroupNumber=group;return core.cache.getImage(v.getCurrentDimensionGroupImageIds()[0]).getPixelData()[48*96+48];});});
+    assert.deepEqual(echoes,[100,150]);checks.push('echo re-selection after rapid switching retains distinct diagnostic pixel values');
+    await selectPending(c.study+'.10',mprSeries[0]);
+  };
   const drawMouse = async (center, corner) => {
     const rect = await page.locator('.cornerstone-viewport-element').first().boundingBox();
     const points = await page.evaluate(({ center, corner }) => { const s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()), z = v.getCamera().focalPoint[2]; return [center, corner].map(p => v.worldToCanvas([p[0], p[1], z])); }, { center, corner });
@@ -105,7 +202,11 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     await page.mouse.move(rect.x + points[1][0], rect.y + points[1][1], { steps: 10 }); await page.mouse.up();
   };
   try {
+    await page.route('**/frames/**',holdFrame);
     await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+    await waitForGate(c.study+'.10');
+    // Run before any first-image readiness wait: all source responses stay gated.
+    await rapidSwitch();
     await Promise.race([page.getByRole('button', { name: 'Enhancement Curve', exact: true }).waitFor({ timeout: 120000 }), browserFailure]);
     await page.waitForFunction(() => { const s = window.services, ds = s.displaySetService.getActiveDisplaySets().find(d => d.isDynamicVolume); const v = window.cornerstone.cache.getVolume(ds?.displaySetInstanceUID, true); return v?.loadStatus.loaded; }, null, { timeout: 90000 });
     checks.push('eligible dynamic MRI controls default ON');
@@ -226,21 +327,105 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     await modify(false);
     await chart.waitFor(); assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [0, 50, 25]);
     checks.push('invalid ROI plane gives an explicit unavailable state and recovers after correction');
-    const nonlinear = async enabled => page.evaluate(enabled => {
+    const nonlinear = async enabled => page.evaluate(async enabled => {
       const s = window.services, core = window.cornerstone, tools = window.cornerstoneTools;
       const v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
-      const ds = s.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);
-      for (const id of ds.dynamicVolumeInfo.timePoints.flat()) {
+      const row = s.viewportGridService.getState().viewports.get(v.id);
+      // Read the active viewport's selected display set. getActiveDisplaySets()
+      // may include a stale set from another viewport after rapid layout changes.
+      const ds = s.displaySetService.getDisplaySetByUID(row?.displaySetInstanceUIDs?.[0]);
+      if (!ds?.isDynamicVolume) throw Error('Nonlinear LUT fixture requires the selected dynamic display set.');
+      const ids = ds.dynamicVolumeInfo?.timePoints?.flat() || [];
+      const annotation = tools.annotation.state.getAnnotations('EllipticalROI', v.element)[0], annotationUID = annotation?.annotationUID;
+      window.__dynamicMriProbe = (seriesUID, uid) => {
+        const currentHost = document.querySelector('.rispro-dynamic-mri'), fiberKey = currentHost && Object.keys(currentHost).find(key => key.startsWith('__reactFiber$'));
+        let fiber = fiberKey && currentHost[fiberKey], component;
+        while (fiber) {
+          const hooks = []; let hook = fiber.memoizedState; while (hook) { hooks.push(hook.memoizedState); hook = hook.next; }
+          const contexts = [], seen = new Set();
+          const scan = (value, depth = 0) => {
+            if (!value || typeof value !== 'object' || depth > 3 || seen.has(value)) return;
+            seen.add(value);
+            if (Array.isArray(value.frames) && value.volume && Array.isArray(value.ids) && value.displaySet?.SeriesInstanceUID === seriesUID) contexts.push(value);
+            if (Array.isArray(value)) value.slice(0, 8).forEach(item => scan(item, depth + 1));
+            else if (depth < 2) Object.values(value).slice(0, 16).forEach(item => scan(item, depth + 1));
+          };
+          hooks.forEach(value => scan(value));
+          if (contexts.length) {
+            const context = contexts[0], refs = hooks.filter(value => value && typeof value === 'object' && 'current' in value).map(value => value.current);
+            component = { name: fiber.type?.displayName || fiber.type?.name || fiber.elementType?.name,
+              series: context.displaySet.SeriesInstanceUID, metadataReferencesMatch: context.frames.flat().every(frame => frame.instance === core.metaData.get('instance', frame.id)),
+              nonlinearFrames: context.frames.flat().filter(frame => frame.instance?.ModalityLUTSequence?.length).length,
+              selectedAnnotation: refs.includes(uid), ownsAnnotation: refs.some(value => value instanceof Set && value.has(uid)),
+              generation: refs.find(value => typeof value === 'number'),
+              results: hooks.find(value => Array.isArray(value) && value.length === context.frames.length && value.every(item => item && Number.isInteger(item.phase)))
+                ?.map(item => ({ phase: item.phase, error: item.error, mean: item.mean })) };
+            break;
+          }
+          fiber = fiber.return;
+        }
+        return component;
+      };
+      const before = window.__dynamicMriProbe(ds.SeriesInstanceUID, annotationUID);
+      const metadata = ids.map(id => {
         const instance = core.metaData.get('instance', id);
-        if (enabled) instance.ModalityLUTSequence = [{ LUTDescriptor: [3, 0, 16], LUTData: [0, 1, 4] }];
-        else delete instance.ModalityLUTSequence;
-      }
-      const annotation = tools.annotation.state.getAnnotations('EllipticalROI', v.element)[0];
-      core.utilities.triggerEvent(core.eventTarget, tools.Enums.Events.ANNOTATION_MODIFIED, { annotation, viewportId: v.id, changeType: tools.Enums.ChangeTypes.HandlesUpdated });
+        if (enabled) instance.ModalityLUTSequence = [{ LUTDescriptor: [3, 0, 16], LUTData: [0, 1, 4] }]; else delete instance.ModalityLUTSequence;
+        return { hasNonlinearLut: !!instance.ModalityLUTSequence?.length, providerReferenceStable: instance === core.metaData.get('instance', id) };
+      });
+      let eventObserved = 0;
+      const eventType = tools.Enums.Events.ANNOTATION_MODIFIED;
+      const observer = event => { if (event.detail?.annotation?.annotationUID === annotationUID) eventObserved++; };
+      core.eventTarget.addEventListener(eventType, observer);
+      core.utilities.triggerEvent(core.eventTarget, eventType, { annotation, viewportId: v.id, changeType: tools.Enums.ChangeTypes.HandlesUpdated });
+      core.eventTarget.removeEventListener(eventType, observer);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const afterOneTick = window.__dynamicMriProbe(ds.SeriesInstanceUID, annotationUID);
+      const call = { selectedSeries: ds.SeriesInstanceUID, selectedDisplaySetUID: ds.displaySetInstanceUID, viewportId: v.id,
+        annotationUID, annotationCount: tools.annotation.state.getAnnotations('EllipticalROI', v.element).length,
+        metadataFrames: metadata.length, nonlinearFrameCount: metadata.filter(item => item.hasNonlinearLut).length,
+        providerReferencesStable: metadata.every(item => item.providerReferenceStable), eventType, eventObserved, before, afterOneTick };
+      window.__nonlinearCall = call; return call;
     }, enabled);
-    await nonlinear(true);
+    const nonlinearProbe = await nonlinear(true);
     const groupedError = page.getByRole('status').filter({ hasText: '3/3 phases unavailable' });
-    await groupedError.waitFor();
+    try { await groupedError.waitFor({ timeout: 30000 }); }
+    catch (error) {
+      const beforeTimeout = await page.evaluate(async () => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const host = document.querySelector('.rispro-dynamic-mri'), fiberKey = host && Object.keys(host).find(key => key.startsWith('__reactFiber$'));
+        const fibers = []; let fiber = fiberKey && host[fiberKey];
+        while (fiber) { const hooks = []; let hook = fiber.memoizedState; while (hook) { hooks.push(hook.memoizedState); hook = hook.next; }
+          const summary = hooks.map((value, index) => ({ index, type: Array.isArray(value) ? 'array' : value instanceof Set ? 'Set' : typeof value,
+            text: typeof value === 'string' ? value : undefined, number: typeof value === 'number' ? value : undefined,
+            results: Array.isArray(value) && value.every(item => item && Number.isInteger(item.phase) || item === null) ? value.map(item => item && ({ phase: item.phase, error: item.error, mean: item.mean })) : undefined,
+            ref: value && typeof value === 'object' && 'current' in value ? { type: value.current instanceof Set ? 'Set' : typeof value.current,
+              chosen: value.current === window.__nonlinearCall?.annotationUID, ownsAnnotation: value.current instanceof Set && value.current.has(window.__nonlinearCall?.annotationUID),
+              generation: typeof value.current === 'number' ? value.current : undefined } : undefined }));
+          fibers.push({ name: fiber.type?.displayName || fiber.type?.name || fiber.elementType?.name, hooks: summary }); fiber = fiber.return;
+        }
+        const ids = window.services?.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume)?.dynamicVolumeInfo?.timePoints?.flat() || [];
+        return { at: Date.now(), nonlinearCall: window.__nonlinearCall, domStatus: [...document.querySelectorAll('[role="status"]')].map(node => node.innerText).filter(Boolean),
+          chartValues: document.querySelector('.rispro-dynamic-mri svg[data-values]')?.getAttribute('data-values') || null,
+          selectedSeries: window.services?.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume)?.SeriesInstanceUID,
+          annotationEvents: window.__annotationModifiedProbe, metadata: ids.map(id => { const instance = window.cornerstone.metaData.get('instance', id); return { hasNonlinearLut: !!instance?.ModalityLUTSequence?.length }; }), fibers };
+      });
+      writeFileSync(join(temp, 'dynamic-mri-nonlinear-lut-timeout.json'), JSON.stringify({ nonlinearProbe, beforeTimeout, consoleMessages, pageExceptions: errors, timeout: error.message }, null, 2));
+      throw error;
+    }
+    const nonlinearResolved = await page.evaluate(() => {
+      const call = window.__nonlinearCall, state = window.__dynamicMriProbe(call.selectedSeries, call.annotationUID);
+      return { selectedSeries: call.selectedSeries, annotationUID: call.annotationUID, eventObserved: call.eventObserved,
+        metadataFrames: call.metadataFrames, nonlinearFrameCount: call.nonlinearFrameCount, providerReferencesStable: call.providerReferencesStable,
+        before: call.before, afterOneTick: call.afterOneTick, resolved: state,
+        status: [...document.querySelectorAll('[role="status"]')].map(node => node.innerText).filter(Boolean),
+        chartValues: document.querySelector('.rispro-dynamic-mri svg[data-values]')?.getAttribute('data-values') || null };
+    });
+    assert.equal(nonlinearProbe.providerReferencesStable, true);assert.equal(nonlinearProbe.before?.metadataReferencesMatch, true);
+    assert.equal(nonlinearProbe.before?.ownsAnnotation, true);assert.equal(nonlinearProbe.eventObserved, 1);
+    assert.ok(nonlinearResolved.resolved.generation > nonlinearResolved.before.generation, 'The active owned-ROI listener must start a new calculation generation');
+    assert.equal(nonlinearResolved.resolved.results?.length, 3);assert.ok(nonlinearResolved.resolved.results.every(result => /Nonlinear modality LUT/.test(result.error)));
+    assert.equal(nonlinearResolved.chartValues, null,'Unsupported nonlinear MRI measurements must never remain displayed as a valid curve');
+    writeFileSync(join(temp, 'dynamic-mri-nonlinear-lut-proof.json'), JSON.stringify(nonlinearResolved, null, 2));
     assert.equal((await groupedError.innerText()).split('Nonlinear modality LUT').length - 1, 1);
     assert.equal(await chart.count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -255,9 +440,14 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     checks.push('unsupported mapping stays rejected with one compact shared reason, then recovers');
     const missingId = await page.evaluate(() => {
       const core = window.cornerstone, s = window.services, v = s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId());
-      const ds = s.displaySetService.getActiveDisplaySets().find(ds => ds.isDynamicVolume);
+      const row = s.viewportGridService.getState().viewports.get(v.id);
+      const ds = s.displaySetService.getDisplaySetByUID(row?.displaySetInstanceUIDs?.[0]);
+      if (!ds?.isDynamicVolume) throw Error('Missing-frame fixture requires the selected dynamic display set.');
       const plane = window.cornerstoneTools.annotation.state.getAnnotations('EllipticalROI', v.element)[0].data.handles.points[0][2];
       const id = ds.dynamicVolumeInfo.timePoints[1].find(id => Math.abs(Number(core.metaData.get('instance', id).ImagePositionPatient[2]) - plane) < .1);
+      if (!id) throw Error('Missing-frame fixture could not match the selected ROI acquisition plane.');
+      window.__missingFrameProbe = { selectedSeries: ds.SeriesInstanceUID, viewportId: v.id, phase: 2,
+        selectedImageId: id, decodedImageCachedBeforeRemoval: !!core.cache.getImage(id), loadObjectCachedBeforeRemoval: !!core.cache.getImageLoadObject(id) };
       core.cache.removeImageLoadObject(id, { force: true }); return id.replace(/^wadors:/, '');
     });
     const missingURL = new URL(missingId, page.url()).href;
@@ -269,7 +459,15 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
       const annotation = tools.annotation.state.getAnnotations('EllipticalROI', v.element)[0];
       core.utilities.triggerEvent(core.eventTarget, tools.Enums.Events.ANNOTATION_MODIFIED, { annotation, viewportId: v.id, changeType: tools.Enums.ChangeTypes.HandlesUpdated });
     });
-    await page.getByRole('status').filter({ hasText: 'Incomplete curve' }).waitFor({ timeout: 30000 });
+    try { await page.getByRole('status').filter({ hasText: 'Incomplete curve' }).waitFor({ timeout: 30000 }); }
+    catch (error) {
+      const diagnostic = await page.evaluate(() => ({ fixture: window.__missingFrameProbe,
+        status: [...document.querySelectorAll('[role="status"]')].map(node => node.innerText).filter(Boolean),
+        chartValues: document.querySelector('.rispro-dynamic-mri svg[data-values]')?.getAttribute('data-values') || null,
+        component: window.__dynamicMriProbe?.(window.__missingFrameProbe?.selectedSeries, document.querySelector('[data-roi-uid]')?.getAttribute('data-roi-uid')) }));
+      writeFileSync(join(temp, 'dynamic-mri-missing-frame-timeout.json'), JSON.stringify({ diagnostic, consoleMessages, pageExceptions: errors, timeout: error.message }, null, 2));
+      throw error;
+    }
     assert.deepEqual(JSON.parse(await chart.getAttribute('data-values')), [0, null, 25]);
     await page.unroute(missingURL);
     await modify(true); await modify(false);
@@ -453,5 +651,5 @@ export async function runDynamicMriAcceptance({ context: parentContext, cases, o
     await page.screenshot({ path: join(temp, 'dynamic-mri-failure.png') }).catch(() => {});
     writeFileSync(join(temp, 'dynamic-mri-failure.txt'), await page.locator('body').innerText().catch(() => ''));
     throw error;
-  } finally { await context.close(); }
+  } finally { releaseFrames();await context.close(); }
 }

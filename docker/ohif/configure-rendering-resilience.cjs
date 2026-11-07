@@ -39,29 +39,46 @@ function configureRenderingResilience(root) {
                     viewport.element.clientWidth < 2 || viewport.element.clientHeight < 2) { this._needsRender.delete(viewport.id); return; }
                 let eventDetail;
                 try { eventDetail = this.renderViewportUsingCustomOrVtkPipeline(viewport); }
-                catch (error) { this._risproFailRendering(error.code || (/out.of.memory|allocation/i.test(error.message || '') ? 'gpu-allocation-failed' : 'gpu-render-failed')); return; }
-                if (!eventDetail) return;
+                catch (error) {
+                    const gl = this.getOffscreenMultiRenderWindow(viewport.id)?.getOpenGLRenderWindow()?.get3DContext();
+                    const contextLost = !!gl?.isContextLost?.();
+                    const code = contextLost ? 'context-lost' : error.code || (/out.of.memory|allocation/i.test(error.message || '') ? 'gpu-allocation-failed' : 'gpu-render-failed');
+                    const sharedFailure = contextLost || !gl && !this.useCPURendering || ['context-pool-missing','rendering-mode-mismatch','engine-destroyed'].includes(code);
+                    this._needsRender.delete(viewport.id);
+                    this._risproFailRendering(code, { scope: sharedFailure ? 'engine' : 'viewport', viewportId: viewport.id,
+                        selectionGeneration: viewport._risproSelectionGeneration, contextLost, error });
+                    return;
+                }
+                if (!eventDetail) { this._needsRender.delete(viewport.id); return; }
                 viewport.setRendered();`);
-  replace(pool, '            this.contextPool = new WebGLContextPool(webGlContextCount);', `            this.contextPool = new WebGLContextPool(webGlContextCount);
+  replace(pool, '            this.contextPool = new WebGLContextPool(webGlContextCount);', `            this._risproRenderingBlocked = false;
+            this.contextPool = new WebGLContextPool(webGlContextCount);
             this.contextPool.getAllContexts().forEach(context => {
                 const canvas = context.getOpenGLRenderWindow().getCanvas();
                 canvas.risproRenderingEngineId = this.id;
                 canvas.addEventListener('webglcontextlost', event => {
                     event.preventDefault();
-                    if (!this.hasBeenDestroyed) this._risproFailRendering('context-lost');
+                    if (!this.hasBeenDestroyed) this._risproFailRendering('context-lost', { scope: 'engine', contextLost: true });
                 });
                 canvas.addEventListener('webglcontextrestored', () => {
-                    if (!this.hasBeenDestroyed) document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: { engineId: this.id, code: 'context-restored' } }));
+                    if (!this.hasBeenDestroyed) document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: { engineId: this.id, code: 'context-restored', scope: 'engine' } }));
                 });
             });`);
-  replace(pool, '    enableVTKjsDrivenViewport(viewportInputEntry) {', `    _risproFailRendering(code) {
+  replace(pool, '    enableVTKjsDrivenViewport(viewportInputEntry) {', `    _risproFailRendering(code, failure = {}) {
         // A stale caller must not report a failure against a replacement
         // engine that now owns the same public id. The caller still receives
         // the classified destroyed-engine error from initialization.
         if (this.hasBeenDestroyed) return;
-        this._risproRenderingBlocked = true;
-        this._needsRender.clear();
-        document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: { engineId: this.id, code } }));
+        const scope = failure.scope || (failure.contextLost || ['context-pool-missing','rendering-mode-mismatch','engine-destroyed'].includes(code) ? 'engine' : 'viewport');
+        if (scope === 'engine') {
+            this._risproRenderingBlocked = true;
+            this._needsRender.clear();
+        } else if (failure.viewportId) this._needsRender.delete(failure.viewportId);
+        document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: {
+            engineId: this.id, code, scope, viewportId: failure.viewportId,
+            selectionGeneration: failure.selectionGeneration, contextLost: !!failure.contextLost,
+            error: failure.error,
+        } }));
     }
     enableVTKjsDrivenViewport(viewportInputEntry) {`);
   replace(pool, '        const { element, canvas, viewportId, type, defaultOptions } = viewportInputEntry;', `        const { element, canvas, viewportId, type, defaultOptions } = viewportInputEntry;
@@ -75,6 +92,10 @@ function configureRenderingResilience(root) {
   // Test context state BEFORE render as well: do not enter a shader path after loss.
   replace(pool, '        renderWindow.render();', `        if (offscreenMultiRenderWindow.getOpenGLRenderWindow().get3DContext()?.isContextLost())
             throw Object.assign(new Error('Graphics context lost.'), { code: 'context-lost' });
+        const canvas = offscreenMultiRenderWindow.getOpenGLRenderWindow().getCanvas();
+        canvas.risproRenderingEngineId = this.id;
+        canvas.risproViewportId = viewport.id;
+        canvas.risproSelectionGeneration = viewport._risproSelectionGeneration;
         renderWindow.render();`);
   replace(pool, `            canvas.width = canvas.clientWidth * devicePixelRatio;
             canvas.height = canvas.clientHeight * devicePixelRatio;`, `            const width = Math.floor(canvas.clientWidth * devicePixelRatio), height = Math.floor(canvas.clientHeight * devicePixelRatio);
@@ -112,8 +133,6 @@ function configureRenderingResilience(root) {
   replace(service, '  public destroy() {', `  public destroy() {
     cancelAnimationFrame((this as any)._risproResizeFrame);
     (this as any)._risproResizeFrame = null;`);
-  replace('extensions/cornerstone/src/Viewport/OHIFCornerstoneViewport.tsx', "        if (obsolete || error?.name === 'AbortError') return;", `        if (obsolete || error?.name === 'AbortError') return;
-        if (['context-pool-missing','rendering-mode-mismatch','engine-destroyed','context-lost','shader-failed','gpu-allocation-failed'].includes(error?.code)) return;`);
   // 36.1.0 guards compilation, cached binding and the downstream draw. Throw a
   // typed failure here so Cornerstone never marks a failed shader as RENDERED.
   configureVolumeShaderGuard(replace);
@@ -122,14 +141,18 @@ function configureRenderingResilience(root) {
     const anchor=`      vtkErrorMacro(model.${stage}Shader.getError());`;
     replace(program,anchor,anchor+`
       document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: {
-        engineId: model.context?.canvas?.risproRenderingEngineId, code: 'shader-failed', shaderStage: '${stage}',
-        shaderLog: String(model.${stage}Shader.getError()).slice(0, 1000), contextLost: !!model.context?.isContextLost()
+        engineId: model.context?.canvas?.risproRenderingEngineId, code: model.context?.isContextLost() ? 'context-lost' : 'shader-failed', shaderStage: '${stage}',
+        shaderLog: String(model.${stage}Shader.getError()).slice(0, 1000), scope: model.context?.isContextLost() ? 'engine' : 'viewport',
+        viewportId: model.context?.canvas?.risproViewportId, selectionGeneration: model.context?.canvas?.risproSelectionGeneration,
+        contextLost: !!model.context?.isContextLost()
       } }));`);
   }
   replace(program,'      vtkErrorMacro(`Links failed: ${model.error}`);', '      vtkErrorMacro(`Links failed: ${model.error}`);'+`
       document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: {
-        engineId: model.context?.canvas?.risproRenderingEngineId, code: 'shader-failed', shaderStage: 'link',
-        shaderLog: String(model.error).slice(0, 1000), contextLost: !!model.context?.isContextLost()
+        engineId: model.context?.canvas?.risproRenderingEngineId, code: model.context?.isContextLost() ? 'context-lost' : 'shader-failed', shaderStage: 'link',
+        shaderLog: String(model.error).slice(0, 1000), scope: model.context?.isContextLost() ? 'engine' : 'viewport',
+        viewportId: model.context?.canvas?.risproViewportId, selectionGeneration: model.context?.canvas?.risproSelectionGeneration,
+        contextLost: !!model.context?.isContextLost()
       } }));`);
   // Cleanup all local actors on cancellation/rejection, including actors built
   // before the final await. Never delete a cache-owned texture or image volume.
@@ -138,8 +161,8 @@ function configureRenderingResilience(root) {
         const release = actor => { actor?.getMapper?.()?.delete?.(); actor?.delete?.(); if (actor) globalThis.risproRenderingResources.discardedActors++; };
         try {
         for (let i = 0; i < volumeInputArray.length; i++) {`);
-  replace(volume, '            if (this._risproSelection !== selection || this.isDisabled) { actor?.delete?.(); return; }',
-    '            if (this._risproSelection !== selection || this.isDisabled) { release(actor); volumeActors.forEach(entry => release(entry.actor)); return; }');
+  replace(volume, '            if (this._risproSelection !== selection || this._risproSelectionGeneration !== generation || this._risproSelectionOwner !== owner || this.isDisabled) { actor?.delete?.(); return; }',
+    '            if (this._risproSelection !== selection || this._risproSelectionGeneration !== generation || this._risproSelectionOwner !== owner || this.isDisabled) { release(actor); volumeActors.forEach(entry => release(entry.actor)); return; }');
   replace(volume, '        this._setVolumeActors(volumeActors);', `        } catch (error) { volumeActors.forEach(entry => release(entry.actor)); throw error; }
         this._risproVolumeInputs = volumeInputArray;
         this._setVolumeActors(volumeActors);`);

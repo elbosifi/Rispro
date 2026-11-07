@@ -95,6 +95,139 @@ async function selectSeries(page,study,series){
   await pixels(page);
 }
 
+async function selectSeriesWithoutWaiting(page,series,displaySetInstanceUID,direct=false){
+  if(!displaySetInstanceUID)await page.waitForFunction(seriesUID=>window.services?.displaySetService.getDisplaySetsForSeries(seriesUID)?.length>0,series,{timeout:60000});
+  await page.evaluate(({seriesUID,displaySetInstanceUID,direct})=>{
+    const s=window.services,rows=s.viewportGridService.getState().viewports;
+    let viewportId=s.viewportGridService.getActiveViewportId();
+    if(!viewportId)viewportId=[...rows.keys()].find(id=>s.cornerstoneViewportService.getCornerstoneViewport(id));
+    if(!viewportId)throw Error('No live viewport is ready for the synthetic series switch');
+    if(s.viewportGridService.getActiveViewportId()!==viewportId)s.viewportGridService.setActiveViewportId(viewportId);
+    let displaySet=displaySetInstanceUID?s.displaySetService.getDisplaySetByUID(displaySetInstanceUID):s.displaySetService.getDisplaySetsForSeries(seriesUID)?.[0];
+    if(!displaySet&&window.__rapidMprDisplaySets?.[seriesUID]){
+      displaySet=window.__rapidMprDisplaySets[seriesUID];
+      s.displaySetService.addDisplaySets(displaySet);
+    }
+    if(!displaySet)throw Error('Synthetic rapid-switch display set missing');
+    const row=s.viewportGridService.getState().viewports.get(viewportId);
+    const update={viewportId,displaySetInstanceUIDs:[displaySet.displaySetInstanceUID],viewportOptions:row?.viewportOptions||{viewportType:'stack'},displaySetOptions:[{}]};
+    if(direct)s.viewportGridService.setDisplaySetsForViewport(update);
+    else window.commandsManager.runCommand('setDisplaySetsForViewports',{viewportsToUpdate:[update]});
+  },{seriesUID:series,displaySetInstanceUID,direct});
+  try{await page.waitForFunction(seriesUID=>{
+    const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+    return row?.displaySetInstanceUIDs?.some(uid=>s.displaySetService.getDisplaySetByUID(uid)?.SeriesInstanceUID===seriesUID);
+  },series,{timeout:30000});}
+  catch(error){const state=await page.evaluate(()=>{const s=window.services;return [...s.viewportGridService.getState().viewports].map(([id,row])=>({id,row:row.displaySetInstanceUIDs,active:s.viewportGridService.getActiveViewportId(),type:s.cornerstoneViewportService.getCornerstoneViewport(id)?.type,sets:row.displaySetInstanceUIDs?.map(uid=>s.displaySetService.getDisplaySetByUID(uid)?.SeriesInstanceUID)}));});throw Error('Synthetic series selection did not apply: '+JSON.stringify(state),{cause:error});}
+}
+
+async function rapidLargeStackSwitch(page,c,network,navigate){
+  const gated=[],frameResponses=new Map(),pendingFrames=new Set(),resourceSamples=[];
+  const configuredCycles=Number(process.env.OHIF_RENDER_SWITCH_CYCLES||2);
+  assert.ok(Number.isSafeInteger(configuredCycles)&&configuredCycles>0,'OHIF_RENDER_SWITCH_CYCLES must be a positive integer');
+  let maxPendingFrames=0;
+  const onFrameRequest=request=>{
+    if(!request.url().includes('/frames/'))return;
+    pendingFrames.add(request);maxPendingFrames=Math.max(maxPendingFrames,pendingFrames.size);
+  };
+  const onFrameSettled=request=>pendingFrames.delete(request);
+  const onFrameResponse=response=>{
+    const url=response.url();
+    if(!url.includes('/frames/'))return;
+    frameResponses.set(url,(frameResponses.get(url)||0)+1);
+  };
+  const hold=async route=>{
+    const url=route.request().url(),series=decodeURIComponent(new URL(url).pathname).match(/\/series\/([^/]+)/)?.[1];
+    const item={url,series,release:null};gated.push(item);
+    await new Promise(resolve=>{item.release=resolve;});
+    try{await route.continue();}catch{}
+  };
+  const release=()=>{for(const item of gated)item.release?.();};
+  const sampleResources=async selectedSeries=>{
+    const resource=await page.evaluate(selectedSeries=>{
+      const core=window.cornerstone,s=window.services,engines=core.getRenderingEngines(),id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+      return {selectedSeries:row?.displaySetInstanceUIDs?.map(uid=>s.displaySetService.getDisplaySetByUID(uid)?.SeriesInstanceUID).join(',')||null,
+        contexts:engines.map(engine=>engine.contextPool?.getContextCount?.()||0),actors:engines.reduce((count,engine)=>count+engine.getViewports().reduce((sum,viewport)=>sum+viewport.getActors().length,0),0),
+        volumes:core.cache.getVolumes().length,cacheBytes:core.cache.getCacheSize(),cacheLimit:core.cache.getMaxCacheSize()};
+    },selectedSeries);
+    resourceSamples.push({...resource,expectedSeries:selectedSeries,pendingFrameRequests:pendingFrames.size});
+  };
+  page.on('request',onFrameRequest);page.on('requestfinished',onFrameSettled);page.on('requestfailed',onFrameSettled);page.on('response',onFrameResponse);
+  await page.route('**/frames/**',hold);
+  try{
+    const waitForGate=async(series,count=1)=>{
+      const until=Date.now()+60000;
+      while(Date.now()<until){if(gated.filter(item=>item.series===series).length>=count)return;await new Promise(resolve=>setTimeout(resolve,25));}
+      throw Error('No gated large MRI frame request started for '+series);
+    };
+    await navigate();
+    await waitForGate(c.study+'.1');
+    await sampleResources(c.study+'.1');
+    await page.evaluate(async study=>window.commandsManager.runCommand('loadStudy',{StudyInstanceUID:study}),c.study);
+    try{await page.waitForFunction(study=>window.services?.displaySetService.getActiveDisplaySets().some(set=>set.SeriesInstanceUID===study+'.2'),c.study,{timeout:60000});}
+    catch(error){const active=await page.evaluate(()=>window.services?.displaySetService.getActiveDisplaySets().map(set=>({series:set.SeriesInstanceUID,uid:set.displaySetInstanceUID}))||[]);throw Error('Synthetic series metadata did not become selectable; available display sets: '+JSON.stringify(active),{cause:error});}
+    const firstFrame=gated.find(item=>item.series===c.study+'.1')?.url;
+    let switches=0;
+    for(let i=0;i<configuredCycles;i++){
+      await selectSeriesWithoutWaiting(page,c.study+'.2');switches++;if(i===0)await waitForGate(c.study+'.2');await sampleResources(c.study+'.2');
+      await selectSeriesWithoutWaiting(page,c.study+'.1');switches++;await sampleResources(c.study+'.1');
+    }
+    // Resize while the repeated selections are still waiting on frame data.
+    await page.setViewportSize({width:1280,height:900});
+    await page.setViewportSize({width:1600,height:1000});
+    await selectSeriesWithoutWaiting(page,c.study+'.1');
+    const outstanding=gated.length,pendingAtFinalSelection=pendingFrames.size;release();
+    await page.unroute('**/frames/**',hold);
+    const expectedPixel=700+Math.round(220*Math.sin((c.size/2)/19)+180*Math.cos((c.size/2)/23))+20;
+    await page.waitForFunction(seriesUID=>{
+      try{
+        const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+        const ds=s.displaySetService.getDisplaySetByUID(row.displaySetInstanceUIDs[0]),v=s.cornerstoneViewportService.getCornerstoneViewport(id),image=v&&window.cornerstone.cache.getImage(v.getCurrentImageId());
+        const pixels=image?.getPixelData?.();
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const ctx=canvas.getContext('2d');ctx.drawImage(v.canvas,0,0,64,64);
+        const data=ctx.getImageData(0,0,64,64).data;let low=255,high=0;for(let i=0;i<data.length;i+=4){low=Math.min(low,data[i]);high=Math.max(high,data[i]);}
+        return ds?.SeriesInstanceUID===seriesUID&&pixels?.length===image.width*image.height&&high-low>20;
+      }catch{return false;}
+    },c.study+'.1',{timeout:120000});
+    const pendingDeadline=Date.now()+10000;let stablePendingCount=-1,stablePendingSince=Date.now();
+    while(Date.now()<pendingDeadline){
+      if(pendingFrames.size!==stablePendingCount){stablePendingCount=pendingFrames.size;stablePendingSince=Date.now();}
+      else if(Date.now()-stablePendingSince>=1000)break;
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    const pendingAfterSettle=pendingFrames.size,pendingFramePaths=[...pendingFrames].map(request=>new URL(request.url()).pathname);
+    const proof=await page.evaluate(()=>{
+      const s=window.services,core=window.cornerstone,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id),v=s.cornerstoneViewportService.getCornerstoneViewport(id),image=core.cache.getImage(v.getCurrentImageId()),engine=v.getRenderingEngine();
+      const instance=core.metaData.get('instance',v.getCurrentImageId())||{},instanceNumber=Number(instance.InstanceNumber||instance.instanceNumber||1);
+      const expectedPixel=700+Math.round(220*Math.sin((image.width/2)/19)+180*Math.cos((image.height/2)/23))+20+((instanceNumber-1)%16)*8;
+      return {series: s.displaySetService.getDisplaySetByUID(row.displaySetInstanceUIDs[0]).SeriesInstanceUID,
+        pixel:image.getPixelData()[Math.floor(image.height/2)*image.width+Math.floor(image.width/2)],expectedPixel,instanceNumber,contexts:v.getRenderingEngine().contextPool.getContextCount(),
+        decodedImageCached:core.cache.isLoaded(v.getCurrentImageId())&&!!image,
+        contextLimit:core.getConfiguration().rendering.webGlContextCount,
+        actors:engine.getViewports().reduce((count,viewport)=>count+viewport.getActors().length,0),
+        volumes:core.cache.getVolumes().length,cacheBytes:core.cache.getCacheSize(),cacheLimit:core.cache.getMaxCacheSize()};
+    });
+    const copyCount=firstFrame?frameResponses.get(firstFrame)||0:0;
+    const peak={contexts:Math.max(0,...resourceSamples.flatMap(sample=>sample.contexts)),actors:Math.max(0,...resourceSamples.map(sample=>sample.actors)),
+      volumes:Math.max(0,...resourceSamples.map(sample=>sample.volumes)),cacheBytes:Math.max(0,...resourceSamples.map(sample=>sample.cacheBytes))};
+    assert.equal(proof.series,c.study+'.1');assert.equal(proof.pixel,proof.expectedPixel,'Final selected series must contain its known synthetic diagnostic pixel');assert.ok(proof.contexts<=proof.contextLimit,'Rapid switching must stay within the existing WebGL context pool');
+    assert.ok(proof.volumes<=2,'Only the two selected synthetic stack series may remain volume-cached');
+    assert.ok(peak.contexts<=proof.contextLimit,'Rapid switching must never exceed the existing WebGL context pool');
+    assert.ok(peak.volumes<=2,'Rapid switching must not retain more than the two selected synthetic MRI volumes');
+    assert.ok(peak.cacheBytes<=proof.cacheLimit,'Rapid switching must respect Cornerstone image-cache capacity');
+    assert.ok(resourceSamples.every(sample=>sample.selectedSeries===sample.expectedSeries),'Every sampled actor/cache state must belong to the currently selected series');
+    assert.ok(outstanding>=2,'At least A and B frame requests must still be gated at selection changes');
+    assert.ok(pendingAtFinalSelection>=2,'A and B image requests must still be pending at the final selection change');
+    assert.ok(pendingAfterSettle<=maxPendingFrames,'Settled frame requests must not accumulate beyond the peak outstanding set during rapid switching');
+    assert.equal(proof.decodedImageCached,true,'The final diagnostic pixels must come from the selected image cache entry');
+    if(firstFrame)assert.ok(copyCount<=1,'Returning to A must not accumulate duplicate downloads for its first frame');
+    network.push({type:'rapid-switch',status:200,rapidSwitches:switches,gatedFrames:outstanding,pendingAtFinalSelection,maxPendingFrames,pendingAfterSettle,pendingFramePaths,
+      duplicateFirstFrameResponses:copyCount,seriesMatches:true,pixel:proof.pixel,expectedPixel:proof.expectedPixel,decodedImageCached:proof.decodedImageCached,
+      contexts:proof.contexts,contextLimit:proof.contextLimit,actors:proof.actors,volumes:proof.volumes,cacheBytes:proof.cacheBytes,cacheLimit:proof.cacheLimit,
+      peak,resourceSamples});
+  }finally{release();await page.unroute('**/frames/**',hold).catch(()=>{});page.off('request',onFrameRequest);page.off('requestfinished',onFrameSettled);page.off('requestfailed',onFrameSettled);page.off('response',onFrameResponse);}
+}
+
 async function capture(page,context,apiOrigin,c){
   const report=page.getByRole('button',{name:'Report',exact:true}).first();
   if(!await report.count())return false; // Original image has no reporting extension.
@@ -123,13 +256,14 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
   const gpu=await gpuSession.send('SystemInfo.getInfo');
   writeFileSync(join(temp,'gpu.json'),JSON.stringify(gpu.gpu,null,2));
   await gpuSession.detach();
-  const results=[];
+  const results=[],sessionRepetitions=Number(process.env.OHIF_RENDER_SESSION_REPETITIONS||2);
+  assert.ok(Number.isSafeInteger(sessionRepetitions)&&sessionRepetitions>0,'OHIF_RENDER_SESSION_REPETITIONS must be a positive integer');
   // Fresh pages in one browser exercise tab teardown and retained GPU resources.
   for(const includePriors of [false,true]){
     const context=await browser.newContext({viewport:{width:1600,height:1000},storageState:await sourceContext.storageState(),ignoreHTTPSErrors:true});
     await context.addInitScript(installRenderingProbe);
     if(process.env.OHIF_BOOTSTRAP_NULL_SCRIPT==='1')await context.addInitScript(()=>Object.defineProperty(document,'currentScript',{get:()=>null}));
-    try{for(let repetition=0;repetition<2;repetition++){
+    try{for(let repetition=0;repetition<sessionRepetitions;repetition++){
     const page=await context.newPage(),network=[],errors=[],warnings=[];
     const started=performance.now();
     const category=url=>url.includes('/frames/')?'frame':url.includes('/metadata')?'metadata':url.includes('/ohif-dicomweb/')?'qido':'asset';
@@ -149,7 +283,9 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
         viewerUrl.searchParams.set('StudyInstanceUIDs',[viewerUrl.searchParams.get('StudyInstanceUIDs'),viewerUrl.searchParams.get('risproPriorStudyUIDs')].filter(Boolean).join(','));
         viewerUrl.searchParams.delete('risproPriorStudyUIDs');
       }
-      await page.goto(viewerUrl.href,{waitUntil:'domcontentloaded',timeout:60000});
+      if(process.env.OHIF_RENDER_STRESS==='1'){
+        await rapidLargeStackSwitch(page,c,network,()=>page.goto(viewerUrl.href,{waitUntil:'domcontentloaded',timeout:60000}));
+      }else await page.goto(viewerUrl.href,{waitUntil:'domcontentloaded',timeout:60000});
       const ready=()=>page.waitForFunction(()=>{
         try{const s=window.services,id=s?.viewportGridService.getActiveViewportId();
           return Boolean(id&&s.cornerstoneViewportService.getCornerstoneViewport(id)?.getCurrentImageId?.());
@@ -216,7 +352,12 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
       await page.screenshot({path:join(temp,stage+'.png')});
       await page.evaluate(()=>{window.history.pushState({},'','/ohif/');window.dispatchEvent(new PopStateEvent('popstate'));});
       await page.waitForFunction(()=>window.cornerstone.cache.getVolumes().length===0&&window.cornerstone.cache.getCacheSize()===0&&!window.cornerstone.getRenderingEngines().some(e=>e.id==='OHIFCornerstoneRenderingEngine'&&e.getViewports().length),null,{timeout:10000});
-      console.log(JSON.stringify({renderingStress:stage,status:'PASS',stackChanges:6,seriesSwitchMs,mprActivations:3,stackCapture,cacheBytes:final.cacheBytes,volumes:final.volumes.length,contexts:final.probe.contexts.length}));
+       const rapid=network.find(item=>item.type==='rapid-switch');
+       const resultSummary={renderingStress:stage,status:'PASS',rapidSwitches:rapid?.rapidSwitches||0,seriesSwitchMs,mprActivations:3,stackCapture,
+         pendingAtFinalSelection:rapid?.pendingAtFinalSelection,pendingAfterSettle:rapid?.pendingAfterSettle,actors:rapid?.actors,volumes:rapid?.volumes,
+         cacheBytes:rapid?.cacheBytes,cacheLimit:rapid?.cacheLimit,contexts:rapid?.contexts,contextLimit:rapid?.contextLimit,
+         finalPixel:rapid?.pixel,expectedPixel:rapid?.expectedPixel};
+       console.log(JSON.stringify(resultSummary));
     }catch(error){
       writeFileSync(join(temp,stage+'-failure.json'),JSON.stringify({network,errors,warnings,state:await snapshot(page).catch(e=>({error:e.message}))},null,2));
       await page.screenshot({path:join(temp,stage+'-failure.png')}).catch(()=>undefined);
@@ -224,6 +365,11 @@ export async function runRenderingStress({browser,context,c,origin,apiOrigin,tem
     }finally{await page.close();}
     }}finally{await context.close();}
   }
+  const rapidSwitches=results.reduce((count,result)=>count+(result.network.find(item=>item.type==='rapid-switch')?.rapidSwitches||0),0);
+  assert.ok(results.length>4,`The soak must span more than four viewer sessions (received ${results.length})`);
+  assert.ok(rapidSwitches>=50,`The soak must perform at least 50 rapid series switches (received ${rapidSwitches})`);
+  writeFileSync(join(temp,'rapid-switch-soak.json'),JSON.stringify({sessionCount:results.length,rapidSwitches,sessionRepetitions,cyclesPerSession:Number(process.env.OHIF_RENDER_SWITCH_CYCLES||2),
+    sessions:results.map(result=>{const rapid=result.network.find(item=>item.type==='rapid-switch');return {stage:result.stage,...rapid};})},null,2));
   console.log('PASS: synthetic large MRI stack/MPR/MIP, repeated series and multi-prior rendering regression');
   return results;
 }

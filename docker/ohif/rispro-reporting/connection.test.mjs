@@ -56,8 +56,40 @@ test('transient DICOM reads retry with backoff, deduplicate and keep exact retur
   const f=fixture();let count=0;
   const work=async()=>{if(count++<3)throw {status:[502,503,504][count-1]};return new Uint8Array([0,255,13,10]);};
   const a=f.controller.read('frame',work),b=f.controller.read('frame',work);
-  assert.equal(a,b);assert.deepEqual(await a,new Uint8Array([0,255,13,10]));assert.equal(count,4);assert.deepEqual(f.delays,[1000,2000,4000]);
+  assert.deepEqual(await Promise.all([a,b]),[new Uint8Array([0,255,13,10]),new Uint8Array([0,255,13,10])]);assert.equal(count,4);assert.deepEqual(f.delays,[1000,2000,4000]);
   assert.equal(f.controller.getSnapshot().status,'connected');
+});
+test('canceling one consumer of a shared image read leaves the other consumer and pixels intact',async()=>{
+  const f=fixture();let workCount=0,cancelCount=0,resolveWork;
+  const expected=new Uint16Array([0,17,1024,4095]);
+  const work=()=>{workCount++;return new Promise(resolve=>{resolveWork=resolve;});};
+  const cancel=()=>{cancelCount++;};
+  const firstAbort=new AbortController(),secondAbort=new AbortController();
+  const first=f.controller.read('shared-image',work,firstAbort.signal,cancel).catch(error=>error);
+  const second=f.controller.read('shared-image',work,secondAbort.signal,cancel).catch(error=>error);
+  await new Promise(r=>setImmediate(r));firstAbort.abort();await new Promise(r=>setImmediate(r));
+  assert.equal(cancelCount,0,'the shared transport is still owned by the second consumer');
+  resolveWork(expected);
+  const [firstResult,secondResult]=await Promise.all([first,second]);
+  assert.equal(firstResult.name,'AbortError');
+  assert.deepEqual(secondResult,expected,'the remaining consumer receives the original decoded pixel data');
+  assert.equal(workCount,1,'shared readers retain transport deduplication');
+  assert.equal(cancelCount,0);f.controller.destroy();
+});
+test('canceling the final shared image consumer aborts the underlying operation exactly once',async()=>{
+  const f=fixture();let cancelCount=0,workCount=0;
+  const work=()=>{workCount++;return new Promise(()=>{});};
+  const cancel=()=>{cancelCount++;};
+  const firstAbort=new AbortController(),secondAbort=new AbortController();
+  const first=f.controller.read('shared-image',work,firstAbort.signal,cancel).catch(error=>error);
+  const second=f.controller.read('shared-image',work,secondAbort.signal,cancel).catch(error=>error);
+  await new Promise(r=>setImmediate(r));firstAbort.abort();await new Promise(r=>setImmediate(r));
+  assert.equal(cancelCount,0);
+  secondAbort.abort();
+  const results=await Promise.all([first,second]);
+  assert.ok(results.every(result=>result.name==='AbortError'));
+  assert.equal(workCount,1);assert.equal(cancelCount,1,'only the last consumer releases the single transport');
+  f.controller.destroy();
 });
 test('offline reads wait for online/Retry without assuming each failure means offline',async()=>{
   const f=fixture();f.target.navigator.onLine=false;let count=0;

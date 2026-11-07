@@ -65,6 +65,33 @@ export async function runRenderingRecoveryAcceptance(h) {
       await page.evaluate(()=>{const e=window.__gpuProof.engine,gl=e.getOffscreenMultiRenderWindow(window.services.viewportGridService.getActiveViewportId()).getOpenGLRenderWindow().get3DContext();const ext=gl.getExtension('WEBGL_lose_context');if(!ext)throw Error('WEBGL_lose_context missing');window.__restoreGpu=()=>ext.restoreContext();ext.loseContext();});
       await expect(alert).toBeVisible();await page.waitForTimeout(100);await page.evaluate(()=>window.__restoreGpu());
       await expect(alert).toBeHidden({timeout:30000});await verify();
+      const switchSeries=async suffix=>{
+        const series=c.study+'.'+suffix;
+        await page.waitForFunction(seriesUID=>window.services?.displaySetService.getDisplaySetsForSeries(seriesUID)?.length>0,series,{timeout:30000});
+        await page.evaluate(seriesUID=>{
+          const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id);
+          const displaySet=s.displaySetService.getDisplaySetsForSeries(seriesUID)?.[0];
+          if(!displaySet)throw Error('Post-recovery synthetic display set is unavailable: '+seriesUID);
+          s.viewportGridService.setDisplaySetsForViewport({viewportId:id,displaySetInstanceUIDs:[displaySet.displaySetInstanceUID],
+            viewportOptions:row?.viewportOptions||{viewportType:'stack'},displaySetOptions:[{}]});
+        },series);
+        await page.waitForFunction(seriesUID=>{
+          const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id),
+            displaySet=s.displaySetService.getDisplaySetByUID(row?.displaySetInstanceUIDs?.[0]),v=s.cornerstoneViewportService.getCornerstoneViewport(id),
+            image=v&&window.cornerstone.cache.getImage(v.getCurrentImageId());
+          return displaySet?.SeriesInstanceUID===seriesUID&&v?.getCurrentImageId?.()?.includes('/series/'+seriesUID+'/instances/')&&!!image&&image.getPixelData?.().length===image.width*image.height;
+        },series,{timeout:30000});
+        await pixels(page);
+        return page.evaluate(()=>{
+          const s=window.services,id=s.viewportGridService.getActiveViewportId(),row=s.viewportGridService.getState().viewports.get(id),
+            displaySet=s.displaySetService.getDisplaySetByUID(row.displaySetInstanceUIDs[0]),v=s.cornerstoneViewportService.getCornerstoneViewport(id),image=window.cornerstone.cache.getImage(v.getCurrentImageId()),
+            data=image.getPixelData();
+          return {series:displaySet.SeriesInstanceUID,pixel:data[Math.floor(image.height/2)*image.width+Math.floor(image.width/2)]};
+        });
+      };
+      const afterRecoveryB=await switchSeries(2);assert.equal(afterRecoveryB.series,c.study+'.2');assert.ok(afterRecoveryB.pixel>20,'Series B must render its diagnostic pixels after recovery');
+      const afterRecoveryA=await switchSeries(1);assert.equal(afterRecoveryA.series,c.study+'.1');assert.ok(afterRecoveryA.pixel>20,'Returning to series A must render its diagnostic pixels after recovery');
+      assert.equal(retainedDownloads,0,'Switching after recovery must reuse the valid cached A image');await expect(findings).toHaveValue(text);
       // Invalid pool state must become a classified failure before getAllContexts.
       await page.waitForTimeout(5100);
       await page.evaluate(()=>{const s=window.services,v=s.cornerstoneViewportService.getCornerstoneViewport(s.viewportGridService.getActiveViewportId()),e=v.getRenderingEngine(),pool=e.contextPool;window.__missingPool={engine:e,pool};e.contextPool=undefined;try{e.addVtkjsDrivenViewport({viewportId:v.id,element:v.element,canvas:v.canvas,type:v.type,defaultOptions:v.defaultOptions});throw Error('Missing pool unexpectedly accepted');}catch(error){if(error.code!=='context-pool-missing')throw error;}});

@@ -49,6 +49,28 @@ test('rendering backport fails closed before patching a different Cornerstone or
   }
 });
 
+test('a recoverable viewport render exception does not block the shared rendering engine', () => {
+  const fs=require('node:fs');
+  const source=fs.readFileSync(require.resolve('./configure-rendering-resilience.cjs'),'utf8');
+  const start=source.indexOf("replace(pool, '    enableVTKjsDrivenViewport(viewportInputEntry) {");
+  assert.notEqual(start,-1,'the pinned engine failure handler must remain version-checked');
+  const templateStart=source.indexOf('`',start),templateEnd=source.indexOf('`);',templateStart);
+  assert.ok(templateStart>=0&&templateEnd>templateStart,'the failure handler injection must be present');
+  const injected=source.slice(templateStart+1,templateEnd);
+  const match=injected.match(/^    _risproFailRendering\([\s\S]*?^    \}/m);
+  assert.ok(match,'the runtime failure handler must be extracted from the production patch');
+  const events=[];
+  class TestCustomEvent { constructor(type,init){this.type=type;this.detail=init.detail;} }
+  const Engine=new Function('document','CustomEvent',`return class { constructor(){this.id='clinical';this.hasBeenDestroyed=false;this._risproRenderingBlocked=false;this._needsRender=new Set(['failed','sibling']);} ${match[0]} };`)({dispatchEvent:event=>events.push(event)},TestCustomEvent);
+  const engine=new Engine();
+
+  engine._risproFailRendering('gpu-render-failed',{viewportId:'failed',sharedContextFailure:false});
+
+  assert.equal(engine._risproRenderingBlocked,false,'a recoverable viewport failure must not poison the shared engine');
+  assert.deepEqual([...engine._needsRender],['sibling'],'the healthy viewport must remain queued');
+  assert.equal(events.at(-1)?.detail?.scope,'viewport');
+});
+
 test('progressive QIDO priority preserves sidebar input, explicit series, count evidence and stable ties', () => {
   const series = [
     { SeriesInstanceUID: '1', Modality: 'MR', SeriesDescription: 'localizer', NumberOfSeriesRelatedInstances: 3 },

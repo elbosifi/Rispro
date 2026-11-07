@@ -1,6 +1,82 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+function failedCacheCleanupGuard() {
+  return 'if (this._imageCache.get(imageId) === cachedImage) this._imageCache.delete(imageId);';
+}
+
+function createCornerstoneImageOwnership(imageLoadPoolManager, cache) {
+  const sharedLoads = new Map();
+  const queuedCount = imageId => {
+    const pool = imageLoadPoolManager.getRequestPool?.() || {};
+    let count = 0;
+    for (const priorities of Object.values(pool)) for (const requests of Object.values(priorities || {})) {
+      for (const request of requests || []) if (request.additionalDetails?.imageId === imageId) count++;
+    }
+    return count;
+  };
+  const removeOneQueued = imageId => {
+    const pool = imageLoadPoolManager.getRequestPool?.() || {};
+    for (const priorities of Object.values(pool)) for (const requests of Object.values(priorities || {})) {
+      const index = (requests || []).findIndex(request => request.additionalDetails?.imageId === imageId);
+      if (index >= 0) { requests.splice(index, 1); return true; }
+    }
+    return false;
+  };
+  const cancelUnderlying = shared => {
+    if (!shared || shared.aborted || shared.settled || shared.consumers.size || queuedCount(shared.imageId)) return;
+    shared.aborted = true;
+    shared.cancelFn?.();
+  };
+  const track = (imageId, loadObject) => {
+    const shared = { imageId, promise: loadObject.promise, cancelFn: loadObject.cancelFn,
+      consumers: new Set(), aborted: false, settled: false, failed: false, cacheOwned: true, loadObject: null };
+    shared.loadObject = { _risproSharedLoad: shared, promise: shared.promise, cancelFn: () => {
+      shared.cacheOwned = false;
+      cancelUnderlying(shared);
+    } };
+    shared.promise.then(() => {
+      shared.settled = true;
+      if (sharedLoads.get(imageId) === shared) sharedLoads.delete(imageId);
+    }, () => {
+      shared.settled = true;
+      shared.failed = true;
+      if (sharedLoads.get(imageId) === shared) sharedLoads.delete(imageId);
+    });
+    sharedLoads.set(imageId, shared);
+    return shared;
+  };
+  const createConsumer = shared => {
+    let active = true, rejectConsumer;
+    const consumer = { _risproSharedLoad: shared, promise: new Promise((resolve, reject) => {
+      rejectConsumer = reject;
+      shared.promise.then(value => { release(); resolve(value); }, error => { release(); reject(error); });
+    }) };
+    const release = () => { if (!active) return; active = false; shared.consumers.delete(consumer); };
+    consumer.cancelFn = () => {
+      if (!active) return;
+      release();
+      rejectConsumer(Object.assign(new Error('Image request canceled.'), { name: 'AbortError' }));
+      cancelUnderlying(shared);
+    };
+    shared.consumers.add(consumer);
+    consumer.promise.catch(() => {});
+    return consumer;
+  };
+  const cancelConsumer = imageId => {
+    const shared = sharedLoads.get(imageId) || cache.getImageLoadObject(imageId)?._risproSharedLoad;
+    if (shared?.consumers.size) {
+      shared.consumers.values().next().value.cancelFn();
+      return true;
+    }
+    const removed = removeOneQueued(imageId);
+    cancelUnderlying(shared);
+    return removed || !!shared;
+  };
+  return { get: imageId => sharedLoads.get(imageId), track, createConsumer, cancelConsumer,
+    queuedCount, cancelUnderlying };
+}
+
 function recoverMobileMpr(servicesManager, viewportId, displaySets, viewportType, error) {
   if (!window.matchMedia('(pointer: coarse)').matches ||
       !['orthographic', 'volume'].includes(viewportType) ||
@@ -44,22 +120,72 @@ function configureViewportReliability(root) {
   replace(service, '    const displaySetPromise = this._setDisplaySets(',
     `    const request = {};
     Object.assign(viewport, { _risproDataRequest: request });
+    const selectionOwner = (viewportInfo as any)._risproPendingSelection;
+    if (selectionOwner) Object.assign(viewport, {
+      _risproSelectionOwner: selectionOwner,
+      _risproSelectionGeneration: selectionOwner.generation,
+      _risproDisplaySetInstanceUIDs: [...selectionOwner.displaySetInstanceUIDs],
+      _risproSelection: { generation: selectionOwner.generation },
+      _risproAttachedData: null,
+    });
     const displaySetPromise = this._setDisplaySets(`);
+  replace(service, `      if ((viewport as any)._risproDataRequest !== request) return;
+      this._broadcastEvent(this.EVENTS.VIEWPORT_DATA_CHANGED, {
+        viewportData,
+        viewportId,
+      });`, `      if ((viewport as any)._risproDataRequest !== request) return;
+      const owner = selectionOwner;
+      const selected = this.servicesManager.services.viewportGridService.getDisplaySetsUIDsForViewport(viewportId) || [];
+      if (owner && ((viewport as any)._risproSelectionOwner !== owner || owner.generation !== (viewport as any)._risproSelectionGeneration || owner.displaySetInstanceUIDs.join('|') !== selected.join('|'))) return;
+      const imageIds = viewport.type === csEnums.ViewportType.STACK ? viewport.getImageIds() : null;
+      const volumeInputs = viewport.type === csEnums.ViewportType.STACK ? null : (viewport as any)._risproVolumeInputs;
+      if (owner) {
+        (viewport as any)._risproAttachedData = imageIds?.length
+          ? { kind: 'stack', selectionGeneration: owner.generation, displaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], imageIds: [...imageIds] }
+          : volumeInputs?.length
+            ? { kind: 'volume', selectionGeneration: owner.generation, displaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], volumeInputs: [...volumeInputs], volumeIds: volumeInputs.map(input => input.volumeId) }
+            : null;
+        if (!(viewport as any)._risproAttachedData) return;
+        document.dispatchEvent(new CustomEvent('rispro-viewport-data-ready', { detail: {
+          viewportId, selectionGeneration: owner.generation,
+          displaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], kind: (viewport as any)._risproAttachedData.kind,
+        } }));
+      }
+      this._broadcastEvent(this.EVENTS.VIEWPORT_DATA_CHANGED, {
+        viewportData,
+        viewportId,
+      });`);
   replace(service, '    return viewport.setStack(imageIds, initialImageIndexToUse).then(() => {',
     `    const stackRequest = viewport.setStack(imageIds, initialImageIndexToUse);
     const selection = (viewport as any)._risproSelection;
+    const generation = (viewport as any)._risproSelectionGeneration;
+    const owner = (viewport as any)._risproSelectionOwner;
     return stackRequest.then(() => {
-      if ((viewport as any)._risproSelection !== selection || viewport.isDisabled) return;`);
+      if ((viewport as any)._risproSelection !== selection || (viewport as any)._risproSelectionGeneration !== generation ||
+          (viewport as any)._risproSelectionOwner !== owner || viewport.isDisabled) return;`);
   replace(service, '  public async setVolumesForViewport(viewport, volumeInputArray, presentations) {',
     `  public async setVolumesForViewport(viewport, volumeInputArray, presentations) {
     // A custom hanging-protocol loader may finish after another series is selected.
     const selected = this.servicesManager.services.viewportGridService.getDisplaySetsUIDsForViewport(viewport.id) || [];
-    if (viewport.isDisabled || volumeInputArray.some(input => input.displaySetInstanceUID && !selected.includes(input.displaySetInstanceUID))) return;`);
+    const owner = (viewport as any)._risproSelectionOwner;
+    if (viewport.isDisabled || owner && (owner.generation !== (viewport as any)._risproSelectionGeneration || owner.displaySetInstanceUIDs.join('|') !== selected.join('|')) ||
+        volumeInputArray.some(input => input.displaySetInstanceUID && !selected.includes(input.displaySetInstanceUID))) return;`);
   replace(service, '    await viewport.setVolumes(volumeInputArray);',
     `    const volumesRequest = viewport.setVolumes(volumeInputArray);
     const selection = (viewport as any)._risproSelection;
+    const generation = (viewport as any)._risproSelectionGeneration;
     await volumesRequest;
-    if ((viewport as any)._risproSelection !== selection || viewport.isDisabled) return;`);
+    if ((viewport as any)._risproSelection !== selection || (viewport as any)._risproSelectionGeneration !== generation ||
+        (viewport as any)._risproSelectionOwner !== owner || viewport.isDisabled) return;
+    if (owner) {
+      const selected = this.servicesManager.services.viewportGridService.getDisplaySetsUIDsForViewport(viewport.id) || [];
+      if (owner.displaySetInstanceUIDs.join('|') !== selected.join('|')) return;
+      (viewport as any)._risproAttachedData = { kind: 'volume', selectionGeneration: generation,
+        displaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], volumeInputs: [...volumeInputArray],
+        volumeIds: volumeInputArray.map(input => input.volumeId) };
+      document.dispatchEvent(new CustomEvent('rispro-viewport-data-ready', { detail: { viewportId: viewport.id,
+        selectionGeneration: generation, displaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], kind: 'volume' } }));
+    }`);
   replace(service, '    const timeoutViewportCallback = (callback: () => void) => setTimeout(callback, 0);',
     `    const dataRequest = (viewport as any)._risproDataRequest;
     const timeoutViewportCallback = (callback: () => void) => setTimeout(() => {
@@ -70,32 +196,130 @@ function configureViewportReliability(root) {
   replace(component, '        cornerstoneViewportService.setViewportData(', '        await cornerstoneViewportService.setViewportData(');
   replace(component, '      const loadViewportData = async () => {', `      let obsolete = false;
       const previousViewport = cornerstoneViewportService.getCornerstoneViewport(viewportId);
+      const viewportInfo = cornerstoneViewportService.getViewportInfo(viewportId);
+      const owner = {
+        generation: Math.max(viewportInfo?._risproSelectionGeneration || 0, previousViewport?._risproSelectionGeneration || 0) + 1,
+        displaySetInstanceUIDs: displaySets.map(displaySet => displaySet.displaySetInstanceUID),
+      };
+      if (viewportInfo) { viewportInfo._risproSelectionGeneration = owner.generation; viewportInfo._risproPendingSelection = owner; }
       // Invalidate actual pending pixel/actor mutations before metadata creation yields.
       const invalidate = () => {
-        if (previousViewport) Object.assign(previousViewport, { _risproSelection: {}, _risproDataRequest: {} });
+        if (previousViewport && previousViewport._risproSelectionGeneration === owner.generation) Object.assign(previousViewport, {
+          _risproSelection: { generation: owner.generation, obsolete: true }, _risproDataRequest: {},
+          _risproSelectionOwner: owner, _risproSelectionGeneration: owner.generation,
+          _risproDisplaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], _risproAttachedData: null,
+        });
       };
+      if (previousViewport) Object.assign(previousViewport, {
+        _risproSelection: { generation: owner.generation }, _risproDataRequest: {},
+        _risproSelectionOwner: owner, _risproSelectionGeneration: owner.generation,
+        _risproDisplaySetInstanceUIDs: [...owner.displaySetInstanceUIDs], _risproAttachedData: null,
+      });
       invalidate();
       const loadViewportData = async () => {`);
   replace(component, '        const presentations = getViewportPresentations(viewportId, viewportOptions);',
-    `        if (obsolete) return;
+    `        if (obsolete || viewportInfo?._risproPendingSelection !== owner) return;
         const presentations = getViewportPresentations(viewportId, viewportOptions);`);
   replace(component, '      loadViewportData();', `      loadViewportData().catch(error => {
-        if (obsolete || error?.name === 'AbortError') return;
+        if (obsolete || error?.name === 'AbortError' || viewportInfo?._risproSelectionGeneration !== owner.generation) return;
         if (!recoverMobileMpr(servicesManager, viewportId, displaySets, viewportOptions.viewportType, error)) {
-          console.warn('OHIF viewport initialization failed', error);
+          const viewport = cornerstoneViewportService.getCornerstoneViewport(viewportId);
+          const code = error?.code || 'viewport-init-failed';
+          const contextLost = code === 'context-lost';
+          const scope = contextLost || ['context-pool-missing','rendering-mode-mismatch'].includes(code) ? 'engine' : 'viewport';
+          document.dispatchEvent(new CustomEvent('rispro-rendering-failure', { detail: {
+            engineId: cornerstoneViewportService.renderingEngine?.id, code, viewportId,
+            selectionGeneration: owner.generation, scope, contextLost, error,
+          } }));
           document.dispatchEvent(new Event('rispro-initial-image-failed'));
         }
       });
-      return () => { obsolete = true; invalidate(); };`);
+      return () => { obsolete = true; invalidate(); if (viewportInfo?._risproPendingSelection === owner) viewportInfo._risproPendingSelection = null; };`);
   // Pinned Cornerstone 4.15.29: guard the continuations that mutate pixels and actors,
   // including A -> B -> A, where an image-id/index check alone is insufficient.
   const core = 'node_modules/@cornerstonejs/core/dist/esm/RenderingEngine/';
-  // Cornerstone returns a separate cache-insertion promise which this caller
-  // discards. Observe it; the original image promise still reports failures to
-  // its consumers and IMAGE_LOAD_FAILED, including intentional cancellation.
-  replace('node_modules/@cornerstonejs/core/dist/esm/loaders/imageLoader.js',
-    '        cache.putImageLoadObject(imageId, imageLoadObject);',
-    '        cache.putImageLoadObject(imageId, imageLoadObject).catch(() => {});');
+  const loaderModule = 'node_modules/@cornerstonejs/core/dist/esm/loaders/imageLoader.js';
+  replace(loaderModule, 'const imageLoaders = {};',
+    'const imageLoaders = {};\nconst risproImageOwnership = (' + createCornerstoneImageOwnership.toString() + ')(imageLoadPoolManager, cache);');
+  replace(loaderModule, `function loadImageFromImageLoader(imageId, options) {
+    const cachedImageLoadObject = cache.getImageLoadObject(imageId);
+    if (cachedImageLoadObject) {
+        handleImageLoadPromise(cachedImageLoadObject.promise, imageId);
+        return cachedImageLoadObject;
+    }
+    const scheme = imageId.split(':')[0];
+    const loader = imageLoaders[scheme] || unknownImageLoader;
+    if (!loader) {
+        throw new Error(\`loadImageFromImageLoader: No image loader found for scheme '\${scheme}'\`);
+    }
+    const imageLoadObject = loader(imageId, options);
+    handleImageLoadPromise(imageLoadObject.promise, imageId);
+    return imageLoadObject;
+}`, `function loadImageFromImageLoader(imageId, options) {
+    let cachedImageLoadObject = cache.getImageLoadObject(imageId);
+    let shared = risproImageOwnership.get(imageId) || cachedImageLoadObject?._risproSharedLoad;
+    if (shared && (shared.aborted || shared.failed)) {
+        if (cachedImageLoadObject?._risproSharedLoad === shared) cache.removeImageLoadObject(imageId, { force: true });
+        cachedImageLoadObject = undefined;
+        shared = undefined;
+    }
+    if (shared && !shared.settled) {
+        const imageLoadObject = risproImageOwnership.createConsumer(shared);
+        handleImageLoadPromise(imageLoadObject.promise, imageId);
+        return imageLoadObject;
+    }
+    if (cachedImageLoadObject) {
+        handleImageLoadPromise(cachedImageLoadObject.promise, imageId);
+        return cachedImageLoadObject;
+    }
+    if (shared && !shared.aborted && !shared.failed) {
+        handleImageLoadPromise(shared.promise, imageId);
+        return shared.loadObject;
+    }
+    const scheme = imageId.split(':')[0];
+    const loader = imageLoaders[scheme] || unknownImageLoader;
+    if (!loader) throw new Error(\`loadImageFromImageLoader: No image loader found for scheme '\${scheme}'\`);
+    shared = risproImageOwnership.track(imageId, loader(imageId, options));
+    const imageLoadObject = risproImageOwnership.createConsumer(shared);
+    handleImageLoadPromise(imageLoadObject.promise, imageId);
+    return imageLoadObject;
+}`);
+  replace(loaderModule, '        cache.putImageLoadObject(imageId, imageLoadObject);',
+    `        const cachedLoadObject = imageLoadObject._risproSharedLoad?.loadObject || imageLoadObject;
+        cache.putImageLoadObject(imageId, cachedLoadObject).catch(error => {
+            if (error?.name !== 'AbortError') document.dispatchEvent(new CustomEvent('rispro-image-cache-failed', {
+                detail: { name: error?.name || 'Error', stack: error?.stack }
+            }));
+        });`);
+  replace(loaderModule, `export function cancelLoadImage(imageId) {
+    const filterFunction = ({ additionalDetails }) => {
+        if (additionalDetails.imageId) {
+            return additionalDetails.imageId !== imageId;
+        }
+        return true;
+    };
+    imageLoadPoolManager.filterRequests(filterFunction);
+    const imageLoadObject = cache.getImageLoadObject(imageId);
+    if (imageLoadObject) {
+        imageLoadObject.cancelFn();
+    }
+}`, `export function cancelLoadImage(imageId) {
+    const shared = risproImageOwnership.get(imageId) || cache.getImageLoadObject(imageId)?._risproSharedLoad;
+    if (shared) {
+        risproImageOwnership.cancelConsumer(imageId);
+        return;
+    }
+    const filterFunction = ({ additionalDetails }) => {
+        if (additionalDetails.imageId) return additionalDetails.imageId !== imageId;
+        return true;
+    };
+    imageLoadPoolManager.filterRequests(filterFunction);
+    const imageLoadObject = cache.getImageLoadObject(imageId);
+    if (imageLoadObject) imageLoadObject.cancelFn?.();
+}`);
+  replace('node_modules/@cornerstonejs/core/dist/esm/cache/cache.js',
+    '            console.debug(`Error caching image ${imageId}:`, error);\n            this._imageCache.delete(imageId);\n            throw error;',
+    '            console.debug(`Error caching image ${imageId}:`, error);\n            ' + failedCacheCleanupGuard() + '\n            throw error;');
   // The WADO iterator consumes the stream directly; its bridge promise is
   // otherwise discarded and rejects separately on failed/canceled transfers.
   replace('node_modules/@cornerstonejs/dicom-image-loader/dist/esm/imageLoader/wadors/loadImage.js',
@@ -106,10 +330,12 @@ function configureViewportReliability(root) {
   const stack = core + 'StackViewport.js';
   replace(stack, '    async setStack(imageIds, currentImageIdIndex = 0) {',
     `    async setStack(imageIds, currentImageIdIndex = 0) {
-        const selection = this._risproSelection = {};`);
+        const generation = this._risproSelectionGeneration;
+        const owner = this._risproSelectionOwner;
+        const selection = this._risproSelection = { generation };`);
   replace(stack, '        const imageId = await this._setImageIdIndex(currentImageIdIndex);',
     `        const imageId = await this._setImageIdIndex(currentImageIdIndex);
-        if (this._risproSelection !== selection || this.isDisabled) return imageId;`);
+        if (this._risproSelection !== selection || this._risproSelectionGeneration !== generation || this._risproSelectionOwner !== owner || this.isDisabled) return imageId;`);
   replace(stack, '    _loadAndDisplayImageCPU(imageId, imageIdIndex) {',
     `    _loadAndDisplayImageCPU(imageId, imageIdIndex) {
         const selection = this._risproSelection;`);
@@ -134,11 +360,17 @@ function configureViewportReliability(root) {
   const volume = core + 'BaseVolumeViewport.js';
   replace(volume, '    async setVolumes(volumeInputArray, immediate = false, suppressEvents = false) {',
     `    async setVolumes(volumeInputArray, immediate = false, suppressEvents = false) {
-        const selection = this._risproSelection = {};`);
+        const generation = this._risproSelectionGeneration;
+        const owner = this._risproSelectionOwner;
+        const selection = this._risproSelection = { generation };`);
   replace(volume, '            const { volumeId, actorUID, slabThickness, ...rest } = volumeInputArray[i];\n            const actor = await createVolumeActor(volumeInputArray[i], this.element, this.id, suppressEvents);',
     `            const { volumeId, actorUID, slabThickness, ...rest } = volumeInputArray[i];
-            const actor = await createVolumeActor(volumeInputArray[i], this.element, this.id, suppressEvents);
-            if (this._risproSelection !== selection || this.isDisabled) { actor?.delete?.(); return; }`);
+            const input = volumeInputArray[i];
+            const guardedInput = input.callback ? { ...input, callback: (...args) => {
+              if (this._risproSelection === selection && this._risproSelectionGeneration === generation && this._risproSelectionOwner === owner && !this.isDisabled) input.callback(...args);
+            } } : input;
+            const actor = await createVolumeActor(guardedInput, this.element, this.id, suppressEvents);
+            if (this._risproSelection !== selection || this._risproSelectionGeneration !== generation || this._risproSelectionOwner !== owner || this.isDisabled) { actor?.delete?.(); return; }`);
   const commands = 'extensions/cornerstone/src/commandsModule.ts';
   replace(commands, "const { add, intersect, subtract, copy }", recoverMobileMpr.toString() + '\n\nconst { add, intersect, subtract, copy }');
   replace(commands, '      viewport.setOrientation(orientation);\n      viewport.render();', `      try {
@@ -151,5 +383,5 @@ function configureViewportReliability(root) {
   require('./configure-rendering-resilience.cjs').configureRenderingResilience(root);
 }
 
-module.exports = { configureViewportReliability, recoverMobileMpr };
+module.exports = { configureViewportReliability, recoverMobileMpr, failedCacheCleanupGuard, createCornerstoneImageOwnership };
 if (require.main === module) configureViewportReliability(process.cwd());

@@ -17,6 +17,13 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
     if(stopped || signal?.aborted)onAbort();
     Promise.resolve(promise).then(value=>finish(resolve,value),error=>finish(reject,error));
   });
+  const abortRead = operation => {
+    if(operation.aborted || operation.settled)return;
+    operation.aborted=true;
+    operation.controller.abort(canceled());
+    try { operation.cancel?.(); }
+    catch(error) { target.dispatchEvent?.(new CustomEvent('rispro-image-cancel-failed',{detail:{name:error?.name || 'Error',stack:error?.stack}})); }
+  };
   const sleep = (ms,signal) => {
     if(wait)return cancellable(wait(ms),signal);
     let timer;
@@ -125,6 +132,7 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
   const controller = {
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getSnapshot: () => state,
+    getReadDiagnostics: () => ({ pendingReads: reads.size, activeConsumers: [...reads.values()].reduce((count, operation) => count + operation.consumers.size, 0) }),
     renew,
     async login(username, password) {
       let authenticated = false;
@@ -162,46 +170,61 @@ export function createConnection({ contextId, fetcher = fetch, target = window, 
     },
     // Only callers implementing DICOM GETs may use this. No report mutations.
     read(key, work, signal, cancel) {
-      if (reads.has(key)) return reads.get(key);
-      if(cancel)readCancels.add(cancel);
-      const pending = (async () => {
-        let attempt = 0, authenticationRetried=false;
-        while (!stopped) {
-          await ready(signal);
-          if (stopped || signal?.aborted) throw canceled();
-          try {
-            const result = await cancellable(work(),signal);
-            failedReads.delete(key);
-            if(!failedReads.size && !recoveryRequested){degraded=false;probeAttempt=0;cancelRecovery();if(state.status==='reconnecting')patch({status:'connected',message:''});}
-            return result;
+      let operation=reads.get(key);
+      if(!operation || operation.aborted || operation.settled){
+        operation={key,controller:new AbortController(),cancel,consumers:new Set(),aborted:false,settled:false,promise:null};
+        operation.cancelOperation=()=>abortRead(operation);
+        readCancels.add(operation.cancelOperation);
+        operation.promise=(async () => {
+          let attempt = 0, authenticationRetried=false;
+          while (!stopped && !operation.controller.signal.aborted) {
+            const operationSignal=operation.controller.signal;
+            await ready(operationSignal);
+            if (stopped || operationSignal.aborted) throw canceled();
+            try {
+              const result = await cancellable(work(operationSignal),operationSignal);
+              if(reads.get(key)===operation)failedReads.delete(key);
+              if(!failedReads.size && !recoveryRequested){degraded=false;probeAttempt=0;cancelRecovery();if(state.status==='reconnecting')patch({status:'connected',message:''});}
+              return result;
+            }
+            catch (error) {
+              if (operationSignal.aborted || error?.name === 'AbortError') throw error;
+              const status = Number(error.status ?? error.request?.status ?? 0);
+              if (status === 401 || status === 403) {
+                if(authenticationRetried && now()-lastRenewed<60000){throw failure(Object.assign(new Error('Image access denied after session renewal.'),{status:403}));}
+                // Nginx auth_request can strip JSON codes. Probe the authenticated
+                // renewal endpoint to distinguish expiry from actual denial.
+                let validated=false;
+                try { await renew();authenticationRetried=true;validated=true; } catch (authError) {
+                  if (state.status === 'authentication-required') { await cancellable(awaitLogin(),operationSignal);authenticationRetried=true;continue; }
+                  if (state.status === 'denied') throw authError;
+                }
+                if (status === 403 && validated) throw failure(Object.assign(new Error(error.message || 'Image access denied.'),{status:403}));
+              } else if (status ? ![502,503,504].includes(status) : !(error instanceof TypeError || 'status' in error || error.request || /network|connection|fetch|reset|timeout|timed out/i.test(error.message || ''))) throw error;
+              patch({ status: 'reconnecting' });
+              failedReads.add(key);
+              // One tab-owned scheduler probes authorization while degraded.
+              // Each successful probe releases only suspended failed reads once;
+              // a frame-only outage cannot restart a four-download burst.
+              if (degraded || ++attempt >= 4) { degraded=true;await waitForWake(operationSignal);attempt=0; }
+              else await sleep(1000 * 2 ** (attempt - 1) * (0.75 + random() * 0.5),operationSignal);
+            }
           }
-          catch (error) {
-            if (signal?.aborted || error.name === 'AbortError') throw error;
-            const status = Number(error.status ?? error.request?.status ?? 0);
-            if (status === 401 || status === 403) {
-              if(authenticationRetried && now()-lastRenewed<60000){throw failure(Object.assign(new Error('Image access denied after session renewal.'),{status:403}));}
-              // Nginx auth_request can strip JSON codes. Probe the authenticated
-              // renewal endpoint to distinguish expiry from actual denial.
-              let validated=false;
-              try { await renew();authenticationRetried=true;validated=true; } catch (authError) {
-                if (state.status === 'authentication-required') { await cancellable(awaitLogin(),signal);authenticationRetried=true;continue; }
-                if (state.status === 'denied') throw authError;
-              }
-              if (status === 403 && validated) throw failure(Object.assign(new Error(error.message || 'Image access denied.'),{status:403}));
-            } else if (status ? ![502,503,504].includes(status) : !(error instanceof TypeError || 'status' in error || error.request || /network|connection|fetch|reset|timeout|timed out/i.test(error.message || ''))) throw error;
-            patch({ status: 'reconnecting' });
-            failedReads.add(key);
-            // One tab-owned scheduler probes authorization while degraded.
-            // Each successful probe releases only suspended failed reads once;
-            // a frame-only outage cannot restart a four-download burst.
-            if (degraded || ++attempt >= 4) { degraded=true;await waitForWake(signal);attempt=0; }
-            else await sleep(1000 * 2 ** (attempt - 1) * (0.75 + random() * 0.5),signal);
-          }
-        }
-        throw new DOMException('Viewer closed', 'AbortError');
-      })().finally(() => { reads.delete(key);failedReads.delete(key);readCancels.delete(cancel);if(!failedReads.size){degraded=false;if(!recoveryRequested)cancelRecovery();} });
-      reads.set(key, pending);
-      return pending;
+          throw canceled();
+        })().finally(() => {
+          operation.settled=true;
+          if(reads.get(key)===operation){reads.delete(key);failedReads.delete(key);if(!failedReads.size){degraded=false;if(!recoveryRequested)cancelRecovery();}}
+          readCancels.delete(operation.cancelOperation);
+        });
+        reads.set(key,operation);
+      }
+      const consumer={active:true};operation.consumers.add(consumer);
+      const release=()=>{
+        if(!consumer.active)return;
+        consumer.active=false;operation.consumers.delete(consumer);
+        if(!operation.consumers.size)abortRead(operation);
+      };
+      return cancellable(operation.promise,signal).finally(release);
     },
     retry() { if(recoveryAllowed() && (state.status==='reconnecting' || failedReads.size || wakeWaiters.size))scheduleRecovery(true); },
     notify(error) {
